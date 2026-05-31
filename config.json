@@ -1,5 +1,5 @@
 {
-  "ai_endpoint": "http://xxx.xxx.xxx.xxx/v1/chat/completions",
+  "ai_endpoint": "http://xxx.xxx.xxx.xxx:xxxx/v1/chat/completions",
   "model": "Insert name of LLM",
   "timeout": 90,
   "max_retries": 2,
