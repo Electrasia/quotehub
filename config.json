@@ -1,6 +1,6 @@
 {
-  "ai_endpoint": "http://192.168.0.196:1234/v1/chat/completions",
-  "model": "qwen/qwen3-vl-4b",
+  "ai_endpoint": "http://xxx.xxx.xxx.xxx/v1/chat/completions",
+  "model": "Insert name of LLM",
   "timeout": 90,
   "max_retries": 2,
   "external_url": "http://localhost:8000",
