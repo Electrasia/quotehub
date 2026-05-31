@@ -1,0 +1,9 @@
+{
+  "ai_endpoint": "http://192.168.0.196:1234/v1/chat/completions",
+  "model": "qwen/qwen3-vl-4b",
+  "timeout": 90,
+  "max_retries": 2,
+  "external_url": "http://localhost:8000",
+  "test_prompt": "Respond with OK",
+  "popup_duration": 2
+}

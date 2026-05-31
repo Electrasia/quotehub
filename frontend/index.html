@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuoteHub - AI Quotation Database</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+
+        /* Header */
+        .header { background: #fff; padding: 16px 24px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 20px; color: #1a1a1a; }
+        .header-right { display: flex; align-items: center; gap: 16px; }
+
+        /* Tabs */
+        .tabs { background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 0; padding: 0 24px; align-items: center; }
+        .tab { padding: 12px 24px; border: none; background: none; cursor: pointer; font-size: 14px; font-weight: 500; color: #666; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .tab:hover { color: #333; }
+        .tab.active { color: #3498db; border-bottom-color: #3498db; }
+        .prefs-item { display: block; width: 100%; padding: 10px 16px; border: none; background: none; text-align: left; font-size: 13px; cursor: pointer; color: #333; }
+        .prefs-item:hover { background: #f0f4f8; }
+
+        /* Status indicator */
+        .status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .status-dot.red { background: #e74c3c; }
+        .status-dot.green { background: #27ae60; }
+        .status-text { font-weight: 500; }
+        .status-text.disconnected { color: #e74c3c; }
+        .status-text.connected { color: #27ae60; }
+
+        /* Buttons */
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #2980b9; }
+        .btn-success { background: #27ae60; color: #fff; }
+        .btn-success:hover:not(:disabled) { background: #219a52; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover:not(:disabled) { background: #c0392b; }
+        .btn-secondary { background: #95a5a6; color: #fff; }
+        .btn-secondary:hover:not(:disabled) { background: #7f8c8d; }
+        .btn-warning { background: #f39c12; color: #fff; }
+        .btn-warning:hover:not(:disabled) { background: #d68910; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+        /* Main content */
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        /* Upload area */
+        .upload-area { background: #fff; border: 2px dashed #ccc; border-radius: 12px; padding: 60px 20px; text-align: center; margin-bottom: 24px; transition: all 0.2s; }
+        .upload-area:hover { border-color: #3498db; }
+        .upload-area.dragover { border-color: #3498db; background: #ebf5fb; }
+        .upload-area p { color: #666; margin-top: 12px; font-size: 14px; }
+        .upload-area .icon { font-size: 48px; color: #aaa; }
+
+        /* File list */
+        .file-list { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+        .file-list h3 { margin-bottom: 12px; font-size: 16px; }
+        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eee; }
+        .file-item:last-child { border-bottom: none; }
+        .file-name { font-size: 14px; color: #333; }
+        .file-status { font-size: 12px; padding: 4px 8px; border-radius: 4px; }
+        .file-status.pending { background: #fef9e7; color: #f39c12; }
+        .file-status.processing { background: #ebf5fb; color: #3498db; }
+        .file-status.done { background: #eafaf1; color: #27ae60; }
+        .file-status.error { background: #fdedec; color: #e74c3c; }
+
+        /* Preview layout: PDF on left, data on right */
+        .review-layout { display: flex; gap: 24px; align-items: flex-start; }
+        .review-pdf { flex: 0 0 40%; position: sticky; top: 24px; background: #fff; border-radius: 12px; padding: 16px; max-height: calc(100vh - 48px); overflow-y: auto; }
+        .review-pdf img { width: 100%; border-radius: 8px; border: 1px solid #eee; }
+        .review-pdf .page-nav { margin-top: 12px; display: flex; justify-content: center; gap: 12px; align-items: center; }
+        .review-data { flex: 1; min-width: 0; }
+
+        .preview { background: #fff; border-radius: 12px; padding: 24px; }
+        .preview h2 { margin-bottom: 16px; font-size: 18px; }
+        .meta { display: flex; gap: 24px; margin-bottom: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px; }
+        .meta-item label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .meta-item input { border: 1px solid #ddd; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 200px; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th { background: #f8f9fa; padding: 10px 12px; text-align: left; font-size: 13px; color: #666; border-bottom: 2px solid #ddd; }
+        td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+        td input { border: 1px solid #ddd; padding: 6px 8px; border-radius: 4px; font-size: 13px; width: 100%; }
+        td textarea { border: 1px solid #ddd; padding: 6px 8px; border-radius: 4px; font-size: 13px; width: 100%; }
+        td input:focus, td textarea:focus { outline: none; border-color: #3498db; }
+        .text-right { text-align: right; }
+        td.price-cell, th.price-cell { text-align: right; }
+        td.date-cell, th.date-cell { text-align: right; }
+        td input.price-input { text-align: right; }
+        .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+        /* Search */
+        .search-bar { display: flex; gap: 12px; margin-bottom: 24px; }
+        .search-bar input { flex: 1; padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+        .search-bar input:focus { outline: none; border-color: #3498db; }
+
+        .results { background: #fff; border-radius: 12px; padding: 16px; }
+        .result-group { background: #fff; border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+        .result-header { padding: 14px 16px; background: #f8f9fa; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .result-header:hover { background: #eef1f3; }
+        .result-header strong { font-size: 15px; }
+        .result-header small { color: #888; margin-left: 8px; }
+        .result-items { overflow: hidden; }
+        .result-items table { margin: 0; }
+        .result-items th { font-size: 12px; padding: 8px 12px; background: #fafafa; white-space: nowrap; }
+        .result-items td { font-size: 13px; padding: 6px 12px; }
+        .result-items td.nowrap-cell { white-space: nowrap; }
+        .result-items tr:hover { background: #f5f9fc; }
+        th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+        th.sortable:hover { background: #e8ecf0; }
+        th.sortable::after { content: ' ⇅'; color: #bbb; font-size: 11px; }
+        th.sort-asc::after { content: ' ▲'; color: #3498db; }
+        th.sort-desc::after { content: ' ▼'; color: #3498db; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; text-align: center; }
+        .modal h3 { margin-bottom: 12px; }
+        .modal p { color: #666; margin-bottom: 20px; font-size: 14px; }
+        .modal .actions { justify-content: center; }
+
+        /* PDF viewer modal */
+        .pdf-modal { max-width: 95vw; width: 95vw; height: 90vh; padding: 0; overflow: hidden; }
+        .pdf-modal iframe { width: 100%; height: 100%; border: none; border-radius: 12px; }
+        .pdf-modal-close { position: absolute; top: 12px; right: 16px; z-index: 10; }
+
+        /* Loading */
+        .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading { display: flex; align-items: center; gap: 8px; color: #3498db; font-size: 14px; }
+
+        /* Progress bar */
+        .progress-bar { width: 100%; height: 6px; background: #eee; border-radius: 3px; margin: 12px 0; overflow: hidden; }
+        .progress-fill { height: 100%; background: #3498db; border-radius: 3px; transition: width 0.3s; }
+
+        /* Hidden */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div>
+            <h1>QuoteHub</h1>
+            <div style="font-size:11px;color:#999;margin-top:2px">v0.001.0</div>
+        </div>
+        <div class="header-right">
+            <div class="status">
+                <div class="status-dot red" id="statusDot"></div>
+                <span class="status-text disconnected" id="statusText">DISCONNECTED</span>
+            </div>
+            <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()" style="min-width:180px">Connect to AI Server</button>
+        </div>
+    </div>
+
+    <!-- Tabs + Preferences -->
+    <div class="tabs">
+        <button class="tab active" id="tabUpload" onclick="showUpload()">📄 Upload</button>
+        <button class="tab" id="tabSearch" onclick="showSearch()">🔍 Search</button>
+        <div style="flex:1"></div>
+        <div style="position:relative">
+            <button class="btn btn-secondary btn-sm" onclick="togglePrefsMenu()" style="margin:6px 0">⚙ Preferences</button>
+            <div class="hidden" id="prefsMenu" style="position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:50;min-width:200px;padding:4px 0">
+                <button class="prefs-item" onclick="openSettings(); closePrefsMenu()">🔌 Server Connection</button>
+                <button class="prefs-item" onclick="openBackupRestore(); closePrefsMenu()">💾 Backup / Restore</button>
+                <button class="prefs-item" onclick="saveLogs(); closePrefsMenu()">📋 Save Logs</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Upload Section -->
+        <div id="uploadSection">
+            <div class="upload-area" id="uploadArea">
+                <div class="icon">📄</div>
+                <h2>Upload Quotation PDFs</h2>
+                <p>Drag and drop files here, or click to browse</p>
+                <input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
+                <button class="btn btn-primary" style="margin-top:16px" onclick="document.getElementById('fileInput').click()">Choose Files</button>
+            </div>
+
+            <div class="file-list hidden" id="fileListSection">
+                <h3>Files</h3>
+                <div id="fileList"></div>
+                <p id="queueSummary" class="hidden" style="font-size:13px;color:#666;margin-top:10px"></p>
+                <div class="actions" style="margin-top:16px">
+                    <button class="btn btn-success" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
+                    <button class="btn btn-secondary" onclick="clearFiles()">Clear All</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Review Section (PDF + Data side by side) -->
+        <div class="hidden" id="reviewSection">
+            <div class="review-layout">
+                <!-- PDF viewer on the left -->
+                <div class="review-pdf" id="reviewPdf">
+                    <img id="reviewPdfImg" src="" alt="PDF Page">
+                    <div class="page-nav">
+                        <button class="btn btn-sm btn-secondary" onclick="reviewPrevPage()">◀</button>
+                        <span id="reviewPageInfo">Page 1 of 1</span>
+                        <button class="btn btn-sm btn-secondary" onclick="reviewNextPage()">▶</button>
+                    </div>
+                </div>
+
+                <!-- Extracted data on the right -->
+                <div class="review-data">
+                    <div class="preview">
+                        <h2>Extracted Data — <span id="reviewFilename"></span></h2>
+                        <div class="meta">
+                            <div class="meta-item">
+                                <label>Supplier</label>
+                                <input type="text" id="supplierName" value="">
+                            </div>
+                        </div>
+
+                        <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
+                        <div style="overflow-x:auto">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Brand</th>
+                                        <th>Model</th>
+                                        <th>Description</th>
+                                        <th class="price-cell">Unit Price</th>
+                                        <th class="date-cell">Date</th>
+                                        <th>Supplier</th>
+                                        <th>Currency</th>
+                                        <th style="width:60px"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="itemsTable"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- Find & Replace -->
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
+                            <span style="font-size:13px;color:#666;font-weight:500">Find & Replace:</span>
+                            <input type="text" id="findInput" placeholder="Find..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                            <input type="text" id="replaceInput" placeholder="Replace with..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                            <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px"><input type="checkbox" id="findCaseSensitive"> Aa</label>
+                            <button class="btn btn-sm btn-primary" onclick="findAndReplace()">Replace All</button>
+                        </div>
+
+                        <button class="btn btn-sm btn-secondary" onclick="addRow()" style="margin-bottom:16px">+ Add Row</button>
+
+                        <div class="actions">
+                            <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
+                            <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Section -->
+        <div id="searchSection" class="hidden">
+            <h2 style="margin-bottom:16px">Search Quotations</h2>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search by supplier, date, or item description..." onkeyup="debounceSearch()">
+                <button class="btn btn-primary" onclick="searchQuotations()">Search</button>
+            </div>
+            <div class="hidden" id="searchActions" style="margin-bottom:12px;display:flex;align-items:center;gap:12px;padding:10px 16px;background:#fff;border-radius:8px;border:1px solid #eee">
+                <span style="font-size:13px"><strong id="searchSelectedCount">0</strong> selected</span>
+                <button class="btn btn-sm btn-primary" onclick="editSelected()">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteSelected()">Delete</button>
+            </div>
+            <div class="results" id="searchResults"></div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal" style="max-width:500px">
+            <h3>AI Settings</h3>
+            <div style="text-align:left; margin:16px 0">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">AI Endpoint URL</label>
+                <input type="text" id="settingsEndpoint" placeholder="http://192.168.0.196:1234/v1/chat/completions" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Model Name</label>
+                <input type="text" id="settingsModel" placeholder="qwen/qwen3-vl-4b" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">QuoDB External URL</label>
+                <input type="text" id="settingsExternalUrl" placeholder="http://localhost:8000 (for image access)" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Timeout (seconds)</label>
+                <input type="number" id="settingsTimeout" value="120" min="10" max="300" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Max Retries</label>
+                <input type="number" id="settingsRetries" value="3" min="1" max="10" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Success popup duration (seconds)</label>
+                <input type="number" id="settingsPopupDuration" value="3" min="1" max="10" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
+            </div>
+            <div class="actions" style="justify-content:center">
+                <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+                <button class="btn btn-secondary" onclick="closeModal('settingsModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection Failed Modal -->
+    <div class="modal-overlay" id="connectFailedModal">
+        <div class="modal">
+            <h3>Connection Failed</h3>
+            <p id="connectError">Unable to connect to AI server</p>
+            <div class="actions">
+                <button class="btn btn-primary" onclick="retryConnect()">Retry</button>
+                <button class="btn btn-secondary" onclick="closeModal('connectFailedModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Processing Modal -->
+    <div class="modal-overlay" id="processingModal">
+        <div class="modal">
+            <h3>Processing Document</h3>
+            <div class="loading" style="justify-content:center; margin:20px 0">
+                <div class="spinner"></div>
+                <span id="processingText">Processing page 1...</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width:0%"></div>
+            </div>
+            <p id="processingDetail">Please wait. Do not close this window.</p>
+            <div class="actions">
+                <button class="btn btn-danger" onclick="cancelProcessing()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF Viewer Modal (for search results) -->
+    <div class="modal-overlay" id="pdfViewerModal">
+        <div class="modal pdf-modal" style="position:relative">
+            <button class="btn btn-danger btn-sm pdf-modal-close" onclick="closePdfViewer()">✕ Close</button>
+            <iframe id="pdfViewerFrame" src=""></iframe>
+        </div>
+    </div>
+
+    <!-- Edit Selected Modal (for search results) -->
+    <div class="modal-overlay" id="editModal">
+        <div class="modal" style="max-width:900px;width:95%;max-height:85vh;overflow-y:auto;text-align:left">
+            <h3 style="margin-bottom:12px">Edit Quotation</h3>
+            <div style="margin-bottom:12px">
+                <label style="font-size:13px;color:#666">Supplier</label>
+                <input type="text" id="editSupplier" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-top:4px">
+            </div>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Brand</th>
+                            <th>Model</th>
+                            <th>Description</th>
+                            <th class="price-cell">Unit Price</th>
+                            <th class="date-cell">Date</th>
+                            <th>Supplier</th>
+                            <th>Currency</th>
+                            <th style="width:40px"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="editItemsTable"></tbody>
+                </table>
+            </div>
+
+            <!-- Find & Replace -->
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
+                <span style="font-size:13px;color:#666;font-weight:500">Find & Replace:</span>
+                <input type="text" id="editFindInput" placeholder="Find..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                <input type="text" id="editReplaceInput" placeholder="Replace with..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px"><input type="checkbox" id="editFindCaseSensitive"> Aa</label>
+                <button class="btn btn-sm btn-primary" onclick="editFindAndReplace()">Replace All</button>
+            </div>
+
+            <button class="btn btn-sm btn-secondary" onclick="editAddRow()" style="margin-bottom:12px">+ Add Row</button>
+            <div class="actions">
+                <button class="btn btn-success" onclick="saveEdit()">Save Changes</button>
+                <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backup/Restore Modal -->
+    <div class="modal-overlay" id="backupModal">
+        <div class="modal" style="max-width:450px;text-align:left">
+            <h3 style="margin-bottom:16px">Backup / Restore</h3>
+            <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
+                <h4 style="margin-bottom:8px;font-size:14px">📤 Export (Backup)</h4>
+                <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as a ZIP archive.</p>
+                <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Download Backup</button>
+                <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
+            </div>
+            <div style="padding:16px;background:#f8f9fa;border-radius:8px">
+                <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
+                <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
+                <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
+                <input type="file" id="importFile" accept=".zip,.json" style="display:none" onchange="importDatabase(this)">
+                <span id="importProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Importing...</span>
+                <div id="importResult" class="hidden" style="margin-top:8px;font-size:13px;color:#27ae60"></div>
+            </div>
+            <div class="actions" style="margin-top:16px">
+                <button class="btn btn-secondary" onclick="closeModal('backupModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Logs Modal -->
+    <div class="modal-overlay" id="logsModal">
+        <div class="modal" style="max-width:450px;text-align:left">
+            <h3 style="margin-bottom:16px">Save Logs</h3>
+            <p style="font-size:13px;color:#666;margin-bottom:16px">Download system logs for troubleshooting. The logs include recent API calls and errors.</p>
+            <div style="margin-bottom:16px">
+                <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Log level</label>
+                <select id="logLevel" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px">
+                    <option value="all">All logs</option>
+                    <option value="errors">Errors only</option>
+                </select>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" onclick="downloadLogs()">Download Logs</button>
+                <button class="btn btn-secondary" onclick="closeModal('logsModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let isConnected = false;
+        let uploadedFiles = [];
+        let currentFileIndex = -1;
+        let reviewPages = [];
+        let reviewCurrentPage = 0;
+        let extractedData = null;
+        let processing = false;
+        let abortController = null;
+
+        // === Preferences Menu ===
+        function togglePrefsMenu() {
+            const menu = document.getElementById('prefsMenu');
+            menu.classList.toggle('hidden');
+        }
+
+        function closePrefsMenu() {
+            document.getElementById('prefsMenu').classList.add('hidden');
+        }
+
+        // Load popup duration on startup
+        loadPopupDuration();
+
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('prefsMenu');
+            if (!e.target.closest('#prefsMenu') && !e.target.closest('[onclick*="togglePrefsMenu"]')) {
+                menu.classList.add('hidden');
+            }
+        });
+
+        // === Settings ===
+        async function openSettings() {
+            try {
+                const resp = await fetch('/config');
+                const cfg = await resp.json();
+                document.getElementById('settingsEndpoint').value = cfg.ai_endpoint || '';
+                document.getElementById('settingsModel').value = cfg.model || '';
+                document.getElementById('settingsExternalUrl').value = cfg.external_url || '';
+                document.getElementById('settingsTimeout').value = cfg.timeout || 120;
+                document.getElementById('settingsRetries').value = cfg.max_retries || 2;
+                document.getElementById('settingsPopupDuration').value = cfg.popup_duration || 3;
+                document.getElementById('settingsModal').classList.add('active');
+            } catch (e) {
+                showBriefPopup('Failed to load settings');
+            }
+        }
+
+        async function saveSettings() {
+            const endpoint = document.getElementById('settingsEndpoint').value.trim();
+            const model = document.getElementById('settingsModel').value.trim();
+            const externalUrl = document.getElementById('settingsExternalUrl').value.trim();
+            const timeout = parseInt(document.getElementById('settingsTimeout').value) || 120;
+            const retries = parseInt(document.getElementById('settingsRetries').value) || 2;
+            const popupDuration = parseInt(document.getElementById('settingsPopupDuration').value) || 3;
+
+            if (!endpoint) { showBriefPopup('AI endpoint URL is required'); return; }
+            if (!model) { showBriefPopup('Model name is required'); return; }
+
+            try {
+                const resp = await fetch('/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ai_endpoint: endpoint, model: model, external_url: externalUrl, timeout: timeout, max_retries: retries, popup_duration: popupDuration })
+                });
+                const result = await resp.json();
+                if (result.status === 'saved') {
+                    popupDurationSec = popupDuration;
+                    closeModal('settingsModal');
+                    showBriefPopup('Settings saved!');
+                }
+            } catch (e) {
+                showBriefPopup('Failed to save settings: ' + e.message);
+            }
+        }
+
+        // === AI Connection ===
+        function updateConnectionUI() {
+            const btn = document.getElementById('connectBtn');
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            if (isConnected) {
+                btn.className = 'btn btn-danger';
+                btn.textContent = 'Disconnect';
+                dot.className = 'status-dot green';
+                text.className = 'status-text connected';
+                text.textContent = 'CONNECTED';
+                document.getElementById('processAllBtn').disabled = false;
+            } else {
+                btn.className = 'btn btn-primary';
+                btn.textContent = 'Connect to AI Server';
+                dot.className = 'status-dot red';
+                text.className = 'status-text disconnected';
+                text.textContent = 'DISCONNECTED';
+                document.getElementById('processAllBtn').disabled = true;
+            }
+            btn.disabled = false;
+        }
+
+        async function toggleConnection() {
+            if (isConnected) {
+                isConnected = false;
+                updateConnectionUI();
+                return;
+            }
+            const btn = document.getElementById('connectBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px"></span> Connecting...';
+            try {
+                const response = await fetch('/ai/connect', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'connected') {
+                    isConnected = true;
+                    updateConnectionUI();
+                } else {
+                    throw new Error(data.error || 'Connection failed');
+                }
+            } catch (err) {
+                document.getElementById('connectError').textContent = err.message || 'Unable to connect to AI server';
+                document.getElementById('connectFailedModal').classList.add('active');
+                updateConnectionUI();
+            }
+        }
+
+        function retryConnect() {
+            closeModal('connectFailedModal');
+            toggleConnection();
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        // === Brief Popup ===
+        let popupDurationSec = 3;
+
+        async function loadPopupDuration() {
+            try {
+                const resp = await fetch('/config');
+                const cfg = await resp.json();
+                popupDurationSec = cfg.popup_duration || 3;
+            } catch (e) { popupDurationSec = 3; }
+        }
+
+        function showBriefPopup(message) {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay active';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:350px">
+                    <p style="font-size:15px;margin:0">${message}</p>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            setTimeout(() => {
+                overlay.classList.remove('active');
+                setTimeout(() => overlay.remove(), 300);
+            }, popupDurationSec * 1000);
+        }
+
+        function showConfirmPopup(message, onConfirm) {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay active';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:400px">
+                    <p style="font-size:15px;margin:0 0 16px 0">${message}</p>
+                    <div class="actions" style="justify-content:center">
+                        <button class="btn btn-danger btn-sm" id="confirmYes">Yes, Delete</button>
+                        <button class="btn btn-secondary btn-sm" id="confirmNo">Cancel</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#confirmYes').onclick = () => {
+                overlay.remove();
+                onConfirm();
+            };
+            overlay.querySelector('#confirmNo').onclick = () => {
+                overlay.remove();
+            };
+        }
+
+        // === Connect/Disconnect from Settings ===
+        async function connectFromSettings() {
+            const btn = document.getElementById('settingsConnectBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px"></span> Connecting...';
+            try {
+                const response = await fetch('/ai/connect', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'connected') {
+                    isConnected = true;
+                    updateConnectionUI();
+                    btn.classList.add('hidden');
+                    document.getElementById('settingsDisconnectBtn').classList.remove('hidden');
+                } else {
+                    throw new Error(data.error || 'Connection failed');
+                }
+            } catch (err) {
+                showBriefPopup('Connection failed: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Connect to AI Server';
+            }
+        }
+
+        async function disconnectFromSettings() {
+            isConnected = false;
+            updateConnectionUI();
+            document.getElementById('settingsConnectBtn').classList.remove('hidden');
+            document.getElementById('settingsDisconnectBtn').classList.add('hidden');
+        }
+
+        function updateSettingsConnectionUI() {
+            if (isConnected) {
+                document.getElementById('settingsConnectBtn').classList.add('hidden');
+                document.getElementById('settingsDisconnectBtn').classList.remove('hidden');
+            } else {
+                document.getElementById('settingsConnectBtn').classList.remove('hidden');
+                document.getElementById('settingsDisconnectBtn').classList.add('hidden');
+            }
+        }
+
+        // === Backup / Restore ===
+        function openBackupRestore() {
+            document.getElementById('backupModal').classList.add('active');
+        }
+
+        // === Save Logs ===
+        function saveLogs() {
+            document.getElementById('logsModal').classList.add('active');
+        }
+
+        async function downloadLogs() {
+            const level = document.getElementById('logLevel').value;
+            try {
+                const resp = await fetch(`/logs?level=${level}`);
+                const data = await resp.json();
+                const blob = new Blob([data.logs || 'No logs available'], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `quodb_logs_${new Date().toISOString().slice(0, 10)}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+                closeModal('logsModal');
+            } catch (e) {
+                showBriefPopup('Failed to get logs: ' + e.message);
+            }
+        }
+
+        // === File Upload ===
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        async function handleFiles(files) {
+            for (const file of files) {
+                if (file.type !== 'application/pdf') continue;
+                const formData = new FormData();
+                formData.append('file', file);
+                const resp = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await resp.json();
+                data.backendIndex = data.file_index;
+                // Check for duplicates
+                try {
+                    const dupResp = await fetch(`/check-duplicate?filename=${encodeURIComponent(file.name)}`);
+                    const dup = await dupResp.json();
+                    if (dup.exists || dup.in_database) {
+                        data.duplicate = true;
+                    }
+                } catch (e) { /* ignore check errors */ }
+                uploadedFiles.push(data);
+                renderFileList();
+            }
+        }
+
+        function renderFileList() {
+            const section = document.getElementById('fileListSection');
+            const list = document.getElementById('fileList');
+            if (uploadedFiles.length === 0) {
+                section.classList.add('hidden');
+                return;
+            }
+            section.classList.remove('hidden');
+            const pendingCount = uploadedFiles.filter(f => f.status === 'pending').length;
+            const doneCount = uploadedFiles.filter(f => f.status === 'done' || f.status === 'saved').length;
+            list.innerHTML = uploadedFiles.map((f, i) => {
+                let statusHtml = '';
+                if (f.status === 'pending') statusHtml = '<span class="file-status pending">Pending</span>';
+                else if (f.status === 'processing') statusHtml = `<span class="file-status processing">${f.progress || 'Processing...'}</span>`;
+                else if (f.status === 'done') statusHtml = '<span class="file-status done">✓ Ready to review</span>';
+                else if (f.status === 'saved') statusHtml = '<span class="file-status done">✓ Saved</span>';
+                else if (f.status === 'error') statusHtml = '<span class="file-status error">✗ Error</span>';
+                else if (f.status === 'skipped') statusHtml = '<span class="file-status" style="color:#999">Skipped</span>';
+                const dupBadge = f.duplicate ? '<span class="file-status" style="background:#fef9e7;color:#e67e22;margin-right:6px">⚠ Duplicate</span>' : '';
+                const canMove = f.status === 'pending';
+                const moveHtml = canMove ? `
+                    <span style="display:inline-flex;gap:2px;margin-right:8px">
+                        <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up" style="padding:2px 6px;font-size:11px">▲</button>
+                        <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, 1)" ${i === uploadedFiles.length - 1 ? 'disabled' : ''} title="Move down" style="padding:2px 6px;font-size:11px">▼</button>
+                    </span>
+                ` : '';
+                return `
+                    <div class="file-item">
+                        <span class="file-name">${moveHtml}${dupBadge}${f.filename} (${f.pages} page${f.pages !== 1 ? 's' : ''})</span>
+                        ${statusHtml}
+                    </div>
+                `;
+            }).join('');
+            const summary = document.getElementById('queueSummary');
+            if (summary) {
+                if (pendingCount > 0) {
+                    summary.textContent = `${doneCount} of ${uploadedFiles.length} done — ${pendingCount} pending`;
+                    summary.classList.remove('hidden');
+                } else {
+                    summary.classList.add('hidden');
+                }
+            }
+        }
+
+        function moveFile(index, direction) {
+            const newIndex = index + direction;
+            if (newIndex < 0 || newIndex >= uploadedFiles.length) return;
+            const item = uploadedFiles.splice(index, 1)[0];
+            uploadedFiles.splice(newIndex, 0, item);
+            renderFileList();
+        }
+
+        async function clearFiles() {
+            await fetch('/clear', { method: 'POST' });
+            uploadedFiles = [];
+            renderFileList();
+        }
+
+        // === Process All Pages (streaming progress) ===
+        async function processAll() {
+            if (!isConnected) { showBriefPopup('Please connect to AI server first.'); return; }
+            if (uploadedFiles.length === 0) return;
+
+            let fileIdx = uploadedFiles.findIndex(f => f.status === 'pending');
+            if (fileIdx === -1) { showBriefPopup('No pending files to process.'); return; }
+
+            const file = uploadedFiles[fileIdx];
+            const backendIdx = file.backendIndex;
+            currentFileIndex = backendIdx;
+
+            // Mark as processing
+            uploadedFiles[fileIdx].status = 'processing';
+            uploadedFiles[fileIdx].progress = 'Starting...';
+            renderFileList();
+
+            document.getElementById('processingModal').classList.add('active');
+            processing = true;
+            abortController = new AbortController();
+            document.getElementById('processingText').textContent = `Starting ${file.filename}...`;
+            document.getElementById('processingDetail').textContent = '';
+            document.getElementById('progressFill').style.width = '0%';
+
+            try {
+                const resp = await fetch('/process-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_index: backendIdx }),
+                    signal: abortController.signal
+                });
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep incomplete line in buffer
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const jsonStr = line.slice(6);
+                        try {
+                            const msg = JSON.parse(jsonStr);
+                            if (msg.type === 'progress') {
+                                document.getElementById('processingText').textContent = msg.message;
+                                document.getElementById('progressFill').style.width = msg.percent + '%';
+                                uploadedFiles[fileIdx].progress = `Page ${msg.page}/${msg.total}`;
+                                renderFileList();
+                            } else if (msg.type === 'page_done') {
+                                document.getElementById('processingDetail').textContent = `Found ${msg.items_found} item(s) on page ${msg.page}`;
+                                document.getElementById('progressFill').style.width = msg.percent + '%';
+                                uploadedFiles[fileIdx].progress = `Page ${msg.page}/${msg.total} ✓`;
+                                renderFileList();
+                            } else if (msg.type === 'page_error') {
+                                document.getElementById('processingDetail').textContent = `Page ${msg.page}: ${msg.error}`;
+                            } else if (msg.type === 'done') {
+                                document.getElementById('progressFill').style.width = '100%';
+                                extractedData = msg.data;
+                                uploadedFiles[fileIdx].status = 'done';
+                                uploadedFiles[fileIdx].progress = '';
+                                renderFileList();
+
+                                const pagesResp = await fetch(`/next-file?file_index=${backendIdx}`);
+                                const pagesData = await pagesResp.json();
+                                reviewPages = pagesData.pages;
+                                reviewCurrentPage = 0;
+
+                                showReview(file.filename);
+                            }
+                        } catch (e) { /* skip parse errors */ }
+                    }
+                }
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    showBriefPopup('Processing failed: ' + err.message);
+                    uploadedFiles[fileIdx].status = 'error';
+                    uploadedFiles[fileIdx].progress = '';
+                    renderFileList();
+                }
+            } finally {
+                processing = false;
+                // Only close modal if not already closed by cancelProcessing
+                if (document.getElementById('processingModal').classList.contains('active')) {
+                    document.getElementById('processingModal').classList.remove('active');
+                }
+            }
+        }
+
+        function cancelProcessing() {
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            processing = false;
+            // Reset current file status to pending
+            if (currentFileIndex >= 0) {
+                const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
+                if (fileIdx !== -1) {
+                    uploadedFiles[fileIdx].status = 'pending';
+                    uploadedFiles[fileIdx].progress = '';
+                    renderFileList();
+                }
+            }
+            document.getElementById('processingModal').classList.remove('active');
+        }
+
+        // === Review (PDF + Data side by side) ===
+        function showReview(filename) {
+            document.getElementById('reviewFilename').textContent = filename;
+            document.getElementById('supplierName').value = extractedData.supplier || '';
+            const tbody = document.getElementById('itemsTable');
+            tbody.innerHTML = '';
+            (extractedData.items || []).forEach(item => addRow(item));
+            updateItemCount();
+            updateReviewPdf();
+            document.getElementById('reviewSection').classList.remove('hidden');
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('searchSection').classList.add('hidden');
+        }
+
+        function updateReviewPdf() {
+            if (reviewPages.length > 0) {
+                document.getElementById('reviewPdfImg').src = reviewPages[reviewCurrentPage];
+                document.getElementById('reviewPageInfo').textContent = `Page ${reviewCurrentPage + 1} of ${reviewPages.length}`;
+            }
+        }
+
+        function reviewPrevPage() {
+            if (reviewCurrentPage > 0) { reviewCurrentPage--; updateReviewPdf(); }
+        }
+
+        function reviewNextPage() {
+            if (reviewCurrentPage < reviewPages.length - 1) { reviewCurrentPage++; updateReviewPdf(); }
+        }
+
+        function updateItemCount() {
+            const count = document.querySelectorAll('#itemsTable tr').length;
+            document.getElementById('itemCount').textContent = count;
+        }
+
+        function findAndReplace() {
+            const find = document.getElementById('findInput').value;
+            const replace = document.getElementById('replaceInput').value;
+            const caseSensitive = document.getElementById('findCaseSensitive').checked;
+            if (!find) { showBriefPopup('Enter a search term.'); return; }
+
+            let count = 0;
+            const rows = document.querySelectorAll('#itemsTable tr');
+            rows.forEach(row => {
+                row.querySelectorAll('input, textarea').forEach(el => {
+                    let val = el.value;
+                    let searchVal = find;
+                    let replaceVal = replace;
+                    if (!caseSensitive) {
+                        const idx = val.toLowerCase().indexOf(searchVal.toLowerCase());
+                        if (idx !== -1) {
+                            // Rebuild with correct case from original
+                            el.value = val.substring(0, idx) + replaceVal + val.substring(idx + searchVal.length);
+                            count++;
+                            // Continue replacing remaining occurrences
+                            let remaining = el.value;
+                            let offset = idx + replaceVal.length;
+                            while (offset < remaining.length) {
+                                const nextIdx = remaining.toLowerCase().indexOf(searchVal.toLowerCase(), offset);
+                                if (nextIdx === -1) break;
+                                el.value = el.value.substring(0, nextIdx) + replaceVal + el.value.substring(nextIdx + searchVal.length);
+                                remaining = el.value;
+                                offset = nextIdx + replaceVal.length;
+                                count++;
+                            }
+                        }
+                    } else {
+                        let offset = 0;
+                        while (offset < val.length) {
+                            const idx = val.indexOf(find, offset);
+                            if (idx === -1) break;
+                            el.value = el.value.substring(0, idx) + replace + el.value.substring(idx + find.length);
+                            val = el.value;
+                            offset = idx + replace.length;
+                            count++;
+                        }
+                    }
+                });
+            });
+            showBriefPopup(count > 0 ? `Replaced ${count} occurrence(s).` : 'No matches found.');
+        }
+
+        function addRow(item = {}) {
+            const tbody = document.getElementById('itemsTable');
+            const tr = document.createElement('tr');
+            const supplierVal = item.supplier || document.getElementById('supplierName').value || '';
+            tr.innerHTML = `
+                <td><input type="text" value="${item.brand || ''}" placeholder="Brand"></td>
+                <td><input type="text" value="${item.model || ''}" placeholder="Model"></td>
+                <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${item.description || ''}</textarea></td>
+                <td><input type="text" class="price-input" value="${item.unit_price || item.price || ''}" placeholder="0.00"></td>
+                <td><input type="text" class="text-right" value="${item.date || ''}" placeholder="YYYY-MM-DD"></td>
+                <td><input type="text" value="${supplierVal}" placeholder="Supplier"></td>
+                <td><input type="text" value="${item.currency || ''}" placeholder="Currency"></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount()">✕</button></td>
+            `;
+            tbody.appendChild(tr);
+            updateItemCount();
+        }
+
+        function getEditedData() {
+            const rows = document.querySelectorAll('#itemsTable tr');
+            const items = [];
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll('input, textarea');
+                items.push({
+                    brand: inputs[0].value,
+                    model: inputs[1].value,
+                    description: inputs[2].value,
+                    unit_price: inputs[3].value,
+                    date: inputs[4].value,
+                    supplier: inputs[5].value,
+                    currency: inputs[6].value
+                });
+            });
+            return {
+                supplier: document.getElementById('supplierName').value,
+                items: items
+            };
+        }
+
+        async function confirmSave() {
+            const data = getEditedData();
+            const resp = await fetch('/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_index: currentFileIndex, data: data })
+            });
+            const result = await resp.json();
+            if (result.status === 'saved') {
+                // Update frontend status
+                const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
+                if (fileIdx !== -1) {
+                    uploadedFiles[fileIdx].status = 'saved';
+                    renderFileList();
+                }
+                showBriefPopup('Saved successfully!');
+                setTimeout(async () => {
+                    await backToUpload();
+                    autoProcessNext();
+                }, popupDurationSec * 1000);
+            } else {
+                showBriefPopup('Save failed: ' + result.error);
+            }
+        }
+
+        function backToUpload() {
+            document.getElementById('reviewSection').classList.add('hidden');
+            document.getElementById('uploadSection').classList.remove('hidden');
+            document.getElementById('searchSection').classList.add('hidden');
+            document.getElementById('tabUpload').classList.add('active');
+            document.getElementById('tabSearch').classList.remove('active');
+            extractedData = null;
+            reviewPages = [];
+            renderFileList();
+        }
+
+        function autoProcessNext() {
+            if (!isConnected) return;
+            const nextIdx = uploadedFiles.findIndex(f => f.status === 'pending');
+            if (nextIdx !== -1) {
+                processAll();
+            }
+        }
+
+        // === Navigation ===
+        function showUpload() {
+            document.getElementById('uploadSection').classList.remove('hidden');
+            document.getElementById('searchSection').classList.add('hidden');
+            document.getElementById('reviewSection').classList.add('hidden');
+            document.getElementById('tabUpload').classList.add('active');
+            document.getElementById('tabSearch').classList.remove('active');
+        }
+
+        function showSearch() {
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('reviewSection').classList.add('hidden');
+            document.getElementById('searchSection').classList.remove('hidden');
+            document.getElementById('tabUpload').classList.remove('active');
+            document.getElementById('tabSearch').classList.add('active');
+            // Load all results
+            document.getElementById('searchInput').value = '';
+            searchQuotations();
+        }
+
+        // === Search ===
+        let searchSelectedIds = new Set();
+        let sortField = '';
+        let sortDir = 'asc'; // asc or desc
+        let lastSearchItems = [];
+        let searchDebounceTimer = null;
+
+        function debounceSearch() {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => searchQuotations(), 300);
+        }
+
+        function toggleSelectAll(cb) {
+            document.querySelectorAll('.search-cb').forEach(c => { c.checked = cb.checked; });
+            updateSelection();
+        }
+
+        function updateSelection() {
+            searchSelectedIds.clear();
+            document.querySelectorAll('.search-cb:checked').forEach(c => {
+                searchSelectedIds.add(c.dataset.id);
+            });
+            const count = searchSelectedIds.size;
+            const bar = document.getElementById('searchActions');
+            if (count > 0) {
+                bar.classList.remove('hidden');
+                document.getElementById('searchSelectedCount').textContent = count;
+            } else {
+                bar.classList.add('hidden');
+            }
+        }
+
+        function sortBy(field) {
+            if (sortField === field) {
+                sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortField = field;
+                sortDir = 'asc';
+            }
+            renderSearchResults();
+        }
+
+        function sortItems(items) {
+            if (!sortField) return items;
+            const sorted = [...items];
+            sorted.sort((a, b) => {
+                let va = (a[sortField] || '').toString().toLowerCase();
+                let vb = (b[sortField] || '').toString().toLowerCase();
+                // For numeric-like fields (unit_price), parse as number
+                if (sortField === 'unit_price' || sortField === 'price') {
+                    va = parseFloat((va || '0').replace(/,/g, '')) || 0;
+                    vb = parseFloat((vb || '0').replace(/,/g, '')) || 0;
+                    return sortDir === 'asc' ? va - vb : vb - va;
+                }
+                // For date fields, try date parsing
+                if (sortField === 'date' || sortField === '_date') {
+                    const da = Date.parse(va) || 0;
+                    const db = Date.parse(vb) || 0;
+                    return sortDir === 'asc' ? da - db : db - da;
+                }
+                // Text comparison
+                if (va < vb) return sortDir === 'asc' ? -1 : 1;
+                if (va > vb) return sortDir === 'asc' ? 1 : -1;
+                return 0;
+            });
+            return sorted;
+        }
+
+        function renderSearchResults() {
+            const allItems = lastSearchItems;
+            const container = document.getElementById('searchResults');
+            const sorted = sortItems(allItems);
+
+            const sortClass = (field) => {
+                if (sortField !== field) return 'sortable';
+                return `sortable sort-${sortDir}`;
+            };
+
+            const tableHeader = `
+                <tr>
+                    <th style="width:40px"><input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this)"></th>
+                    <th class="${sortClass('brand')}" onclick="sortBy('brand')">Brand</th>
+                    <th class="${sortClass('model')}" onclick="sortBy('model')">Model</th>
+                    <th class="${sortClass('description')}" onclick="sortBy('description')">Description</th>
+                    <th class="${sortClass('unit_price')}" style="text-align:right" onclick="sortBy('unit_price')">Unit Price</th>
+                    <th class="${sortClass('date')}" style="text-align:right" onclick="sortBy('date')">Date</th>
+                    <th class="${sortClass('supplier')}" onclick="sortBy('supplier')">Supplier</th>
+                    <th class="${sortClass('currency')}" onclick="sortBy('currency')">Currency</th>
+                    <th style="text-align:center">Pg</th>
+                </tr>`;
+
+            const renderItem = (item) => `
+                <tr ondblclick="viewPdf('${item._filename}')" style="cursor:pointer" title="Double-click to view PDF">
+                    <td><input type="checkbox" class="search-cb" data-id="${item._id}" data-file="${item._filename}" onchange="updateSelection()"></td>
+                    <td>${item.brand || ''}</td>
+                    <td>${item.model || ''}</td>
+                    <td style="word-wrap:break-word;max-width:300px">${item.description || ''}</td>
+                    <td class="text-right nowrap-cell">${item.unit_price || item.price || ''}</td>
+                    <td class="text-right nowrap-cell">${item.date || ''}</td>
+                    <td style="word-wrap:break-word;max-width:150px">${item.supplier || item._supplier || ''}</td>
+                    <td class="nowrap-cell">${item.currency || ''}</td>
+                    <td style="text-align:center"><span style="color:#3498db;cursor:pointer;text-decoration:underline" onclick="event.stopPropagation(); viewPdf('${item._filename}')">${item.page || '-'}</span></td>
+                </tr>`;
+
+            container.innerHTML = `
+                <div style="background:#fff;border-radius:12px;overflow:hidden">
+                    <table>
+                        <thead>${tableHeader}</thead>
+                        <tbody>${sorted.map(item => renderItem(item)).join('')}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function searchQuotations() {
+            const q = document.getElementById('searchInput').value;
+            sortField = '';
+            sortDir = 'asc';
+            const resp = await fetch(`/search?q=${encodeURIComponent(q)}`);
+            const results = await resp.json();
+            const container = document.getElementById('searchResults');
+            searchSelectedIds.clear();
+            document.getElementById('searchActions').classList.add('hidden');
+
+            if (results.length === 0) {
+                container.innerHTML = '<p style="padding:20px;text-align:center;color:#666">No results found</p>';
+                lastSearchItems = [];
+                return;
+            }
+
+            let allItems = [];
+            results.forEach(r => {
+                (r.items || []).forEach(item => {
+                    allItems.push({ ...item, _id: r.id, _filename: r.filename, _supplier: r.supplier || '', _date: r.quotation_date || '' });
+                });
+            });
+
+            lastSearchItems = allItems;
+            renderSearchResults();
+        }
+
+        // === PDF Viewer ===
+        function viewPdf(filename) {
+            document.getElementById('pdfViewerFrame').src = `/archive/${encodeURIComponent(filename)}`;
+            document.getElementById('pdfViewerModal').classList.add('active');
+        }
+
+        async function deleteSelected() {
+            const ids = [...searchSelectedIds].map(Number);
+            if (ids.length === 0) return;
+            showConfirmPopup(`Delete ${ids.length} quotation(s)? This will also remove the archived PDFs.`, async () => {
+                try {
+                    const resp = await fetch('/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ids: ids })
+                    });
+                    const result = await resp.json();
+                    if (result.status === 'deleted') {
+                        searchQuotations();
+                    }
+                } catch (e) {
+                    showBriefPopup('Delete failed: ' + e.message);
+                }
+            });
+        }
+
+        let editQuotationId = null;
+
+        async function editSelected() {
+            const ids = [...searchSelectedIds].map(Number);
+            if (ids.length === 0) return;
+            // For now, edit the first selected quotation
+            editQuotationId = ids[0];
+            // Fetch the quotation data
+            const resp = await fetch(`/search?q=`);
+            const results = await resp.json();
+            const quotation = results.find(r => r.id === editQuotationId);
+            if (!quotation) { showBriefPopup('Quotation not found.'); return; }
+
+            document.getElementById('editSupplier').value = quotation.supplier || '';
+            const tbody = document.getElementById('editItemsTable');
+            tbody.innerHTML = '';
+            (quotation.items || []).forEach(item => editAddRow(item));
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        function editFindAndReplace() {
+            const find = document.getElementById('editFindInput').value;
+            const replace = document.getElementById('editReplaceInput').value;
+            const caseSensitive = document.getElementById('editFindCaseSensitive').checked;
+            if (!find) { showBriefPopup('Enter a search term.'); return; }
+
+            let count = 0;
+            const rows = document.querySelectorAll('#editItemsTable tr');
+            rows.forEach(row => {
+                row.querySelectorAll('input, textarea').forEach(el => {
+                    let val = el.value;
+                    if (!caseSensitive) {
+                        let offset = 0;
+                        while (offset < val.length) {
+                            const idx = val.toLowerCase().indexOf(find.toLowerCase(), offset);
+                            if (idx === -1) break;
+                            el.value = el.value.substring(0, idx) + replace + el.value.substring(idx + find.length);
+                            val = el.value;
+                            offset = idx + replace.length;
+                            count++;
+                        }
+                    } else {
+                        let offset = 0;
+                        while (offset < val.length) {
+                            const idx = val.indexOf(find, offset);
+                            if (idx === -1) break;
+                            el.value = el.value.substring(0, idx) + replace + el.value.substring(idx + find.length);
+                            val = el.value;
+                            offset = idx + replace.length;
+                            count++;
+                        }
+                    }
+                });
+            });
+            showBriefPopup(count > 0 ? `Replaced ${count} occurrence(s).` : 'No matches found.');
+        }
+
+        function editAddRow(item = {}) {
+            const tbody = document.getElementById('editItemsTable');
+            const tr = document.createElement('tr');
+            const supplierVal = item.supplier || document.getElementById('editSupplier').value || '';
+            tr.innerHTML = `
+                <td><input type="text" value="${item.brand || ''}" placeholder="Brand"></td>
+                <td><input type="text" value="${item.model || ''}" placeholder="Model"></td>
+                <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${item.description || ''}</textarea></td>
+                <td><input type="text" class="price-input" value="${item.unit_price || item.price || ''}" placeholder="0.00"></td>
+                <td><input type="text" class="text-right" value="${item.date || ''}" placeholder="YYYY-MM-DD"></td>
+                <td><input type="text" value="${supplierVal}" placeholder="Supplier"></td>
+                <td><input type="text" value="${item.currency || ''}" placeholder="Currency"></td>
+                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">✕</button></td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        async function saveEdit() {
+            const rows = document.querySelectorAll('#editItemsTable tr');
+            const items = [];
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll('input, textarea');
+                items.push({
+                    brand: inputs[0].value,
+                    model: inputs[1].value,
+                    description: inputs[2].value,
+                    unit_price: inputs[3].value,
+                    date: inputs[4].value,
+                    supplier: inputs[5].value,
+                    currency: inputs[6].value
+                });
+            });
+            const data = {
+                supplier: document.getElementById('editSupplier').value,
+                items: items
+            };
+            try {
+                const resp = await fetch('/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: editQuotationId, data: data })
+                });
+                const result = await resp.json();
+                if (result.status === 'updated') {
+                    closeModal('editModal');
+                    searchQuotations();
+                }
+            } catch (e) {
+                showBriefPopup('Update failed: ' + e.message);
+            }
+        }
+
+        function closePdfViewer() {
+            document.getElementById('pdfViewerFrame').src = '';
+            document.getElementById('pdfViewerModal').classList.remove('active');
+        }
+
+        // === Export / Import ===
+        async function exportDatabase() {
+            const btn = document.getElementById('exportBtn');
+            const prog = document.getElementById('exportProgress');
+            btn.disabled = true;
+            prog.classList.remove('hidden');
+            prog.textContent = 'Preparing backup...';
+            try {
+                const resp = await fetch('/export');
+                prog.textContent = 'Creating archive with PDFs...';
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `quodb_backup_${new Date().toISOString().slice(0, 10)}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+                prog.textContent = 'Done!';
+                setTimeout(() => { prog.classList.add('hidden'); }, 2000);
+            } catch (e) {
+                showBriefPopup('Export failed: ' + e.message);
+                prog.classList.add('hidden');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function importDatabase(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const btn = document.getElementById('importBtn');
+            const prog = document.getElementById('importProgress');
+            const result = document.getElementById('importResult');
+            btn.disabled = true;
+            prog.classList.remove('hidden');
+            result.classList.add('hidden');
+            prog.textContent = `Reading ${file.name}...`;
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                prog.textContent = 'Uploading and importing...';
+                const resp = await fetch('/import/upload', { method: 'POST', body: formData });
+                const data = await resp.json();
+                if (data.status === 'imported') {
+                    let msg = `✓ Imported ${data.count} quotation(s) successfully.`;
+                    if (data.pdfs_restored > 0) msg += ` ${data.pdfs_restored} PDF file(s) restored.`;
+                    result.textContent = msg;
+                    result.style.color = '#27ae60';
+                    result.classList.remove('hidden');
+                    prog.classList.add('hidden');
+                    // Auto-refresh search if on search page
+                    if (!document.getElementById('searchSection').classList.contains('hidden')) {
+                        searchQuotations();
+                    }
+                } else {
+                    result.textContent = '✗ ' + (data.error || 'Import failed');
+                    result.style.color = '#e74c3c';
+                    result.classList.remove('hidden');
+                    prog.classList.add('hidden');
+                }
+            } catch (e) {
+                result.textContent = '✗ Import failed: ' + e.message;
+                result.style.color = '#e74c3c';
+                result.classList.remove('hidden');
+                prog.classList.add('hidden');
+            } finally {
+                btn.disabled = false;
+                input.value = '';
+            }
+        }
+
+        // Close PDF viewer on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closePdfViewer();
+        });
+    </script>
+</body>
+</html>

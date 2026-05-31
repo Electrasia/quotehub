@@ -1,0 +1,44 @@
+# Data (stored in Docker volume, not in repo)
+data/temp/
+data/processed/
+data/images/
+data/quotations.db
+data/quotations.db-journal
+data/quotations.db-wal
+data/quotations.db-shm
+data/upload_state.json
+data/quotations_fts*
+data/archive/
+
+# Old planning docs (replaced by README.md)
+rules.md/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+env/
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.log
