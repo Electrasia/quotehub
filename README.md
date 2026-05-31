@@ -54,8 +54,8 @@ Open your browser and go to **http://localhost:8000**
 ### 5. Connect to AI Server
 
 1. Click **⚙ Preferences** → **Server Connection**
-2. Enter your AI endpoint URL (e.g., `http://192.168.0.196:1234/v1/chat/completions`)
-3. Enter your model name (e.g., `qwen/qwen3-vl-4b`)
+2. Enter your AI endpoint URL (e.g., `http://ai_ip:port/v1/chat/completions`)
+3. Enter your model name (e.g., `llm_name`)
 4. Click **Save Settings**
 5. Click **Connect to AI Server** in the header
 
