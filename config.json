@@ -1,6 +1,6 @@
 {
-  "ai_endpoint": "",
-  "model": "",
+  "ai_endpoint": "http://your-ai-server:port/v1/chat/completions",
+  "model": "your-model-name",
   "timeout": 90,
   "max_retries": 2,
   "external_url": "http://localhost:8000",
