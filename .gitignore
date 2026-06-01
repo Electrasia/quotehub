@@ -9,6 +9,8 @@ data/quotations.db-shm
 data/upload_state.json
 data/quotations_fts*
 data/archive/
+data/secret.key
+data/init_password.txt
 
 # Old planning docs (replaced by README.md)
 rules.md/
