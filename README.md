@@ -123,6 +123,28 @@ On the very first startup (or after the database is wiped), QuoteHub automatical
 
 Log in as `master` with that password, then **immediately change the password** (you will be forced to).
 
+### Where to Find the Initial Master Password (Recovery)
+
+If you missed the password when it was first generated, recover it from either the file or the logs. Try them in this order — the file is the more reliable of the two.
+
+**1. Read the file inside the container** (easiest, works while the container is running):
+
+```bash
+docker exec quodb cat /app/data/init_password.txt
+```
+
+If the file exists, it prints the password and you can log in. If the command says *"No such file or directory"*, the file was already auto-deleted (which means the master has already changed the password at some point) — skip to step 3.
+
+**2. Check the container logs:**
+
+```bash
+docker logs quodb 2>&1 | grep -A2 "INITIAL MASTER PASSWORD"
+```
+
+This works only if the container has not been restarted since the first startup (the banner is in the startup logs, not in the access logs). If `grep` finds nothing, the logs have rolled past it — skip to step 3.
+
+**3. If both the file and the logs are gone**, you have to follow the [Reset Master Password](#reset-master-password) steps below. This is destructive: it removes all user accounts (but keeps all quotations and PDFs intact), then the next startup generates a brand-new master password.
+
 ### Forced Password Change (`must_change_password`)
 
 When a user is created (or when the master logs in for the first time) with a temporary password, the app blocks normal access and shows a **Change Password** form. The form requires:
@@ -139,7 +161,7 @@ When an **admin** opens **Settings → Server Connection**, the AI fields (endpo
 
 ### Reset Master Password
 
-If the master password is lost, recover access by deleting all `users` rows in the SQLite database and restarting the container. The next startup will detect that no master exists and generate a new random password.
+If the master password is truly lost (file deleted, logs gone, no other master to ask), recover access by deleting all `users` rows in the SQLite database and restarting the container. The next startup will detect that no master exists and generate a new random password.
 
 ```bash
 # 1. Stop the container
@@ -156,7 +178,9 @@ docker start quodb
 docker logs quodb 2>&1 | grep -A1 "INITIAL MASTER PASSWORD"
 ```
 
-> **Warning:** this only deletes the `users` table — no quotations or PDFs are touched. The new password is generated and printed exactly as on a first run; log in as `master` and change it immediately.
+> **What this does:** it only deletes the `users` table — no quotations or PDFs are touched. The new password is generated and printed exactly as on a first run; log in as `master` and change it immediately.
+>
+> **Side effect:** any `admin` and `user` accounts you had created are also deleted. You will have to re-create them from the Users Management panel after the new master is set up.
 
 ## Configuration
 
