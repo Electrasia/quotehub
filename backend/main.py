@@ -20,8 +20,8 @@ from pdf2image import convert_from_path
 from PIL import Image
 from starlette.middleware.sessions import SessionMiddleware
 
-import auth
-from auth import (
+from . import auth
+from .auth import (
     require_role, LoginRequest, ChangePasswordRequest,
     UserCreate, UserUpdate, SESSION_USER_ID, DATA_DIR,
     read_init_password, acknowledge_init_password,
