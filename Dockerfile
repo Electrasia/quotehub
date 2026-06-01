@@ -12,10 +12,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY VERSION ./VERSION
 COPY config.json .
-COPY data/ ./data/
 
+# Note: data/ is not copied from the build context because it's gitignored
+# (the directory would not exist on a fresh clone). The required subdirectories
+# are created by the mkdir line below, and all real data lives in the
+# `quodb_data` Docker volume at runtime.
 RUN mkdir -p /app/data/temp /app/data/archive /app/data/images
+
+ARG GIT_COMMIT=unknown
+RUN echo "${GIT_COMMIT}" > /app/GIT_COMMIT
 
 EXPOSE 8000
 
