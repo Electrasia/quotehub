@@ -18,6 +18,20 @@ import httpx
 from pdf2image import convert_from_path
 from PIL import Image
 
+# ─── Version Info ────────────────────────────────────────
+VERSION_PATH = Path(__file__).parent.parent / "VERSION"
+GIT_COMMIT_PATH = Path(__file__).parent.parent / "GIT_COMMIT"
+
+def read_file_text(path, default=""):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return default
+
+APP_VERSION = read_file_text(VERSION_PATH, "0.0.0")
+APP_COMMIT = read_file_text(GIT_COMMIT_PATH, "unknown")
+
 # ─── Config ───────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
@@ -185,6 +199,14 @@ async def update_config(req: ConfigRequest):
     cfg["popup_duration"] = req.popup_duration
     save_config(cfg)
     return {"status": "saved", "config": cfg}
+
+# ─── Version Endpoint ─────────────────────────────────────
+@app.get("/version")
+async def get_version():
+    return {
+        "version": APP_VERSION,
+        "commit": APP_COMMIT
+    }
 
 # ─── AI Connection ────────────────────────────────────────
 @app.post("/ai/connect")

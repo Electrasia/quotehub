@@ -146,7 +146,7 @@
     <div class="header">
         <div>
             <h1>QuoteHub</h1>
-            <div style="font-size:11px;color:#999;margin-top:2px">v0.001.0</div>
+            <div style="font-size:11px;color:#999;margin-top:2px" id="versionLabel">v0.0.0</div>
         </div>
         <div class="header-right">
             <div class="status">
@@ -446,6 +446,9 @@
         // Load popup duration on startup
         loadPopupDuration();
 
+        // Load version + commit on startup
+        loadVersion();
+
         // Close menu when clicking outside
         document.addEventListener('click', (e) => {
             const menu = document.getElementById('prefsMenu');
@@ -565,6 +568,18 @@
                 const cfg = await resp.json();
                 popupDurationSec = cfg.popup_duration || 3;
             } catch (e) { popupDurationSec = 3; }
+        }
+
+        // === Version Display ===
+        async function loadVersion() {
+            try {
+                const resp = await fetch('/version');
+                const data = await resp.json();
+                const label = document.getElementById('versionLabel');
+                if (label && data.version) {
+                    label.textContent = `v${data.version} (${data.commit})`;
+                }
+            } catch (e) { /* keep default */ }
         }
 
         function showBriefPopup(message) {
