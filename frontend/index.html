@@ -92,6 +92,11 @@
         /* Master-only items in the Preferences dropdown */
         body.role-master .prefs-master { display: block !important; }
 
+        /* AI Server status + Connect button — only relevant for admin/master.
+           Users (read-only) never process documents, so the whole AI server
+           concern is hidden from their UI. */
+        body.role-user .ai-admin-master { display: none !important; }
+
         /* Buttons */
         .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -262,11 +267,11 @@
                 <span id="userName">—</span>
                 <button class="logout-link" onclick="doLogout()" title="Sign out">⏻ Sign out</button>
             </div>
-            <div class="status">
+            <div class="status ai-admin-master">
                 <div class="status-dot red" id="statusDot"></div>
                 <span class="status-text disconnected" id="statusText">DISCONNECTED</span>
             </div>
-            <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()" style="min-width:180px">Connect to AI Server</button>
+            <button class="btn btn-primary ai-admin-master" id="connectBtn" onclick="toggleConnection()" style="min-width:180px">Connect to AI Server</button>
         </div>
     </div>
 

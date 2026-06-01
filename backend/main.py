@@ -376,7 +376,7 @@ async def init_password_acknowledge():
     return {"deleted": deleted}
 
 # ─── AI Connection ────────────────────────────────────────
-@app.post("/ai/connect", dependencies=[Depends(require_role("master"))])
+@app.post("/ai/connect", dependencies=[Depends(require_role("admin", "master"))])
 async def ai_connect():
     global ai_connected
     cfg = load_config()
@@ -413,7 +413,7 @@ async def ai_connect():
     except Exception as e:
         return {"status": "failed", "error": str(e)}
 
-@app.get("/ai/status", dependencies=[Depends(require_role("master"))])
+@app.get("/ai/status", dependencies=[Depends(require_role("admin", "master"))])
 async def ai_status():
     return {"connected": ai_connected}
 
