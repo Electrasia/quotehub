@@ -96,6 +96,35 @@ def soft_delete_user(user_id: int) -> None:
     finally:
         conn.close()
 
+def set_user_active(user_id: int, active: bool) -> None:
+    """Toggle a user's active flag. Used by Edit form to activate/deactivate."""
+    conn = _connect()
+    try:
+        conn.execute("UPDATE users SET active = ? WHERE id = ?", (1 if active else 0, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+def hard_delete_user(user_id: int) -> None:
+    """Permanently remove a user row. Cannot be undone."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+def count_masters() -> int:
+    """Count ALL masters (active + inactive). Used for hard-delete protection."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'master'"
+        ).fetchone()
+        return row["n"] if row else 0
+    finally:
+        conn.close()
+
 def clear_must_change_password(user_id: int) -> None:
     conn = _connect()
     try:
@@ -190,6 +219,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     role: Optional[str] = Field(default=None, pattern="^(master|admin|user)$")
     new_password: Optional[str] = Field(default=None, min_length=1)
+    active: Optional[bool] = Field(default=None)
 
 class UserOut(BaseModel):
     id: int

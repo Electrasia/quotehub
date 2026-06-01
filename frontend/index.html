@@ -452,6 +452,15 @@
             <!-- Edit User sub-form (hidden by default) -->
             <div id="editUserForm" class="hidden" style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:12px">
                 <h4 style="margin-bottom:8px;font-size:14px" id="editUserTitle">Edit user</h4>
+                <div style="margin-bottom:10px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e0e0e0">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                        <input type="checkbox" id="editActive" style="width:16px;height:16px">
+                        <strong>Account is active</strong>
+                    </label>
+                    <div style="font-size:12px;color:#666;margin-top:4px;margin-left:24px">
+                        Uncheck to deactivate — the user will not be able to log in. You can re-enable it later by checking the box again.
+                    </div>
+                </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                     <label style="font-size:13px">Role:</label>
                     <select id="editRole" style="padding:8px;border:1px solid #ddd;border-radius:6px">
@@ -463,6 +472,24 @@
                     <input type="password" id="editPassword" placeholder="leave blank to keep" style="flex:1;min-width:160px;padding:8px;border:1px solid #ddd;border-radius:6px">
                     <button class="btn btn-success btn-sm" onclick="submitEditUser()">Save</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideEditUserForm()">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Hard Delete confirmation sub-form (hidden by default) -->
+            <div id="hardDeleteForm" class="hidden" style="background:#fdedec;padding:12px;border-radius:8px;margin-bottom:12px;border:1px solid #e74c3c">
+                <h4 style="margin-bottom:8px;font-size:14px;color:#c0392b">⚠ Permanently delete user</h4>
+                <p style="font-size:13px;margin-bottom:8px">
+                    This will <strong>permanently remove</strong> the user from the database.
+                    The username will be freed and can be reused.
+                    <strong>This cannot be undone.</strong>
+                </p>
+                <p style="font-size:13px;margin-bottom:8px">
+                    Type the username <code id="hardDeleteTarget" style="background:#fff;padding:2px 6px;border-radius:3px"></code> to confirm:
+                </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                    <input type="text" id="hardDeleteConfirm" placeholder="type username" style="flex:1;min-width:160px;padding:8px;border:1px solid #e74c3c;border-radius:6px">
+                    <button class="btn btn-danger btn-sm" id="hardDeleteBtn" onclick="submitHardDelete()" disabled>Delete Permanently</button>
+                    <button class="btn btn-secondary btn-sm" onclick="hideHardDeleteForm()">Cancel</button>
                 </div>
             </div>
 
@@ -866,7 +893,7 @@
         }
 
         function renderUsersTable() {
-            const masterCount = usersCache.filter(u => u.role === 'master' && u.active).length;
+            const totalMasterCount = usersCache.filter(u => u.role === 'master').length;
             const container = document.getElementById('usersTable');
             if (usersCache.length === 0) {
                 container.innerHTML = '<div style="padding:20px;text-align:center;color:#888">No users found.</div>';
@@ -877,9 +904,11 @@
                 .replace(/"/g, '&quot;');
             const rows = usersCache.map(u => {
                 const isSelf = currentUser && u.id === currentUser.id;
-                const isLastMaster = u.role === 'master' && u.active && masterCount <= 1;
+                // Hard delete (the only delete option now) is blocked if the target
+                // is the last master of any status. Self-delete is always blocked.
+                const isLastMaster = u.role === 'master' && totalMasterCount <= 1;
                 const canDelete = !isSelf && !isLastMaster;
-                let deleteTitle = 'Delete user';
+                let deleteTitle = 'Permanently delete user';
                 if (isSelf) deleteTitle = 'Cannot delete yourself';
                 else if (isLastMaster) deleteTitle = 'Cannot delete the last master';
                 const status = u.active
@@ -938,12 +967,14 @@
         function showEditUserForm(userId) {
             clearUsersError();
             hideAddUserForm();
+            hideHardDeleteForm();
             const u = usersCache.find(x => x.id === userId);
             if (!u) return;
             editingUserId = userId;
             document.getElementById('editUserTitle').textContent = `Edit user: ${u.username}`;
             document.getElementById('editRole').value = u.role;
             document.getElementById('editPassword').value = '';
+            document.getElementById('editActive').checked = !!u.active;
             document.getElementById('editUserForm').classList.remove('hidden');
         }
         function hideEditUserForm() {
@@ -978,12 +1009,13 @@
             if (!editingUserId) return;
             const role = document.getElementById('editRole').value;
             const newPassword = document.getElementById('editPassword').value;
+            const active = document.getElementById('editActive').checked;
             if (newPassword && newPassword.length < 6) {
                 showUsersError('New password must be at least 6 characters');
                 return;
             }
             try {
-                const body = { role };
+                const body = { role, active };
                 if (newPassword) body.new_password = newPassword;
                 const r = await apiFetch(`/users/${editingUserId}`, {
                     method: 'PATCH',
@@ -1001,20 +1033,58 @@
             }
         }
 
+        // Hard delete state + functions (master only, irreversible)
+        let hardDeletingUserId = null;
+
+        function showHardDeleteForm(userId, username) {
+            clearUsersError();
+            hideAddUserForm();
+            hideEditUserForm();
+            const u = usersCache.find(x => x.id === userId);
+            if (!u) return;
+            hardDeletingUserId = userId;
+            document.getElementById('hardDeleteTarget').textContent = username;
+            document.getElementById('hardDeleteConfirm').value = '';
+            document.getElementById('hardDeleteBtn').disabled = true;
+            document.getElementById('hardDeleteForm').classList.remove('hidden');
+            // Live-validate the confirm input
+            const inp = document.getElementById('hardDeleteConfirm');
+            inp.oninput = () => {
+                document.getElementById('hardDeleteBtn').disabled =
+                    inp.value.trim() !== username;
+            };
+            setTimeout(() => inp.focus(), 50);
+        }
+        function hideHardDeleteForm() {
+            document.getElementById('hardDeleteForm').classList.add('hidden');
+            hardDeletingUserId = null;
+        }
+
+        async function submitHardDelete() {
+            if (!hardDeletingUserId) return;
+            const btn = document.getElementById('hardDeleteBtn');
+            btn.disabled = true;
+            btn.textContent = 'Deleting…';
+            try {
+                const r = await apiFetch(`/users/${hardDeletingUserId}?hard=true`, { method: 'DELETE' });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${r.status}`);
+                }
+                hideHardDeleteForm();
+                await loadUsersTable();
+            } catch (e) {
+                showUsersError(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Delete Permanently';
+            }
+        }
+
         async function confirmDeleteUser(userId, username) {
             clearUsersError();
-            showConfirmPopup(`Delete user "${username}"? This soft-deletes the account.`, async () => {
-                try {
-                    const r = await apiFetch(`/users/${userId}`, { method: 'DELETE' });
-                    if (!r.ok) {
-                        const err = await r.json().catch(() => ({}));
-                        throw new Error(err.detail || `HTTP ${r.status}`);
-                    }
-                    await loadUsersTable();
-                } catch (e) {
-                    showUsersError(e.message);
-                }
-            });
+            // Use the dedicated hard-delete form (with type-to-confirm) instead of a popup
+            showHardDeleteForm(userId, username);
         }
 
         // === Preferences Menu ===

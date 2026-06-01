@@ -318,24 +318,47 @@ async def create_user_route(req: UserCreate):
     return {"id": user_id, "status": "created"}
 
 @app.patch("/users/{user_id}", dependencies=[Depends(require_role("master"))])
-async def update_user_route(user_id: int, req: UserUpdate):
+async def update_user_route(user_id: int, req: UserUpdate, user: dict = Depends(require_role("master"))):
+    target = auth.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Block self-deactivation (would lock the master out)
+    if req.active is False and user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="cannot_deactivate_self")
+    # Block deactivation if it would leave no active master
+    if req.active is False and target["role"] == "master" and auth.count_active_masters() <= 1:
+        raise HTTPException(status_code=400, detail="cannot_deactivate_last_master")
     if req.role:
         auth.update_user_role(user_id, req.role)
     if req.new_password:
         auth.update_user_password(user_id, req.new_password)
+    if req.active is not None:
+        auth.set_user_active(user_id, req.active)
     return {"status": "updated"}
 
 @app.delete("/users/{user_id}", dependencies=[Depends(require_role("master"))])
-async def delete_user_route(user_id: int, user: dict = Depends(require_role("master"))):
+async def delete_user_route(
+    user_id: int,
+    hard: bool = Query(False, description="If true, permanently delete the user instead of deactivating"),
+    user: dict = Depends(require_role("master")),
+):
     if user_id == user["id"]:
         raise HTTPException(status_code=400, detail="cannot_delete_self")
     target = auth.get_user_by_id(user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    if target["role"] == "master" and auth.count_active_masters() <= 1:
-        raise HTTPException(status_code=400, detail="cannot_delete_last_master")
-    auth.soft_delete_user(user_id)
-    return {"status": "deleted"}
+    if hard:
+        # Hard delete: protect against removing the last master of any status
+        if target["role"] == "master" and auth.count_masters() <= 1:
+            raise HTTPException(status_code=400, detail="cannot_delete_last_master")
+        auth.hard_delete_user(user_id)
+        return {"status": "deleted_permanently"}
+    else:
+        # Soft delete: protect against removing the last ACTIVE master
+        if target["role"] == "master" and auth.count_active_masters() <= 1:
+            raise HTTPException(status_code=400, detail="cannot_delete_last_master")
+        auth.soft_delete_user(user_id)
+        return {"status": "deactivated"}
 
 @app.get("/init-password/status", dependencies=[Depends(require_role("master"))])
 async def init_password_status(user: dict = Depends(require_role("master"))):
