@@ -120,7 +120,8 @@ quotehub/
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
 │   └── index.html           # Single-page frontend
-├── data/                    # Runtime data (Docker volume)
+├── data/                    # Runtime data — NOT in the repo (gitignored). Created at
+│   # build time and persists in the `quodb_data` Docker volume at runtime
 │   ├── quotations.db        # SQLite database
 │   ├── archive/             # Archived PDFs
 │   └── temp/                # Temporary uploads
