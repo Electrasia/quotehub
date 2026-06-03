@@ -1,9 +1,8 @@
 {
-  "ai_endpoint": "http://your-ai-server:port/v1/chat/completions",
-  "model": "your-model-name",
+  "ai_endpoint": "",
+  "model": "",
   "timeout": 90,
   "max_retries": 2,
-  "external_url": "http://localhost:8000",
-  "test_prompt": "Respond with OK",
-  "popup_duration": 2
+  "external_url": "",
+  "popup_duration": 3
 }

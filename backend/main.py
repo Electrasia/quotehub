@@ -1131,6 +1131,8 @@ async def serve_frontend():
     return FileResponse(str(FRONTEND_PATH))
 
 # ─── Static Files ─────────────────────────────────────────
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend-static")
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 if __name__ == "__main__":

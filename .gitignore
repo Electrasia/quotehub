@@ -29,6 +29,7 @@ env/
 
 # Docker
 .dockerignore
+GIT_COMMIT
 
 # IDE
 .vscode/

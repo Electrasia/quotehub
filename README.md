@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.020.0 (release) / v0.021.0 (dev) — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.031.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -66,10 +66,8 @@ Open your browser and go to **http://localhost:8000**
 
 ### 5. Connect to AI Server
 
-1. Click **⚙ Preferences** → **Server Connection**
-2. Enter your AI endpoint URL and model name
-3. Click **Save Settings**
-4. Click **Connect to AI Server** in the header
+1. Go to **Settings** (top nav bar) and enter your AI endpoint URL and model name, then click **Save Settings**
+2. Click **Connect to AI Server** in the header
 
 ## Updating the Deployed App
 
@@ -88,9 +86,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.021.0`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.031.0`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.021.0 (a1b2c3d)`
+- The app header displays both: `v0.031.0 (a1b2c3d)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -203,14 +201,25 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 quotehub/
 ├── backend/
 │   ├── main.py              # FastAPI application
+│   ├── auth.py              # Authentication primitives
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
-│   └── index.html           # Single-page frontend
+│   ├── index.html           # HTML structure
+│   ├── style.css            # All styles
+│   └── js/
+│       ├── app.js           # Global state, shared utilities, boot
+│       ├── auth.js          # Login, logout, password, roles
+│       ├── nav.js           # Navigation (Process / Search / Settings)
+│       ├── upload.js        # File upload, processing, review
+│       ├── search.js        # Search, edit, delete, PDF viewer
+│       ├── settings.js      # Settings, AI connection, backup/restore, logs
+│       └── users.js         # User management (master only)
 ├── data/                    # Runtime data — NOT in the repo (gitignored). Created at
 │   # build time and persists in the `quodb_data` Docker volume at runtime
 │   ├── quotations.db        # SQLite database
 │   ├── archive/             # Archived PDFs
 │   └── temp/                # Temporary uploads
+├── rules.md/                # UI system rules (layout, UX principles)
 ├── config.json              # Your personal settings (mounted, not in image)
 ├── config.example.json      # Template for config.json
 ├── deploy.sh                # One-command deploy/update script
@@ -256,9 +265,9 @@ docker-compose up -d
 
 ## Backup & Restore
 
-1. Click **⚙ Preferences** → **Backup / Restore**
-2. **Export**: Downloads a ZIP file with all quotations and PDFs
-3. **Import**: Upload a ZIP or JSON file to restore data
+1. Go to **Settings** (top nav bar)
+2. **Export**: Click **Download Backup** to download a ZIP file with all quotations and PDFs
+3. **Import**: Click **Choose File to Import** to upload a ZIP or JSON file to restore data
 
 ## Troubleshooting
 
