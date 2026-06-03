@@ -4,12 +4,13 @@ import base64
 import sqlite3
 import shutil
 import re
+import secrets
 import zipfile
 import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, Query
+from fastapi import FastAPI, File, UploadFile, Query, Request, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.responses import StreamingResponse
@@ -17,6 +18,14 @@ from pydantic import BaseModel
 import httpx
 from pdf2image import convert_from_path
 from PIL import Image
+from starlette.middleware.sessions import SessionMiddleware
+
+from . import auth
+from .auth import (
+    require_role, LoginRequest, ChangePasswordRequest,
+    UserCreate, UserUpdate, SESSION_USER_ID, DATA_DIR,
+    read_init_password, acknowledge_init_password,
+)
 
 # ─── Version Info ────────────────────────────────────────
 VERSION_PATH = Path(__file__).parent.parent / "VERSION"
@@ -150,22 +159,60 @@ def init_db():
             INSERT INTO quotations_fts(rowid, supplier, quotation_date, items)
             SELECT id, supplier, quotation_date, items FROM quotations
         """)
+    # Users table for auth (master/admin/user)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('master', 'admin', 'user')),
+            must_change_password INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
 init_db()
 
 # ─── App ──────────────────────────────────────────────────
+# ─── Session secret key (persisted in data volume) ────────
+SECRET_KEY_PATH = DATA_DIR / "secret.key"
+
+def _get_or_create_secret_key():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if SECRET_KEY_PATH.exists():
+        return SECRET_KEY_PATH.read_text().strip()
+    key = secrets.token_hex(32)
+    SECRET_KEY_PATH.write_text(key)
+    try:
+        os.chmod(SECRET_KEY_PATH, 0o600)
+    except OSError:
+        pass
+    return key
+
+SECRET_KEY = _get_or_create_secret_key()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = load_config()
     print(f"QuoDB starting. AI endpoint: {cfg.get('ai_endpoint', 'NOT SET')}")
     print(f"QuoDB starting. AI model: {cfg.get('model', 'NOT SET')}")
     print(f"QuoDB starting. AI connected: {ai_connected}")
+    auth.bootstrap_master()
     load_upload_state()
     yield
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie="quotahub_session",
+    same_site="lax",
+    https_only=False,
+)
 
 # ─── Models ───────────────────────────────────────────────
 class ProcessRequest(BaseModel):
@@ -184,11 +231,13 @@ class ConfigRequest(BaseModel):
     popup_duration: int = 3
 
 # ─── Config Endpoints ─────────────────────────────────────
-@app.get("/config")
+# GET is allowed for admin+master (admin can READ settings to populate the
+# Settings modal). POST is master-only (only master can change AI settings).
+@app.get("/config", dependencies=[Depends(require_role("admin", "master"))])
 async def get_config_route():
     return get_config_data()
 
-@app.post("/config")
+@app.post("/config", dependencies=[Depends(require_role("master"))])
 async def update_config(req: ConfigRequest):
     cfg = get_config_data()
     cfg["ai_endpoint"] = req.ai_endpoint
@@ -208,8 +257,126 @@ async def get_version():
         "commit": APP_COMMIT
     }
 
+# ─── Auth Endpoints ───────────────────────────────────────
+@app.post("/auth/login")
+async def login(req: LoginRequest, request: Request):
+    user = auth.get_user_by_username(req.username)
+    if not user or not auth.verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if not user.get("active"):
+        raise HTTPException(status_code=401, detail="Account is disabled")
+    request.session[SESSION_USER_ID] = user["id"]
+    auth.record_login(user["id"])
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "must_change_password": user["must_change_password"],
+    }
+
+@app.post("/auth/logout")
+async def logout(request: Request):
+    request.session.pop(SESSION_USER_ID, None)
+    return {"status": "logged_out"}
+
+@app.get("/auth/me")
+async def me(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "must_change_password": user["must_change_password"],
+    }
+
+@app.post("/auth/change-password")
+async def change_password(req: ChangePasswordRequest, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not auth.verify_password(req.old_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    auth.update_user_password(user["id"], req.new_password)
+    auth.clear_must_change_password(user["id"])
+    # If the init file still exists, auto-delete it now that the master
+    # has set a real password.
+    acknowledge_init_password()
+    return {"status": "changed"}
+
+# ─── User Management (master only) ────────────────────────
+@app.get("/users", dependencies=[Depends(require_role("master"))])
+async def list_users_route():
+    return auth.list_users()
+
+@app.post("/users", dependencies=[Depends(require_role("master"))])
+async def create_user_route(req: UserCreate):
+    if auth.get_user_by_username(req.username):
+        raise HTTPException(status_code=400, detail="Username already exists")
+    user_id = auth.create_user(req.username, req.password, req.role)
+    return {"id": user_id, "status": "created"}
+
+@app.patch("/users/{user_id}", dependencies=[Depends(require_role("master"))])
+async def update_user_route(user_id: int, req: UserUpdate, user: dict = Depends(require_role("master"))):
+    target = auth.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Block self-deactivation (would lock the master out)
+    if req.active is False and user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="cannot_deactivate_self")
+    # Block deactivation if it would leave no active master
+    if req.active is False and target["role"] == "master" and auth.count_active_masters() <= 1:
+        raise HTTPException(status_code=400, detail="cannot_deactivate_last_master")
+    if req.role:
+        auth.update_user_role(user_id, req.role)
+    if req.new_password:
+        auth.update_user_password(user_id, req.new_password)
+    if req.active is not None:
+        auth.set_user_active(user_id, req.active)
+    return {"status": "updated"}
+
+@app.delete("/users/{user_id}", dependencies=[Depends(require_role("master"))])
+async def delete_user_route(
+    user_id: int,
+    hard: bool = Query(False, description="If true, permanently delete the user instead of deactivating"),
+    user: dict = Depends(require_role("master")),
+):
+    if user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="cannot_delete_self")
+    target = auth.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if hard:
+        # Hard delete: protect against removing the last master of any status
+        if target["role"] == "master" and auth.count_masters() <= 1:
+            raise HTTPException(status_code=400, detail="cannot_delete_last_master")
+        auth.hard_delete_user(user_id)
+        return {"status": "deleted_permanently"}
+    else:
+        # Soft delete: protect against removing the last ACTIVE master
+        if target["role"] == "master" and auth.count_active_masters() <= 1:
+            raise HTTPException(status_code=400, detail="cannot_delete_last_master")
+        auth.soft_delete_user(user_id)
+        return {"status": "deactivated"}
+
+@app.get("/init-password/status", dependencies=[Depends(require_role("master"))])
+async def init_password_status(user: dict = Depends(require_role("master"))):
+    # Only callable when the master still needs to change the password
+    if not user["must_change_password"]:
+        raise HTTPException(status_code=404, detail="Not available")
+    password = read_init_password()
+    if password is None:
+        raise HTTPException(status_code=404, detail="No init password file")
+    return {"password": password}
+
+@app.post("/init-password/acknowledge", dependencies=[Depends(require_role("master"))])
+async def init_password_acknowledge():
+    deleted = acknowledge_init_password()
+    return {"deleted": deleted}
+
 # ─── AI Connection ────────────────────────────────────────
-@app.post("/ai/connect")
+@app.post("/ai/connect", dependencies=[Depends(require_role("admin", "master"))])
 async def ai_connect():
     global ai_connected
     cfg = load_config()
@@ -246,12 +413,12 @@ async def ai_connect():
     except Exception as e:
         return {"status": "failed", "error": str(e)}
 
-@app.get("/ai/status")
+@app.get("/ai/status", dependencies=[Depends(require_role("admin", "master"))])
 async def ai_status():
     return {"connected": ai_connected}
 
 # ─── Upload ───────────────────────────────────────────────
-@app.post("/upload")
+@app.post("/upload", dependencies=[Depends(require_role("admin", "master"))])
 async def upload(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         return JSONResponse(status_code=400, content={"error": "Only PDF files allowed"})
@@ -286,7 +453,7 @@ async def upload(file: UploadFile = File(...)):
     file_index = len(uploaded_files) - 1
     return {"filename": file.filename, "status": "pending", "pages": len(page_images), "file_index": file_index}
 
-@app.post("/clear")
+@app.post("/clear", dependencies=[Depends(require_role("admin", "master"))])
 async def clear_files():
     global uploaded_files
     uploaded_files = []
@@ -294,7 +461,7 @@ async def clear_files():
     return {"status": "cleared"}
 
 # ─── Next File (PDF preview) ──────────────────────────────
-@app.get("/next-file")
+@app.get("/next-file", dependencies=[Depends(require_role("admin", "master"))])
 async def next_file(file_index: int = 0):
     if file_index >= len(uploaded_files):
         return {"pages": []}
@@ -467,7 +634,7 @@ CRITICAL RULES:
 
     return None, "All retries exhausted"
 
-@app.post("/process-all")
+@app.post("/process-all", dependencies=[Depends(require_role("admin", "master"))])
 async def process_all(req: ProcessRequest):
     """Process ALL pages of a file sequentially, merge results."""
     global ai_connected
@@ -532,7 +699,7 @@ async def process_all(req: ProcessRequest):
     save_upload_state()
     return {"status": "success", "data": merged, "pages_processed": file_entry["num_pages"], "errors": errors}
 
-@app.post("/process-stream")
+@app.post("/process-stream", dependencies=[Depends(require_role("admin", "master"))])
 async def process_stream(req: ProcessRequest):
     """Process ALL pages with SSE streaming progress updates."""
     import asyncio
@@ -613,7 +780,7 @@ async def process_stream(req: ProcessRequest):
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 # ─── Confirm / Save ───────────────────────────────────────
-@app.post("/confirm")
+@app.post("/confirm", dependencies=[Depends(require_role("admin", "master"))])
 async def confirm(req: ConfirmRequest):
     data = req.data
     items = data.get("items", [])
@@ -650,7 +817,7 @@ async def confirm(req: ConfirmRequest):
     return {"status": "saved", "id": last_id}
 
 # ─── Skip ─────────────────────────────────────────────────
-@app.post("/skip")
+@app.post("/skip", dependencies=[Depends(require_role("admin", "master"))])
 async def skip(req: ProcessRequest):
     uploaded_files[req.file_index]["status"] = "skipped"
     save_upload_state()
@@ -663,7 +830,7 @@ class UpdateRequest(BaseModel):
     id: int
     data: dict
 
-@app.post("/delete")
+@app.post("/delete", dependencies=[Depends(require_role("admin", "master"))])
 async def delete(req: DeleteRequest):
     if not req.ids:
         return {"status": "nothing to delete"}
@@ -679,7 +846,7 @@ async def delete(req: DeleteRequest):
     conn.close()
     return {"status": "deleted", "count": len(req.ids)}
 
-@app.post("/update")
+@app.post("/update", dependencies=[Depends(require_role("admin", "master"))])
 async def update_quotation(req: UpdateRequest):
     data = req.data
     items = data.get("items", [])
@@ -695,7 +862,7 @@ async def update_quotation(req: UpdateRequest):
     return {"status": "updated"}
 
 # ─── Export / Import ──────────────────────────────────────
-@app.get("/export")
+@app.get("/export", dependencies=[Depends(require_role("admin", "master"))])
 async def export_db():
     """Export all quotations and archived PDFs as a zip file."""
     from fastapi.responses import StreamingResponse
@@ -749,7 +916,7 @@ async def export_db():
             os.unlink(zip_path)
         raise
 
-@app.post("/import/upload")
+@app.post("/import/upload", dependencies=[Depends(require_role("admin", "master"))])
 async def import_upload(file: UploadFile = File(...)):
     """Import quotations from a JSON or ZIP file."""
     content = await file.read()
@@ -811,7 +978,7 @@ async def import_upload(file: UploadFile = File(...)):
     return {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
 
 # ─── Search ───────────────────────────────────────────────
-@app.get("/search")
+@app.get("/search", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def search(q: str = ""):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -886,7 +1053,7 @@ async def search(q: str = ""):
     return results
 
 # ─── Duplicate Check ──────────────────────────────────────
-@app.get("/check-duplicate")
+@app.get("/check-duplicate", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def check_duplicate(filename: str = ""):
     if not filename:
         return {"exists": False}
@@ -899,7 +1066,7 @@ async def check_duplicate(filename: str = ""):
     return {"exists": exists, "in_database": db_count > 0, "filename": filename}
 
 # ─── View archived PDF ────────────────────────────────────
-@app.get("/archive/{filename}")
+@app.get("/archive/{filename}", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def serve_archive(filename: str):
     filepath = (ARCHIVE_DIR / filename).resolve()
     # Prevent path traversal: ensure resolved path is within ARCHIVE_DIR
@@ -949,7 +1116,7 @@ root_logger.addHandler(mem_handler)
 sys.stdout = PrintCapture(sys.stdout)
 sys.stderr = PrintCapture(sys.stderr)
 
-@app.get("/logs")
+@app.get("/logs", dependencies=[Depends(require_role("admin", "master"))])
 async def get_logs(level: str = "all"):
     lines = log_buffer if log_buffer else ["No logs captured yet. Logs are captured from app startup."]
     if level == "errors":

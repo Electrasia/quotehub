@@ -1,7 +1,8 @@
 #!/bin/bash
 # QuoteHub deploy script
 # Run this from inside the cloned quotehub repository on the deployed PC.
-# Pulls the latest main, rebuilds the image with the current commit hash baked in,
+# Pulls the latest from the branch you're currently on (main for production,
+# dev for testing), rebuilds the image with the current commit hash baked in,
 # and restarts the container. All data (config.json + database) persists via mounts.
 
 set -e
@@ -32,9 +33,12 @@ if [ ! -f config.json ]; then
     fi
 fi
 
-# Pull latest from main
-echo ">> Pulling latest from origin/main..."
-git pull origin main
+# Pull latest from the current branch (best-effort; skip if local is ahead of origin)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+echo ">> Pulling latest from origin/$CURRENT_BRANCH..."
+if ! git pull --ff-only origin "$CURRENT_BRANCH" 2>/dev/null; then
+    echo "   (local is ahead of origin/$CURRENT_BRANCH, skipping pull — building local HEAD)"
+fi
 
 # Get the current commit hash (local, no network needed)
 GIT_COMMIT=$(git rev-parse --short HEAD)

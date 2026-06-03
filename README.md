@@ -96,6 +96,92 @@ This will:
   - `MINOR` — new features (backwards compatible)
   - `PATCH` — bug fixes
 
+## Authentication
+
+QuoteHub has a 3-role authentication system (introduced in `0.030.0`). All access — except the public pages (login, version, and PDF/image serving) — requires a session cookie.
+
+### Roles
+
+| Role | Search | Upload / Process / Edit / Delete | AI Settings | User Management |
+|------|--------|-----------------------------------|-------------|----------------|
+| **user** | ✓ | — | — | — |
+| **admin** | ✓ | ✓ | view only (fields disabled) | — |
+| **master** | ✓ | ✓ | ✓ | ✓ |
+
+A short summary:
+
+- **user** — read-only access. Can search and view PDFs. Cannot upload, edit, or change settings.
+- **admin** — day-to-day operations. Can upload, process, edit, delete, backup/restore, and view all settings. Cannot change the AI server endpoint / model / timeout — those are master-only.
+- **master** — full access, including AI Settings and user management.
+
+### First-Run Master Password
+
+On the very first startup (or after the database is wiped), QuoteHub automatically creates a `master` user and generates a random 16-character password. The password is:
+
+1. **Printed once to the container logs.** Run `docker logs quodb` (or `docker compose logs`) immediately after the first start and look for the `=== INITIAL MASTER PASSWORD ===` banner.
+2. **Written to `data/init_password.txt` inside the Docker volume** with `chmod 600`. The file is auto-deleted the first time the master changes the password.
+
+Log in as `master` with that password, then **immediately change the password** (you will be forced to).
+
+### Where to Find the Initial Master Password (Recovery)
+
+If you missed the password when it was first generated, recover it from either the file or the logs. Try them in this order — the file is the more reliable of the two.
+
+**1. Read the file inside the container** (easiest, works while the container is running):
+
+```bash
+docker exec quodb cat /app/data/init_password.txt
+```
+
+If the file exists, it prints the password and you can log in. If the command says *"No such file or directory"*, the file was already auto-deleted (which means the master has already changed the password at some point) — skip to step 3.
+
+**2. Check the container logs:**
+
+```bash
+docker logs quodb 2>&1 | grep -A2 "INITIAL MASTER PASSWORD"
+```
+
+This works only if the container has not been restarted since the first startup (the banner is in the startup logs, not in the access logs). If `grep` finds nothing, the logs have rolled past it — skip to step 3.
+
+**3. If both the file and the logs are gone**, you have to follow the [Reset Master Password](#reset-master-password) steps below. This is destructive: it removes all user accounts (but keeps all quotations and PDFs intact), then the next startup generates a brand-new master password.
+
+### Forced Password Change (`must_change_password`)
+
+When a user is created (or when the master logs in for the first time) with a temporary password, the app blocks normal access and shows a **Change Password** form. The form requires:
+
+- The current (temporary) password
+- A new password (minimum 6 characters)
+- A confirmation of the new password
+
+The app only becomes usable after this change succeeds.
+
+### Server-Connection (AI Settings) Lock for Admin
+
+When an **admin** opens **Settings → Server Connection**, the AI fields (endpoint, model, external URL, timeout, max retries, popup duration) are visible but disabled. Hovering each field shows the tooltip *"Only Master can change AI settings"*. The **Save** button is also disabled. Even if the disabled state is bypassed via dev tools, the server enforces the same rule — `POST /config` requires the **master** role and returns `403` otherwise.
+
+### Reset Master Password
+
+If the master password is truly lost (file deleted, logs gone, no other master to ask), recover access by deleting all `users` rows in the SQLite database and restarting the container. The next startup will detect that no master exists and generate a new random password.
+
+```bash
+# 1. Stop the container
+docker stop quodb
+
+# 2. Remove all users (preserves quotations + PDFs)
+docker run --rm -v quodb_data:/data alpine sh -c \
+  'apk add --no-cache sqlite && sqlite3 /data/quotations.db "DELETE FROM users;"'
+
+# 3. Start the container again
+docker start quodb
+
+# 4. Read the new password from the logs
+docker logs quodb 2>&1 | grep -A1 "INITIAL MASTER PASSWORD"
+```
+
+> **What this does:** it only deletes the `users` table — no quotations or PDFs are touched. The new password is generated and printed exactly as on a first run; log in as `master` and change it immediately.
+>
+> **Side effect:** any `admin` and `user` accounts you had created are also deleted. You will have to re-create them from the Users Management panel after the new master is set up.
+
 ## Configuration
 
 The `config.json` file stores your settings and is mounted as a Docker volume so it persists across rebuilds.
