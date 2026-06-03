@@ -30,6 +30,7 @@ env/
 # Docker
 .dockerignore
 GIT_COMMIT
+.env
 
 # IDE
 .vscode/
