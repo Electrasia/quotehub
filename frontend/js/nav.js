@@ -2,6 +2,10 @@
 let currentStep = 1;
 
 function goToStep(step) {
+    // Prevent navigating to step 2 (queue) when there are no files
+    if (step === 2 && uploadedFiles.length === 0) {
+        step = 1;
+    }
     currentStep = step;
     // Update step indicators
     for (let i = 1; i <= 4; i++) {

@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.031.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.031.1 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 

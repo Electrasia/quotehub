@@ -36,6 +36,7 @@ async function handleFiles(files) {
         uploadedFiles.push(data);
         renderFileList();
     }
+    updateStepClickability();
 }
 
 function renderFileList() {
@@ -64,10 +65,14 @@ function renderFileList() {
                 <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, 1)" ${i === uploadedFiles.length - 1 ? 'disabled' : ''} title="Move down" style="padding:2px 6px;font-size:11px">▼</button>
             </span>
         ` : '';
+        const canRemove = f.status === 'pending' || f.status === 'error' || f.status === 'skipped';
+        const removeHtml = canRemove
+            ? `<button class="btn btn-sm btn-danger" onclick="removeFile(${i})" title="Remove" style="padding:2px 6px;font-size:11px">✕</button>`
+            : '';
         return `
             <div class="file-item">
                 <span class="file-name">${moveHtml}${dupBadge}${f.filename} (${f.pages} page${f.pages !== 1 ? 's' : ''})</span>
-                ${statusHtml}
+                <span style="display:flex;align-items:center;gap:8px">${statusHtml} ${removeHtml}</span>
             </div>
         `;
     }).join('');
@@ -90,10 +95,39 @@ function moveFile(index, direction) {
     renderFileList();
 }
 
+async function removeFile(index) {
+    const file = uploadedFiles[index];
+    if (!file) return;
+    // Remove from backend if it has a backend index
+    if (file.backendIndex !== undefined) {
+        try { await fetch('/clear', { method: 'POST' }); } catch (e) { /* ignore */ }
+    }
+    uploadedFiles.splice(index, 1);
+    renderFileList();
+    updateStepClickability();
+    if (uploadedFiles.length === 0) {
+        goToStep(1);
+    }
+}
+
 async function clearFiles() {
     await fetch('/clear', { method: 'POST' });
     uploadedFiles = [];
     renderFileList();
+    updateStepClickability();
+    goToStep(1);
+}
+
+function updateStepClickability() {
+    const hasFiles = uploadedFiles.length > 0;
+    const step2 = document.getElementById('step2');
+    if (hasFiles) {
+        step2.classList.add('clickable');
+        step2.onclick = () => goToStep(2);
+    } else {
+        step2.classList.remove('clickable');
+        step2.onclick = null;
+    }
 }
 
 // ─── Process All Pages (streaming progress) ──────────────────
