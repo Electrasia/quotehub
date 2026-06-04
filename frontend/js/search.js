@@ -96,7 +96,7 @@ function renderSearchResults() {
             <th class="${sortClass('date')}" style="text-align:right" onclick="sortBy('date')">Date</th>
             <th class="${sortClass('supplier')}" onclick="sortBy('supplier')">Supplier</th>
             <th class="${sortClass('currency')}" onclick="sortBy('currency')">Currency</th>
-            <th style="text-align:center">Pg</th>
+            <th class="${sortClass('_document_type')}" onclick="sortBy('_document_type')" style="text-align:center">Type</th>
         </tr>`;
 
     const renderItem = (item) => {
@@ -114,7 +114,7 @@ function renderSearchResults() {
         ];
         return `<tr data-filename="${fn}" style="cursor:pointer" title="Double-click to view PDF">` +
             cells.map(c => `<td${c.className ? ` class="${c.className}"` : ''}${c.style ? ` style="${c.style}"` : ''}>${c.html !== undefined ? c.html : escapeHtml(c.text || '')}</td>`).join('') +
-            `<td style="text-align:center"><span class="view-pdf-link" style="color:#3498db;cursor:pointer;text-decoration:underline">${escapeHtml(String(item.page ?? '-'))}</span></td>` +
+            `<td style="text-align:center">${escapeHtml(item._document_type || '-')}</td>` +
             `</tr>`;
     };
 
@@ -128,10 +128,6 @@ function renderSearchResults() {
     `;
     container.querySelectorAll('tr[data-filename]').forEach(tr => {
         tr.ondblclick = () => viewPdf(tr.dataset.filename);
-    });
-    container.querySelectorAll('span.view-pdf-link').forEach(span => {
-        const tr = span.closest('tr');
-        span.onclick = (e) => { e.stopPropagation(); viewPdf(tr.dataset.filename); };
     });
 }
 
@@ -154,7 +150,7 @@ async function searchQuotations() {
     let allItems = [];
     results.forEach(r => {
         (r.items || []).forEach(item => {
-            allItems.push({ ...item, _id: r.id, _filename: r.filename, _supplier: r.supplier || '', _date: r.quotation_date || '' });
+            allItems.push({ ...item, _id: r.id, _filename: r.filename, _supplier: r.supplier || '', _date: r.quotation_date || '', _document_type: r.document_type || '' });
         });
     });
 
