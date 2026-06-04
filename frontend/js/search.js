@@ -5,6 +5,16 @@ let sortDir = 'asc'; // asc or desc
 let lastSearchItems = [];
 let searchDebounceTimer = null;
 
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function debounceSearch() {
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => searchQuotations(), 300);
@@ -89,18 +99,24 @@ function renderSearchResults() {
             <th style="text-align:center">Pg</th>
         </tr>`;
 
-    const renderItem = (item) => `
-        <tr ondblclick="viewPdf('${item._filename}')" style="cursor:pointer" title="Double-click to view PDF">
-            <td><input type="checkbox" class="search-cb" data-id="${item._id}" data-file="${item._filename}" onchange="updateSelection()"></td>
-            <td>${item.brand || ''}</td>
-            <td>${item.model || ''}</td>
-            <td style="word-wrap:break-word;max-width:300px">${item.description || ''}</td>
-            <td class="text-right nowrap-cell">${item.unit_price || item.price || ''}</td>
-            <td class="text-right nowrap-cell">${item.date || ''}</td>
-            <td style="word-wrap:break-word;max-width:150px">${item.supplier || item._supplier || ''}</td>
-            <td class="nowrap-cell">${item.currency || ''}</td>
-            <td style="text-align:center"><span style="color:#3498db;cursor:pointer;text-decoration:underline" onclick="event.stopPropagation(); viewPdf('${item._filename}')">${item.page || '-'}</span></td>
-        </tr>`;
+    const renderItem = (item) => {
+        const fn = escapeHtml(item._filename || '');
+        const id = escapeHtml(String(item._id ?? ''));
+        const cells = [
+            { html: `<input type="checkbox" class="search-cb" data-id="${id}" data-file="${fn}" data-filename="${fn}" onchange="updateSelection()">` },
+            { text: item.brand },
+            { text: item.model },
+            { html: escapeHtml(item.description || ''), style: 'word-wrap:break-word;max-width:300px' },
+            { text: item.unit_price || item.price, className: 'text-right nowrap-cell' },
+            { text: item.date, className: 'text-right nowrap-cell' },
+            { html: escapeHtml(item.supplier || item._supplier || ''), style: 'word-wrap:break-word;max-width:150px' },
+            { text: item.currency, className: 'nowrap-cell' },
+        ];
+        return `<tr data-filename="${fn}" style="cursor:pointer" title="Double-click to view PDF">` +
+            cells.map(c => `<td${c.className ? ` class="${c.className}"` : ''}${c.style ? ` style="${c.style}"` : ''}>${c.html !== undefined ? c.html : escapeHtml(c.text || '')}</td>`).join('') +
+            `<td style="text-align:center"><span class="view-pdf-link" style="color:#3498db;cursor:pointer;text-decoration:underline">${escapeHtml(String(item.page ?? '-'))}</span></td>` +
+            `</tr>`;
+    };
 
     container.innerHTML = `
         <div style="background:#fff;border-radius:12px;overflow:hidden">
@@ -110,6 +126,13 @@ function renderSearchResults() {
             </table>
         </div>
     `;
+    container.querySelectorAll('tr[data-filename]').forEach(tr => {
+        tr.ondblclick = () => viewPdf(tr.dataset.filename);
+    });
+    container.querySelectorAll('span.view-pdf-link').forEach(span => {
+        const tr = span.closest('tr');
+        span.onclick = (e) => { e.stopPropagation(); viewPdf(tr.dataset.filename); };
+    });
 }
 
 async function searchQuotations() {
@@ -213,13 +236,13 @@ function editAddRow(item = {}) {
     const tr = document.createElement('tr');
     const supplierVal = item.supplier || document.getElementById('editSupplier').value || '';
     tr.innerHTML = `
-        <td><input type="text" value="${item.brand || ''}" placeholder="Brand"></td>
-        <td><input type="text" value="${item.model || ''}" placeholder="Model"></td>
-        <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${item.description || ''}</textarea></td>
-        <td><input type="text" class="price-input" value="${item.unit_price || item.price || ''}" placeholder="0.00"></td>
-        <td><input type="text" class="text-right" value="${item.date || ''}" placeholder="YYYY-MM-DD"></td>
-        <td><input type="text" value="${supplierVal}" placeholder="Supplier"></td>
-        <td><input type="text" value="${item.currency || ''}" placeholder="Currency"></td>
+        <td><input type="text" value="${escapeHtml(item.brand || '')}" placeholder="Brand"></td>
+        <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"></td>
+        <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${escapeHtml(item.description || '')}</textarea></td>
+        <td><input type="text" class="price-input" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
+        <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD"></td>
+        <td><input type="text" value="${escapeHtml(supplierVal)}" placeholder="Supplier"></td>
+        <td><input type="text" value="${escapeHtml(item.currency || '')}" placeholder="Currency"></td>
         <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">✕</button></td>
     `;
     tbody.appendChild(tr);

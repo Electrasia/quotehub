@@ -2,6 +2,16 @@
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
 uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
 uploadArea.addEventListener('drop', (e) => {
@@ -71,7 +81,7 @@ function renderFileList() {
             : '';
         return `
             <div class="file-item">
-                <span class="file-name">${moveHtml}${dupBadge}${f.filename} (${f.pages} page${f.pages !== 1 ? 's' : ''})</span>
+                <span class="file-name">${moveHtml}${dupBadge}${escapeHtml(f.filename)} (${escapeHtml(String(f.pages))} page${f.pages !== 1 ? 's' : ''})</span>
                 <span style="display:flex;align-items:center;gap:8px">${statusHtml} ${removeHtml}</span>
             </div>
         `;
@@ -327,13 +337,13 @@ function addRow(item = {}) {
     const tr = document.createElement('tr');
     const supplierVal = item.supplier || document.getElementById('supplierName').value || '';
     tr.innerHTML = `
-        <td><input type="text" value="${item.brand || ''}" placeholder="Brand"></td>
-        <td><input type="text" value="${item.model || ''}" placeholder="Model"></td>
-        <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${item.description || ''}</textarea></td>
-        <td><input type="text" class="price-input" value="${item.unit_price || item.price || ''}" placeholder="0.00"></td>
-        <td><input type="text" class="text-right" value="${item.date || ''}" placeholder="YYYY-MM-DD"></td>
-        <td><input type="text" value="${supplierVal}" placeholder="Supplier"></td>
-        <td><input type="text" value="${item.currency || ''}" placeholder="Currency"></td>
+        <td><input type="text" value="${escapeHtml(item.brand || '')}" placeholder="Brand"></td>
+        <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"></td>
+        <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${escapeHtml(item.description || '')}</textarea></td>
+        <td><input type="text" class="price-input" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
+        <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD"></td>
+        <td><input type="text" value="${escapeHtml(supplierVal)}" placeholder="Supplier"></td>
+        <td><input type="text" value="${escapeHtml(item.currency || '')}" placeholder="Currency"></td>
         <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount()">✕</button></td>
     `;
     tbody.appendChild(tr);
