@@ -38,6 +38,12 @@ function updateSelection() {
     } else {
         bar.classList.add('hidden');
     }
+    // Edit button: enabled only when exactly 1 row is selected
+    const editBtn = bar.querySelector('button[onclick="editSelected()"]');
+    if (editBtn) {
+        editBtn.disabled = (count !== 1);
+        editBtn.title = (count === 1) ? 'Edit selected item' : 'Select exactly one item to edit';
+    }
 }
 
 function sortBy(field) {
