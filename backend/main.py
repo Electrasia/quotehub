@@ -1154,12 +1154,19 @@ async def check_duplicate(filename: str = ""):
 # ─── View archived PDF ────────────────────────────────────
 @app.get("/archive/{filename}", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def serve_archive(filename: str):
-    filepath = (ARCHIVE_DIR / filename).resolve()
+    # Check archive first
+    archive_path = (ARCHIVE_DIR / filename).resolve()
     # Prevent path traversal: ensure resolved path is within ARCHIVE_DIR
-    if not filepath.is_relative_to(ARCHIVE_DIR.resolve()):
+    if not archive_path.is_relative_to(ARCHIVE_DIR.resolve()):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
-    if filepath.exists():
-        return FileResponse(str(filepath), media_type="application/pdf")
+    if archive_path.exists():
+        return FileResponse(str(archive_path), media_type="application/pdf")
+    # Fallback: check temp (for files in review phase, not yet saved)
+    temp_path = (UPLOAD_DIR / filename).resolve()
+    if not temp_path.is_relative_to(UPLOAD_DIR.resolve()):
+        return JSONResponse(status_code=403, content={"error": "Access denied"})
+    if temp_path.exists():
+        return FileResponse(str(temp_path), media_type="application/pdf")
     return JSONResponse(status_code=404, content={"error": "File not found"})
 
 # ─── Logs ─────────────────────────────────────────────────
