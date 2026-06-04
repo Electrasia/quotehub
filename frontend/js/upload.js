@@ -261,12 +261,22 @@ function cancelProcessing() {
 function showReview(filename) {
     document.getElementById('reviewFilename').textContent = filename;
     document.getElementById('supplierName').value = extractedData.supplier || '';
+    document.getElementById('documentType').value = extractedData.document_type || 'unknown';
+    updateDocumentTypeWarning();
     const tbody = document.getElementById('itemsTable');
     tbody.innerHTML = '';
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
     updateReviewPdf();
     goToStep(4);
+}
+
+function updateDocumentTypeWarning() {
+    const val = document.getElementById('documentType').value;
+    const warn = document.getElementById('docTypeWarning');
+    warn.style.display = (val === 'unknown') ? 'inline' : 'none';
+    const saveBtn = document.querySelector('button[onclick="confirmSave()"]');
+    if (saveBtn) saveBtn.disabled = (val === 'unknown');
 }
 
 function updateReviewPdf() {
@@ -371,6 +381,7 @@ function getEditedData() {
     });
     return {
         supplier: document.getElementById('supplierName').value,
+        document_type: document.getElementById('documentType').value,
         items: items
     };
 }

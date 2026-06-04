@@ -170,6 +170,15 @@
                                     <label>Supplier</label>
                                     <input type="text" id="supplierName" value="">
                                 </div>
+                                <div class="meta-item">
+                                    <label>Document Type <span id="docTypeWarning" style="color:#e67e22;font-size:12px;display:none">⚠ Please select</span></label>
+                                    <select id="documentType" onchange="updateDocumentTypeWarning()">
+                                        <option value="unknown">Unknown (not classified)</option>
+                                        <option value="QUO">QUO — Quotation</option>
+                                        <option value="PO">PO — Purchase Order</option>
+                                        <option value="PL">PL — Price List</option>
+                                    </select>
+                                </div>
                             </div>
 
                             <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
@@ -438,6 +447,15 @@
             <div style="margin-bottom:12px">
                 <label style="font-size:13px;color:#666">Supplier</label>
                 <input type="text" id="editSupplier" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-top:4px">
+            </div>
+            <div style="margin-bottom:12px">
+                <label style="font-size:13px;color:#666">Document Type <span id="editDocTypeWarning" style="color:#e67e22;font-size:12px;display:none">⚠ Please select</span></label>
+                <select id="editDocumentType" onchange="updateEditDocumentTypeWarning()" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-top:4px">
+                    <option value="unknown">Unknown (not classified)</option>
+                    <option value="QUO">QUO — Quotation</option>
+                    <option value="PO">PO — Purchase Order</option>
+                    <option value="PL">PL — Price List</option>
+                </select>
             </div>
             <div style="overflow-x:auto">
                 <table>

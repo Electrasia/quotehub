@@ -188,10 +188,20 @@ async function editSelected() {
     if (!quotation) { showBriefPopup('Quotation not found.'); return; }
 
     document.getElementById('editSupplier').value = quotation.supplier || '';
+    document.getElementById('editDocumentType').value = quotation.document_type || 'unknown';
+    updateEditDocumentTypeWarning();
     const tbody = document.getElementById('editItemsTable');
     tbody.innerHTML = '';
     (quotation.items || []).forEach(item => editAddRow(item));
     document.getElementById('editModal').classList.add('active');
+}
+
+function updateEditDocumentTypeWarning() {
+    const val = document.getElementById('editDocumentType').value;
+    const warn = document.getElementById('editDocTypeWarning');
+    warn.style.display = (val === 'unknown') ? 'inline' : 'none';
+    const saveBtn = document.querySelector('button[onclick="saveEdit()"]');
+    if (saveBtn) saveBtn.disabled = (val === 'unknown');
 }
 
 function editFindAndReplace() {
@@ -265,6 +275,7 @@ async function saveEdit() {
     });
     const data = {
         supplier: document.getElementById('editSupplier').value,
+        document_type: document.getElementById('editDocumentType').value,
         items: items
     };
     try {

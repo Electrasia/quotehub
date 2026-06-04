@@ -122,9 +122,14 @@ def init_db():
             supplier TEXT,
             quotation_date TEXT,
             items TEXT,
+            document_type TEXT DEFAULT 'unknown',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Migration: add document_type column to existing tables
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(quotations)").fetchall()]
+    if "document_type" not in cols:
+        conn.execute("ALTER TABLE quotations ADD COLUMN document_type TEXT DEFAULT 'unknown'")
     # Create FTS virtual table for fast search
     conn.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS quotations_fts USING fts5(
@@ -527,10 +532,25 @@ async def call_ai(image_paths, page_num, file_stem):
     if not endpoint or not model:
         return None, "AI endpoint or model not configured"
 
-    prompt = f"""Analyze this supplier quotation image. Extract ALL information and return ONLY valid JSON.
+    prompt = f"""Analyze this document image. Classify the document type AND extract ALL information. Return ONLY valid JSON.
+
+DOCUMENT TYPE CLASSIFICATION (REQUIRED):
+You MUST classify the document as ONE of:
+- "QUO" = Quotation (price proposal from supplier to client)
+- "PO"  = Purchase Order (order issued by client to supplier)
+- "PL"  = Price List (catalog or list of products with prices)
+
+Rules:
+- If the document contains "Purchase Order", "PO", or similar → classify as PO
+- If the document is clearly a supplier quotation or proposal → classify as QUO
+- If the document is a list of multiple items with prices but not a specific transaction → classify as PL
+- If uncertain, return "unknown"
+
+Return ONLY one of: "QUO", "PO", "PL", or "unknown" for document_type.
 
 Return this exact structure:
 {{
+  "document_type": "QUO" | "PO" | "PL" | "unknown",
   "supplier": "full company name issuing this quotation",
   "items": [
     {{
@@ -549,6 +569,7 @@ CRITICAL RULES:
 - unit_price: Format as X,XXX.XX — always use comma as thousands separator and period as decimal separator. Always show exactly 2 decimal places. Remove ALL currency symbols ($, €, £, HK$, MOP$, etc.). Examples: 2000 → 2,000.00, 12345.6 → 12,345.60, 99.9 → 99.90
 - date: ALWAYS convert to YYYY-MM-DD format. Example: 20/1/2026 becomes 2026-01-20, January 20 2026 becomes 2026-01-20.
 - currency: $ alone = USD, HK$ = HKD, € = EUR, £ = GBP, MOP$ = MOP
+- document_type: Must be exactly one of "QUO", "PO", "PL", or "unknown". Default to "unknown" if unsure.
 - Return ONLY valid parseable JSON, no markdown, no explanation"""
 
     content_parts = []
@@ -662,6 +683,7 @@ async def process_all(req: ProcessRequest):
 
     all_items = []
     supplier = ""
+    document_type = ""
     shared_date = ""
     errors = []
 
@@ -681,6 +703,10 @@ async def process_all(req: ProcessRequest):
         if not supplier and result.get("supplier"):
             supplier = result["supplier"]
 
+        # Take document_type from first page that has it
+        if not document_type and result.get("document_type"):
+            document_type = result["document_type"]
+
         # Find date from any page
         if not shared_date:
             for item in result.get("items", []):
@@ -699,11 +725,16 @@ async def process_all(req: ProcessRequest):
             if not item.get("date"):
                 item["date"] = shared_date
 
+    # Coerce document_type to one of the valid values
+    if document_type not in ("QUO", "PO", "PL", "unknown"):
+        document_type = "unknown"
+
     if not all_items and errors:
         return JSONResponse(status_code=500, content={"status": "error", "error": "; ".join(errors)})
 
     merged = {
         "supplier": supplier,
+        "document_type": document_type,
         "items": all_items
     }
 
@@ -732,13 +763,14 @@ async def process_stream(req: ProcessRequest):
     async def generate():
         all_items = []
         supplier = ""
+        document_type = ""
         shared_date = ""
         errors = []
 
         if total_pages == 0:
             uploaded_files[req.file_index]["status"] = "error"
             save_upload_state()
-            yield f"data: {json.dumps({'type': 'done', 'data': {'supplier': '', 'items': []}, 'pages_processed': 0, 'errors': ['No pages to process']})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'data': {'supplier': '', 'document_type': 'unknown', 'items': []}, 'pages_processed': 0, 'errors': ['No pages to process']})}\n\n"
             return
 
         for page_idx in range(total_pages):
@@ -761,6 +793,9 @@ async def process_stream(req: ProcessRequest):
 
             if not supplier and result.get("supplier"):
                 supplier = result["supplier"]
+
+            if not document_type and result.get("document_type"):
+                document_type = result["document_type"]
 
             if not shared_date:
                 for item in result.get("items", []):
@@ -788,7 +823,11 @@ async def process_stream(req: ProcessRequest):
                 if not item.get("date"):
                     item["date"] = shared_date
 
-        merged = {"supplier": supplier, "items": all_items}
+        # Coerce document_type to one of the valid values
+        if document_type not in ("QUO", "PO", "PL", "unknown"):
+            document_type = "unknown"
+
+        merged = {"supplier": supplier, "document_type": document_type, "items": all_items}
         if all_items:
             uploaded_files[req.file_index]["status"] = "processed"
         elif errors:
@@ -813,14 +852,18 @@ async def confirm(req: ConfirmRequest):
     items = data.get("items", [])
     supplier = data.get("supplier", "") or (items[0].get("supplier", "") if items else "")
     quotation_date = items[0].get("date", "") if items else ""
+    document_type = data.get("document_type", "unknown")
+    if document_type not in ("QUO", "PO", "PL"):
+        raise HTTPException(status_code=400, detail="document_type must be QUO, PO, or PL")
 
     conn = sqlite3.connect(db_path)
     conn.execute(
-        "INSERT INTO quotations (filename, supplier, quotation_date, items) VALUES (?, ?, ?, ?)",
+        "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
         (uploaded_files[req.file_index]["filename"],
          supplier,
          quotation_date,
-         json.dumps(items))
+         json.dumps(items),
+         document_type)
     )
     last_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.commit()
@@ -884,10 +927,13 @@ async def update_quotation(req: UpdateRequest):
         raise HTTPException(status_code=400, detail="items must be a list")
     supplier = data.get("supplier", "")
     quotation_date = items[0].get("date", "") if items else ""
+    document_type = data.get("document_type", "unknown")
+    if document_type not in ("QUO", "PO", "PL"):
+        raise HTTPException(status_code=400, detail="document_type must be QUO, PO, or PL")
     conn = sqlite3.connect(db_path)
     cur = conn.execute(
-        "UPDATE quotations SET supplier=?, quotation_date=?, items=? WHERE id=?",
-        (supplier, quotation_date, json.dumps(items), req.id)
+        "UPDATE quotations SET supplier=?, quotation_date=?, items=?, document_type=? WHERE id=?",
+        (supplier, quotation_date, json.dumps(items), document_type, req.id)
     )
     conn.commit()
     conn.close()
@@ -997,6 +1043,9 @@ async def import_upload(file: UploadFile = File(...)):
     for q in quotations:
         supplier = q.get("supplier", "")
         quotation_date = q.get("quotation_date", "")
+        document_type = q.get("document_type", "unknown")
+        if document_type not in ("QUO", "PO", "PL", "unknown"):
+            document_type = "unknown"
         items = q.get("items", [])
         if isinstance(items, str):
             try:
@@ -1006,8 +1055,8 @@ async def import_upload(file: UploadFile = File(...)):
         if not quotation_date and items:
             quotation_date = items[0].get("date", "")
         conn.execute(
-            "INSERT INTO quotations (filename, supplier, quotation_date, items) VALUES (?, ?, ?, ?)",
-            (q.get("filename", "imported.pdf"), supplier, quotation_date, json.dumps(items))
+            "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
+            (q.get("filename", "imported.pdf"), supplier, quotation_date, json.dumps(items), document_type)
         )
         imported += 1
     conn.commit()
