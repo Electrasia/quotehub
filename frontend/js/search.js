@@ -92,10 +92,10 @@ function renderSearchResults() {
             <th class="${sortClass('brand')}" onclick="sortBy('brand')">Brand</th>
             <th class="${sortClass('model')}" onclick="sortBy('model')">Model</th>
             <th class="${sortClass('description')}" onclick="sortBy('description')">Description</th>
+            <th class="${sortClass('currency')}" onclick="sortBy('currency')">Currency</th>
             <th class="${sortClass('unit_price')}" style="text-align:right" onclick="sortBy('unit_price')">Unit Price</th>
             <th class="${sortClass('date')}" style="text-align:right" onclick="sortBy('date')">Date</th>
             <th class="${sortClass('supplier')}" onclick="sortBy('supplier')">Supplier</th>
-            <th class="${sortClass('currency')}" onclick="sortBy('currency')">Currency</th>
             <th class="${sortClass('_document_type')}" onclick="sortBy('_document_type')" style="text-align:center">Type</th>
         </tr>`;
 
@@ -107,10 +107,10 @@ function renderSearchResults() {
             { text: item.brand },
             { text: item.model },
             { html: escapeHtml(item.description || ''), style: 'word-wrap:break-word;max-width:300px' },
+            { text: item.currency, className: 'nowrap-cell' },
             { text: item.unit_price || item.price, className: 'text-right nowrap-cell' },
             { text: item.date, className: 'text-right nowrap-cell' },
             { html: escapeHtml(item.supplier || item._supplier || ''), style: 'word-wrap:break-word;max-width:150px' },
-            { text: item.currency, className: 'nowrap-cell' },
         ];
         return `<tr data-filename="${fn}" style="cursor:pointer" title="Double-click to view PDF">` +
             cells.map(c => `<td${c.className ? ` class="${c.className}"` : ''}${c.style ? ` style="${c.style}"` : ''}>${c.html !== undefined ? c.html : escapeHtml(c.text || '')}</td>`).join('') +
