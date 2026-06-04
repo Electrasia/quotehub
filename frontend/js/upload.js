@@ -34,6 +34,10 @@ async function handleFiles(files) {
         formData.append('file', file);
         const resp = await fetch('/upload', { method: 'POST', body: formData });
         const data = await resp.json();
+        if (!resp.ok) {
+            showBriefPopup(`Upload failed: ${data.error || resp.statusText}`);
+            continue;
+        }
         data.backendIndex = data.file_index;
         // Check for duplicates
         try {

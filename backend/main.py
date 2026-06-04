@@ -444,6 +444,15 @@ async def upload(file: UploadFile = File(...)):
             filepath.unlink()
         return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
 
+    # Reject PDFs that yielded 0 pages (corrupt files that did not raise)
+    if len(page_images) == 0:
+        try:
+            if filepath.exists():
+                filepath.unlink()
+        except OSError:
+            pass
+        return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
+
     entry = {
         "filename": file.filename,
         "filepath": str(filepath),
