@@ -152,8 +152,16 @@
             <div id="stepPanel4" class="step-panel hidden">
                 <div class="review-layout">
                     <!-- PDF viewer on the left -->
-                    <div class="review-pdf" id="reviewPdf">
+                    <div class="review-pdf" id="reviewPdf" style="overflow:auto">
                         <img id="reviewPdfImg" src="" alt="PDF Page">
+                        <div class="zoom-toolbar" style="margin-top:12px;display:flex;justify-content:center;gap:8px;align-items:center;flex-wrap:wrap">
+                            <button class="btn btn-sm btn-secondary" onclick="reviewZoomOut()" title="Zoom out">−</button>
+                            <span id="reviewZoomInfo" style="min-width:50px;text-align:center;font-size:13px">100%</span>
+                            <button class="btn btn-sm btn-secondary" onclick="reviewZoomIn()" title="Zoom in">+</button>
+                            <button class="btn btn-sm btn-secondary" onclick="reviewZoomReset()" title="Reset to 100% (natural size)">100%</button>
+                            <button class="btn btn-sm btn-secondary" onclick="reviewFitWidth()" title="Fit image to container width">Fit</button>
+                            <button class="btn btn-sm btn-secondary" onclick="reviewOpenNewWindow()" title="Open PDF in new browser window">↗ New Window</button>
+                        </div>
                         <div class="page-nav">
                             <button class="btn btn-sm btn-secondary" onclick="reviewPrevPage()">◀</button>
                             <span id="reviewPageInfo">Page 1 of 1</span>

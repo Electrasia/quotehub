@@ -2,6 +2,10 @@
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 
+// ─── Review PDF zoom state ──────────────────────────────────
+let reviewZoom = 1.0;        // 1.0 = 100% = natural pixel size
+let reviewAutoFit = true;    // true when a new file is loaded (fit-width on first image load)
+
 function escapeHtml(s) {
     if (s == null) return '';
     return String(s)
@@ -267,6 +271,7 @@ function showReview(filename) {
     tbody.innerHTML = '';
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
+    reviewAutoFit = true;
     updateReviewPdf();
     goToStep(4);
 }
@@ -281,7 +286,22 @@ function updateDocumentTypeWarning() {
 
 function updateReviewPdf() {
     if (reviewPages.length > 0) {
-        document.getElementById('reviewPdfImg').src = reviewPages[reviewCurrentPage];
+        const img = document.getElementById('reviewPdfImg');
+        img.src = reviewPages[reviewCurrentPage];
+        const finalize = () => {
+            if (reviewAutoFit) {
+                reviewFitWidth();
+                reviewAutoFit = false;
+            } else {
+                applyReviewZoom();
+            }
+            img.onload = null;
+        };
+        if (img.complete && img.naturalWidth) {
+            finalize();
+        } else {
+            img.onload = finalize;
+        }
         document.getElementById('reviewPageInfo').textContent = `Page ${reviewCurrentPage + 1} of ${reviewPages.length}`;
     }
 }
@@ -292,6 +312,51 @@ function reviewPrevPage() {
 
 function reviewNextPage() {
     if (reviewCurrentPage < reviewPages.length - 1) { reviewCurrentPage++; updateReviewPdf(); }
+}
+
+// ─── Review PDF zoom controls ────────────────────────────────
+function applyReviewZoom() {
+    const img = document.getElementById('reviewPdfImg');
+    if (!img.naturalWidth) return;
+    img.style.width = (img.naturalWidth * reviewZoom) + 'px';
+    img.style.height = 'auto';
+    document.getElementById('reviewZoomInfo').textContent = `${Math.round(reviewZoom * 100)}%`;
+}
+
+function reviewZoomIn() {
+    reviewZoom = Math.min(reviewZoom * 1.25, 5.0);
+    applyReviewZoom();
+}
+
+function reviewZoomOut() {
+    reviewZoom = Math.max(reviewZoom / 1.25, 0.1);
+    applyReviewZoom();
+}
+
+function reviewZoomReset() {
+    reviewZoom = 1.0;
+    applyReviewZoom();
+}
+
+function reviewFitWidth() {
+    const img = document.getElementById('reviewPdfImg');
+    if (!img.complete || !img.naturalWidth) {
+        img.onload = () => reviewFitWidth();
+        return;
+    }
+    const container = document.getElementById('reviewPdf');
+    const containerWidth = container.clientWidth - 32;
+    reviewZoom = containerWidth / img.naturalWidth;
+    applyReviewZoom();
+}
+
+function reviewOpenNewWindow() {
+    const filename = document.getElementById('reviewFilename').textContent;
+    if (!filename) {
+        showBriefPopup('No PDF loaded.');
+        return;
+    }
+    window.open(`/archive/${encodeURIComponent(filename)}`, '_blank');
 }
 
 function updateItemCount() {
