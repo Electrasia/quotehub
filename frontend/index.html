@@ -4,209 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QuoteHub - AI Quotation Database</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
-
-        /* Header */
-        .header { background: #fff; padding: 16px 24px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
-        .header h1 { font-size: 20px; color: #1a1a1a; }
-        .header-right { display: flex; align-items: center; gap: 16px; }
-
-        /* Tabs */
-        .tabs { background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 0; padding: 0 24px; align-items: center; }
-        .tab { padding: 12px 24px; border: none; background: none; cursor: pointer; font-size: 14px; font-weight: 500; color: #666; border-bottom: 2px solid transparent; transition: all 0.2s; }
-        .tab:hover { color: #333; }
-        .tab.active { color: #3498db; border-bottom-color: #3498db; }
-        .prefs-item { display: block; width: 100%; padding: 10px 16px; border: none; background: none; text-align: left; font-size: 13px; cursor: pointer; color: #333; }
-        .prefs-item:hover { background: #f0f4f8; }
-
-        /* Status indicator */
-        .status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-        .status-dot { width: 12px; height: 12px; border-radius: 50%; }
-        .status-dot.red { background: #e74c3c; }
-        .status-dot.green { background: #27ae60; }
-        .status-text { font-weight: 500; }
-        .status-text.disconnected { color: #e74c3c; }
-        .status-text.connected { color: #27ae60; }
-
-        /* Login overlay */
-        .login-overlay {
-            position: fixed; inset: 0; background: rgba(245, 245, 245, 0.98);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 9999;
-        }
-        .login-card {
-            background: #fff; padding: 40px; border-radius: 16px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.12); width: 100%; max-width: 380px;
-        }
-        .login-logo { font-size: 48px; text-align: center; margin-bottom: 8px; }
-        .login-title { font-size: 24px; text-align: center; margin-bottom: 4px; color: #1a1a1a; }
-        .login-subtitle { text-align: center; color: #888; font-size: 14px; margin-bottom: 28px; }
-        .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; font-size: 12px; color: #666; margin-bottom: 6px; font-weight: 500; }
-        .form-group input {
-            width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px;
-            font-size: 14px; outline: none; transition: border-color 0.2s;
-        }
-        .form-group input:focus { border-color: #3498db; }
-        .login-btn { width: 100%; padding: 12px; font-size: 15px; margin-top: 8px; }
-        .login-error {
-            background: #fdedec; color: #c0392b; padding: 10px 14px; border-radius: 8px;
-            font-size: 13px; margin-bottom: 16px;
-        }
-
-        /* User info badge in header */
-        .user-badge {
-            display: flex; align-items: center; gap: 8px; font-size: 13px;
-            padding: 6px 12px; background: #f0f4f8; border-radius: 16px;
-        }
-        .user-badge .role-tag {
-            font-size: 10px; padding: 2px 6px; border-radius: 4px;
-            font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
-        }
-        .user-badge .role-tag.master { background: #8e44ad; color: #fff; }
-        .user-badge .role-tag.admin { background: #2980b9; color: #fff; }
-        .user-badge .role-tag.user { background: #7f8c8d; color: #fff; }
-        .user-badge .logout-link {
-            color: #888; cursor: pointer; font-size: 12px; text-decoration: none;
-            border: none; background: none; padding: 0;
-        }
-        .user-badge .logout-link:hover { color: #e74c3c; text-decoration: underline; }
-
-        /* Role-based UI visibility (driven by body class) */
-        body.role-user .tab-upload { display: none !important; }
-        body.role-user .search-cb,
-        body.role-user #selectAllCb,
-        body.role-user .prefs-admin,
-        body.role-user #searchActions { display: none !important; }
-        body.role-user .upload-section { display: none !important; }
-
-        /* Admin gets a visible-but-disabled look on AI Settings fields */
-        body.role-admin .ai-master-only {
-            opacity: 0.5;
-            cursor: not-allowed !important;
-            background: #f8f9fa !important;
-        }
-
-        /* Master-only items in the Preferences dropdown */
-        body.role-master .prefs-master { display: block !important; }
-
-        /* AI Server status + Connect button — only relevant for admin/master.
-           Users (read-only) never process documents, so the whole AI server
-           concern is hidden from their UI. */
-        body.role-user .ai-admin-master { display: none !important; }
-
-        /* Buttons */
-        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-primary { background: #3498db; color: #fff; }
-        .btn-primary:hover:not(:disabled) { background: #2980b9; }
-        .btn-success { background: #27ae60; color: #fff; }
-        .btn-success:hover:not(:disabled) { background: #219a52; }
-        .btn-danger { background: #e74c3c; color: #fff; }
-        .btn-danger:hover:not(:disabled) { background: #c0392b; }
-        .btn-secondary { background: #95a5a6; color: #fff; }
-        .btn-secondary:hover:not(:disabled) { background: #7f8c8d; }
-        .btn-warning { background: #f39c12; color: #fff; }
-        .btn-warning:hover:not(:disabled) { background: #d68910; }
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
-
-        /* Main content */
-        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-
-        /* Upload area */
-        .upload-area { background: #fff; border: 2px dashed #ccc; border-radius: 12px; padding: 60px 20px; text-align: center; margin-bottom: 24px; transition: all 0.2s; }
-        .upload-area:hover { border-color: #3498db; }
-        .upload-area.dragover { border-color: #3498db; background: #ebf5fb; }
-        .upload-area p { color: #666; margin-top: 12px; font-size: 14px; }
-        .upload-area .icon { font-size: 48px; color: #aaa; }
-
-        /* File list */
-        .file-list { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 24px; }
-        .file-list h3 { margin-bottom: 12px; font-size: 16px; }
-        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eee; }
-        .file-item:last-child { border-bottom: none; }
-        .file-name { font-size: 14px; color: #333; }
-        .file-status { font-size: 12px; padding: 4px 8px; border-radius: 4px; }
-        .file-status.pending { background: #fef9e7; color: #f39c12; }
-        .file-status.processing { background: #ebf5fb; color: #3498db; }
-        .file-status.done { background: #eafaf1; color: #27ae60; }
-        .file-status.error { background: #fdedec; color: #e74c3c; }
-
-        /* Preview layout: PDF on left, data on right */
-        .review-layout { display: flex; gap: 24px; align-items: flex-start; }
-        .review-pdf { flex: 0 0 40%; position: sticky; top: 24px; background: #fff; border-radius: 12px; padding: 16px; max-height: calc(100vh - 48px); overflow-y: auto; }
-        .review-pdf img { width: 100%; border-radius: 8px; border: 1px solid #eee; }
-        .review-pdf .page-nav { margin-top: 12px; display: flex; justify-content: center; gap: 12px; align-items: center; }
-        .review-data { flex: 1; min-width: 0; }
-
-        .preview { background: #fff; border-radius: 12px; padding: 24px; }
-        .preview h2 { margin-bottom: 16px; font-size: 18px; }
-        .meta { display: flex; gap: 24px; margin-bottom: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px; }
-        .meta-item label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
-        .meta-item input { border: 1px solid #ddd; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 200px; }
-
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-        th { background: #f8f9fa; padding: 10px 12px; text-align: left; font-size: 13px; color: #666; border-bottom: 2px solid #ddd; }
-        td { padding: 8px 12px; border-bottom: 1px solid #eee; }
-        td input { border: 1px solid #ddd; padding: 6px 8px; border-radius: 4px; font-size: 13px; width: 100%; }
-        td textarea { border: 1px solid #ddd; padding: 6px 8px; border-radius: 4px; font-size: 13px; width: 100%; }
-        td input:focus, td textarea:focus { outline: none; border-color: #3498db; }
-        .text-right { text-align: right; }
-        td.price-cell, th.price-cell { text-align: right; }
-        td.date-cell, th.date-cell { text-align: right; }
-        td input.price-input { text-align: right; }
-        .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-
-        /* Search */
-        .search-bar { display: flex; gap: 12px; margin-bottom: 24px; }
-        .search-bar input { flex: 1; padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-        .search-bar input:focus { outline: none; border-color: #3498db; }
-
-        .results { background: #fff; border-radius: 12px; padding: 16px; }
-        .result-group { background: #fff; border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
-        .result-header { padding: 14px 16px; background: #f8f9fa; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-        .result-header:hover { background: #eef1f3; }
-        .result-header strong { font-size: 15px; }
-        .result-header small { color: #888; margin-left: 8px; }
-        .result-items { overflow: hidden; }
-        .result-items table { margin: 0; }
-        .result-items th { font-size: 12px; padding: 8px 12px; background: #fafafa; white-space: nowrap; }
-        .result-items td { font-size: 13px; padding: 6px 12px; }
-        .result-items td.nowrap-cell { white-space: nowrap; }
-        .result-items tr:hover { background: #f5f9fc; }
-        th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-        th.sortable:hover { background: #e8ecf0; }
-        th.sortable::after { content: ' ⇅'; color: #bbb; font-size: 11px; }
-        th.sort-asc::after { content: ' ▲'; color: #3498db; }
-        th.sort-desc::after { content: ' ▼'; color: #3498db; }
-
-        /* Modal */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: center; }
-        .modal-overlay.active { display: flex; }
-        .modal { background: #fff; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; text-align: center; }
-        .modal h3 { margin-bottom: 12px; }
-        .modal p { color: #666; margin-bottom: 20px; font-size: 14px; }
-        .modal .actions { justify-content: center; }
-
-        /* PDF viewer modal */
-        .pdf-modal { max-width: 95vw; width: 95vw; height: 90vh; padding: 0; overflow: hidden; }
-        .pdf-modal iframe { width: 100%; height: 100%; border: none; border-radius: 12px; }
-        .pdf-modal-close { position: absolute; top: 12px; right: 16px; z-index: 10; }
-
-        /* Loading */
-        .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .loading { display: flex; align-items: center; gap: 8px; color: #3498db; font-size: 14px; }
-
-        /* Progress bar */
-        .progress-bar { width: 100%; height: 6px; background: #eee; border-radius: 3px; margin: 12px 0; overflow: hidden; }
-        .progress-fill { height: 100%; background: #3498db; border-radius: 3px; transition: width 0.3s; }
-
-        /* Hidden */
-        .hidden { display: none !important; }
-    </style>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <!-- Login Overlay -->
@@ -257,127 +55,165 @@
 
     <!-- Header -->
     <div class="header">
-        <div>
-            <h1>QuoteHub</h1>
-            <div style="font-size:11px;color:#999;margin-top:2px" id="versionLabel">v0.0.0</div>
+        <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:24px">📑</span>
+            <div>
+                <h1>QuoteHub</h1>
+                <div style="font-size:11px;color:#999;margin-top:2px" id="versionLabel">v0.0.0</div>
+            </div>
         </div>
         <div class="header-right">
+            <div class="status ai-admin-master">
+                <div class="status-dot red" id="statusDot"></div>
+                <span class="status-text disconnected" id="statusText">DISCONNECTED</span>
+            </div>
+            <button class="btn btn-primary btn-sm ai-admin-master" id="connectBtn" onclick="toggleConnection()">Connect to AI Server</button>
+        </div>
+    </div>
+
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-left">
+            <button class="nav-item nav-process active" id="navProcess" onclick="showUpload()">Process</button>
+            <button class="nav-item" id="navSearch" onclick="showSearch()">Search</button>
+            <button class="nav-item" id="navSettings" onclick="showSettings()">Settings</button>
+        </div>
+        <div class="nav-right">
             <div class="user-badge hidden" id="userBadge">
                 <span class="role-tag" id="userRoleTag">USER</span>
                 <span id="userName">—</span>
                 <button class="logout-link" onclick="doLogout()" title="Sign out">⏻ Sign out</button>
             </div>
-            <div class="status ai-admin-master">
-                <div class="status-dot red" id="statusDot"></div>
-                <span class="status-text disconnected" id="statusText">DISCONNECTED</span>
-            </div>
-            <button class="btn btn-primary ai-admin-master" id="connectBtn" onclick="toggleConnection()" style="min-width:180px">Connect to AI Server</button>
         </div>
-    </div>
-
-    <!-- Tabs + Preferences -->
-    <div class="tabs">
-        <button class="tab tab-upload active" id="tabUpload" onclick="showUpload()">📄 Upload</button>
-        <button class="tab" id="tabSearch" onclick="showSearch()">🔍 Search</button>
-        <div style="flex:1"></div>
-        <div style="position:relative">
-            <button class="btn btn-secondary btn-sm" onclick="togglePrefsMenu()" style="margin:6px 0">⚙ Preferences</button>
-            <div class="hidden" id="prefsMenu" style="position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:50;min-width:200px;padding:4px 0">
-                <button class="prefs-item prefs-admin" onclick="openSettings(); closePrefsMenu()">🔌 Server Connection</button>
-                <button class="prefs-item prefs-admin" onclick="openBackupRestore(); closePrefsMenu()">💾 Backup / Restore</button>
-                <button class="prefs-item prefs-admin" onclick="saveLogs(); closePrefsMenu()">📋 Save Logs</button>
-                <button class="prefs-item prefs-master" id="prefsUsersBtn" style="display:none" onclick="openUsersModal(); closePrefsMenu()">👥 Users Management</button>
-            </div>
-        </div>
-    </div>
+    </nav>
 
     <div class="container">
-        <!-- Upload Section -->
-        <div id="uploadSection" class="upload-section">
-            <div class="upload-area" id="uploadArea">
-                <div class="icon">📄</div>
-                <h2>Upload Quotation PDFs</h2>
-                <p>Drag and drop files here, or click to browse</p>
-                <input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
-                <button class="btn btn-primary" style="margin-top:16px" onclick="document.getElementById('fileInput').click()">Choose Files</button>
-            </div>
-
-            <div class="file-list hidden" id="fileListSection">
-                <h3>Files</h3>
-                <div id="fileList"></div>
-                <p id="queueSummary" class="hidden" style="font-size:13px;color:#666;margin-top:10px"></p>
-                <div class="actions" style="margin-top:16px">
-                    <button class="btn btn-success" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
-                    <button class="btn btn-secondary" onclick="clearFiles()">Clear All</button>
+        <!-- ═══════════════ PROCESS VIEW ═══════════════ -->
+        <div id="processView">
+            <!-- Step Indicator -->
+            <div class="step-indicator" id="stepIndicator">
+                <div class="step clickable active" id="step1" onclick="goToStep(1)">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">Upload</div>
+                </div>
+                <div class="step-connector" id="connector1"></div>
+                <div class="step" id="step2" onclick="goToStep(2)">
+                    <div class="step-circle">2</div>
+                    <div class="step-label">File Queue</div>
+                </div>
+                <div class="step-connector" id="connector2"></div>
+                <div class="step" id="step3">
+                    <div class="step-circle">3</div>
+                    <div class="step-label">Processing</div>
+                </div>
+                <div class="step-connector" id="connector3"></div>
+                <div class="step" id="step4">
+                    <div class="step-circle">4</div>
+                    <div class="step-label">Review</div>
                 </div>
             </div>
-        </div>
 
-        <!-- Review Section (PDF + Data side by side) -->
-        <div class="hidden" id="reviewSection">
-            <div class="review-layout">
-                <!-- PDF viewer on the left -->
-                <div class="review-pdf" id="reviewPdf">
-                    <img id="reviewPdfImg" src="" alt="PDF Page">
-                    <div class="page-nav">
-                        <button class="btn btn-sm btn-secondary" onclick="reviewPrevPage()">◀</button>
-                        <span id="reviewPageInfo">Page 1 of 1</span>
-                        <button class="btn btn-sm btn-secondary" onclick="reviewNextPage()">▶</button>
+            <!-- Step 1: Upload -->
+            <div id="stepPanel1" class="step-panel">
+                <div class="upload-area" id="uploadArea">
+                    <div class="icon">📄</div>
+                    <h2>Upload Quotation PDFs</h2>
+                    <p>Drag and drop files here, or click to browse</p>
+                    <input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
+                    <button class="btn btn-primary" style="margin-top:16px" onclick="document.getElementById('fileInput').click()">Choose Files</button>
+                </div>
+            </div>
+
+            <!-- Step 2: File Queue -->
+            <div id="stepPanel2" class="step-panel hidden">
+                <div class="file-list" id="fileListSection">
+                    <h3>Files</h3>
+                    <div id="fileList"></div>
+                    <p id="queueSummary" class="hidden" style="font-size:13px;color:#666;margin-top:10px"></p>
+                    <div class="actions" style="margin-top:16px">
+                        <button class="btn btn-success" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
+                        <button class="btn btn-secondary" onclick="clearFiles()">Clear All</button>
                     </div>
                 </div>
+            </div>
 
-                <!-- Extracted data on the right -->
-                <div class="review-data">
-                    <div class="preview">
-                        <h2>Extracted Data — <span id="reviewFilename"></span></h2>
-                        <div class="meta">
-                            <div class="meta-item">
-                                <label>Supplier</label>
-                                <input type="text" id="supplierName" value="">
+            <!-- Step 3: Processing -->
+            <div id="stepPanel3" class="step-panel hidden">
+                <div style="background:#fff;border-radius:12px;padding:40px;text-align:center">
+                    <div class="loading" style="justify-content:center;margin-bottom:16px">
+                        <div class="spinner"></div>
+                        <span style="font-size:16px">Processing documents...</span>
+                    </div>
+                    <p style="color:#666;font-size:14px">Please wait while the AI processes your files.</p>
+                </div>
+            </div>
+
+            <!-- Step 4: Review -->
+            <div id="stepPanel4" class="step-panel hidden">
+                <div class="review-layout">
+                    <!-- PDF viewer on the left -->
+                    <div class="review-pdf" id="reviewPdf">
+                        <img id="reviewPdfImg" src="" alt="PDF Page">
+                        <div class="page-nav">
+                            <button class="btn btn-sm btn-secondary" onclick="reviewPrevPage()">◀</button>
+                            <span id="reviewPageInfo">Page 1 of 1</span>
+                            <button class="btn btn-sm btn-secondary" onclick="reviewNextPage()">▶</button>
+                        </div>
+                    </div>
+
+                    <!-- Extracted data on the right -->
+                    <div class="review-data">
+                        <div class="preview">
+                            <h2>Extracted Data — <span id="reviewFilename"></span></h2>
+                            <div class="meta">
+                                <div class="meta-item">
+                                    <label>Supplier</label>
+                                    <input type="text" id="supplierName" value="">
+                                </div>
+                            </div>
+
+                            <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
+                            <div style="overflow-x:auto">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Brand</th>
+                                            <th>Model</th>
+                                            <th>Description</th>
+                                            <th class="price-cell">Unit Price</th>
+                                            <th class="date-cell">Date</th>
+                                            <th>Supplier</th>
+                                            <th>Currency</th>
+                                            <th style="width:60px"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="itemsTable"></tbody>
+                                </table>
+                            </div>
+
+                            <!-- Find & Replace -->
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
+                                <span style="font-size:13px;color:#666;font-weight:500">Find & Replace:</span>
+                                <input type="text" id="findInput" placeholder="Find..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                                <input type="text" id="replaceInput" placeholder="Replace with..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                                <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px"><input type="checkbox" id="findCaseSensitive"> Aa</label>
+                                <button class="btn btn-sm btn-primary" onclick="findAndReplace()">Replace All</button>
+                            </div>
+
+                            <button class="btn btn-sm btn-secondary" onclick="addRow()" style="margin-bottom:16px">+ Add Row</button>
+
+                            <div class="actions">
+                                <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
+                                <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
                             </div>
                         </div>
-
-                        <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
-                        <div style="overflow-x:auto">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Brand</th>
-                                        <th>Model</th>
-                                        <th>Description</th>
-                                        <th class="price-cell">Unit Price</th>
-                                        <th class="date-cell">Date</th>
-                                        <th>Supplier</th>
-                                        <th>Currency</th>
-                                        <th style="width:60px"></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="itemsTable"></tbody>
-                            </table>
-                        </div>
-
-                        <!-- Find & Replace -->
-                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
-                            <span style="font-size:13px;color:#666;font-weight:500">Find & Replace:</span>
-                            <input type="text" id="findInput" placeholder="Find..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
-                            <input type="text" id="replaceInput" placeholder="Replace with..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
-                            <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px"><input type="checkbox" id="findCaseSensitive"> Aa</label>
-                            <button class="btn btn-sm btn-primary" onclick="findAndReplace()">Replace All</button>
-                        </div>
-
-                        <button class="btn btn-sm btn-secondary" onclick="addRow()" style="margin-bottom:16px">+ Add Row</button>
-
-                        <div class="actions">
-                            <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
-                            <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
-                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Search Section -->
-        <div id="searchSection" class="hidden">
+        <!-- ═══════════════ SEARCH VIEW ═══════════════ -->
+        <div id="searchView" class="hidden">
             <h2 style="margin-bottom:16px">Search Quotations</h2>
             <div class="search-bar">
                 <input type="text" id="searchInput" placeholder="Search by supplier, date, or item description..." onkeyup="debounceSearch()">
@@ -390,28 +226,97 @@
             </div>
             <div class="results" id="searchResults"></div>
         </div>
+
+        <!-- ═══════════════ SETTINGS VIEW ═══════════════ -->
+        <div id="settingsView" class="hidden">
+            <!-- AI Connection Section -->
+            <div class="settings-card ai-connection-section ai-admin-master">
+                <h3>🔌 AI Settings</h3>
+
+                <h4>Server Configuration</h4>
+                <div class="settings-field">
+                    <label>AI Endpoint URL</label>
+                    <input type="text" id="settingsEndpoint" class="ai-master-only" placeholder="http://192.168.0.196:1234/v1/chat/completions">
+                </div>
+                <div class="settings-field">
+                    <label>Model Name</label>
+                    <input type="text" id="settingsModel" class="ai-master-only" placeholder="qwen/qwen3-vl-4b">
+                </div>
+                <div class="settings-field">
+                    <label>QuoDB External URL</label>
+                    <input type="text" id="settingsExternalUrl" class="ai-master-only" placeholder="http://localhost:8000 (for image access)">
+                </div>
+                <div class="settings-field">
+                    <label>Timeout (seconds)</label>
+                    <input type="number" id="settingsTimeout" class="ai-master-only" value="120" min="10" max="300">
+                </div>
+                <div class="settings-field">
+                    <label>Max Retries</label>
+                    <input type="number" id="settingsRetries" class="ai-master-only" value="3" min="1" max="10">
+                </div>
+                <div class="settings-field">
+                    <label>Success popup duration (seconds)</label>
+                    <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10">
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                </div>
+            </div>
+
+            <!-- Backup / Restore Section -->
+            <div class="settings-card backup-restore-section ai-admin-master">
+                <h3>💾 Backup / Restore</h3>
+                <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
+                    <h4 style="margin-bottom:8px;font-size:14px">📤 Export (Backup)</h4>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as a ZIP archive.</p>
+                    <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Download Backup</button>
+                    <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
+                </div>
+                <div style="padding:16px;background:#f8f9fa;border-radius:8px">
+                    <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
+                    <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
+                    <input type="file" id="importFile" accept=".zip,.json" style="display:none" onchange="importDatabase(this)">
+                    <span id="importProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Importing...</span>
+                    <div id="importResult" class="hidden" style="margin-top:8px;font-size:13px;color:#27ae60"></div>
+                </div>
+            </div>
+
+            <!-- Logs Section -->
+            <div class="settings-card logs-section ai-admin-master">
+                <h3>📋 Logs</h3>
+                <p style="font-size:13px;color:#666;margin-bottom:16px">Download system logs for troubleshooting. The logs include recent API calls and errors.</p>
+                <div style="margin-bottom:16px">
+                    <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Log level</label>
+                    <select id="logLevel" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px">
+                        <option value="all">All logs</option>
+                        <option value="errors">Errors only</option>
+                    </select>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" onclick="downloadLogs()">Download Logs</button>
+                </div>
+            </div>
+
+            <!-- Users Management Section (master only) -->
+            <div class="settings-card users-management-section">
+                <h3>👥 Users Management</h3>
+                <div style="display:flex;align-items:center;gap:12px;margin:12px 0">
+                    <button class="btn btn-primary btn-sm" id="addUserBtn" onclick="showAddUserForm()">+ Add User</button>
+                    <span id="usersError" class="hidden" style="color:#e74c3c;font-size:13px;flex:1"></span>
+                </div>
+                <div id="usersTable" style="max-height:400px;overflow-y:auto;border:1px solid #eee;border-radius:6px"></div>
+            </div>
+        </div>
     </div>
 
-    <!-- Settings Modal -->
+    <!-- Settings Modal (kept for backward compatibility) -->
     <div class="modal-overlay" id="settingsModal">
         <div class="modal" style="max-width:500px">
             <h3>AI Settings</h3>
-            <div style="text-align:left; margin:16px 0">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">AI Endpoint URL</label>
-                <input type="text" id="settingsEndpoint" class="ai-master-only" placeholder="http://192.168.0.196:1234/v1/chat/completions" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Model Name</label>
-                <input type="text" id="settingsModel" class="ai-master-only" placeholder="qwen/qwen3-vl-4b" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">QuoDB External URL</label>
-                <input type="text" id="settingsExternalUrl" class="ai-master-only" placeholder="http://localhost:8000 (for image access)" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Timeout (seconds)</label>
-                <input type="number" id="settingsTimeout" class="ai-master-only" value="120" min="10" max="300" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Max Retries</label>
-                <input type="number" id="settingsRetries" class="ai-master-only" value="3" min="1" max="10" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:4px">Success popup duration (seconds)</label>
-                <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; margin-bottom:12px">
-            </div>
+            <p style="font-size:13px;color:#666">Use the Settings page to configure AI connection and settings.</p>
             <div class="actions" style="justify-content:center">
-                <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                <button class="btn btn-primary" onclick="showSettings(); closeModal('settingsModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('settingsModal')">Close</button>
             </div>
         </div>
@@ -433,10 +338,6 @@
     <div class="modal-overlay" id="usersModal">
         <div class="modal" style="max-width:760px;width:90%">
             <h3>👥 Users Management</h3>
-            <div style="display:flex;align-items:center;gap:12px;margin:12px 0">
-                <button class="btn btn-primary btn-sm" id="addUserBtn" onclick="showAddUserForm()">+ Add User</button>
-                <span id="usersError" class="hidden" style="color:#e74c3c;font-size:13px;flex:1"></span>
-            </div>
 
             <!-- Add User sub-form (hidden by default) -->
             <div id="addUserForm" class="hidden" style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:12px">
@@ -497,8 +398,6 @@
                     <button class="btn btn-secondary btn-sm" onclick="hideHardDeleteForm()">Cancel</button>
                 </div>
             </div>
-
-            <div id="usersTable" style="max-height:400px;overflow-y:auto;border:1px solid #eee;border-radius:6px"></div>
 
             <div class="actions" style="justify-content:center;margin-top:16px">
                 <button class="btn btn-secondary" onclick="closeModal('usersModal')">Close</button>
@@ -575,1564 +474,37 @@
         </div>
     </div>
 
-    <!-- Backup/Restore Modal -->
+    <!-- Backup/Restore Modal (kept for backward compatibility) -->
     <div class="modal-overlay" id="backupModal">
         <div class="modal" style="max-width:450px;text-align:left">
             <h3 style="margin-bottom:16px">Backup / Restore</h3>
-            <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
-                <h4 style="margin-bottom:8px;font-size:14px">📤 Export (Backup)</h4>
-                <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as a ZIP archive.</p>
-                <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Download Backup</button>
-                <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
-            </div>
-            <div style="padding:16px;background:#f8f9fa;border-radius:8px">
-                <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
-                <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
-                <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
-                <input type="file" id="importFile" accept=".zip,.json" style="display:none" onchange="importDatabase(this)">
-                <span id="importProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Importing...</span>
-                <div id="importResult" class="hidden" style="margin-top:8px;font-size:13px;color:#27ae60"></div>
-            </div>
-            <div class="actions" style="margin-top:16px">
+            <p style="font-size:13px;color:#666;margin-bottom:16px">Use the Settings page for backup and restore operations.</p>
+            <div class="actions" style="justify-content:center">
+                <button class="btn btn-primary" onclick="showSettings(); closeModal('backupModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('backupModal')">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- Save Logs Modal -->
+    <!-- Save Logs Modal (kept for backward compatibility) -->
     <div class="modal-overlay" id="logsModal">
         <div class="modal" style="max-width:450px;text-align:left">
             <h3 style="margin-bottom:16px">Save Logs</h3>
-            <p style="font-size:13px;color:#666;margin-bottom:16px">Download system logs for troubleshooting. The logs include recent API calls and errors.</p>
-            <div style="margin-bottom:16px">
-                <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Log level</label>
-                <select id="logLevel" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px">
-                    <option value="all">All logs</option>
-                    <option value="errors">Errors only</option>
-                </select>
-            </div>
-            <div class="actions">
-                <button class="btn btn-primary" onclick="downloadLogs()">Download Logs</button>
+            <p style="font-size:13px;color:#666;margin-bottom:16px">Use the Settings page to download logs.</p>
+            <div class="actions" style="justify-content:center">
+                <button class="btn btn-primary" onclick="showSettings(); closeModal('logsModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('logsModal')">Close</button>
             </div>
         </div>
     </div>
 
-    <script>
-        // State
-        let isConnected = false;
-        let uploadedFiles = [];
-        let currentFileIndex = -1;
-        let reviewPages = [];
-        let reviewCurrentPage = 0;
-        let extractedData = null;
-        let processing = false;
-        let abortController = null;
-        let currentUser = null;        // {id, username, role, must_change_password}
-        let appInitialized = false;
-        let suppressAuthRedirect = false; // set during /auth/* calls to avoid loops
-
-        // ─── Auth ────────────────────────────────────────────
-        // Wrap window.fetch so every request sends cookies and a 401
-        // (other than /auth/* and /version) re-shows the login overlay.
-        const _nativeFetch = window.fetch.bind(window);
-        window.fetch = async function(input, init) {
-            init = init || {};
-            init.credentials = 'include';
-            const url = typeof input === 'string' ? input : input.url;
-            const resp = await _nativeFetch(input, init);
-            if (resp.status === 401
-                && !suppressAuthRedirect
-                && !url.includes('/auth/')
-                && !url.includes('/version')) {
-                showLogin();
-            }
-            return resp;
-        };
-
-        async function apiFetch(url, opts = {}) {
-            opts.credentials = 'include';
-            const r = await _nativeFetch(url, opts);
-            if (r.status === 401) {
-                const data = await r.clone().json().catch(() => ({}));
-                if (data.detail && data.detail !== 'Not authenticated') {
-                    throw new Error(data.detail);
-                }
-                throw new Error('Not authenticated');
-            }
-            return r;
-        }
-
-        function showLogin() {
-            document.getElementById('loginOverlay').classList.remove('hidden');
-            document.getElementById('userBadge').classList.add('hidden');
-            currentUser = null;
-            setTimeout(() => {
-                const u = document.getElementById('loginUsername');
-                if (u) u.focus();
-            }, 50);
-        }
-
-        function hideLogin() {
-            document.getElementById('loginOverlay').classList.add('hidden');
-            document.getElementById('loginError').classList.add('hidden');
-        }
-
-        function showLoginError(msg) {
-            const e = document.getElementById('loginError');
-            e.textContent = msg;
-            e.classList.remove('hidden');
-        }
-
-        function showChangePassword(subtitle) {
-            document.getElementById('changePasswordSubtitle').textContent = subtitle || 'You must change your password before continuing.';
-            document.getElementById('changePasswordModal').classList.remove('hidden');
-            setTimeout(() => document.getElementById('cpOld').focus(), 50);
-        }
-
-        function hideChangePassword() {
-            document.getElementById('changePasswordModal').classList.add('hidden');
-            document.getElementById('changePasswordError').classList.add('hidden');
-        }
-
-        function showChangePasswordError(msg) {
-            const e = document.getElementById('changePasswordError');
-            e.textContent = msg;
-            e.classList.remove('hidden');
-        }
-
-        function renderUserBadge() {
-            if (!currentUser) {
-                document.getElementById('userBadge').classList.add('hidden');
-                return;
-            }
-            const tag = document.getElementById('userRoleTag');
-            tag.textContent = currentUser.role;
-            tag.className = 'role-tag ' + currentUser.role;
-            document.getElementById('userName').textContent = currentUser.username;
-            document.getElementById('userBadge').classList.remove('hidden');
-            applyRoleClass();
-        }
-
-        function applyRoleClass() {
-            // Remove all role classes first, then add the current one.
-            document.body.classList.remove('role-master', 'role-admin', 'role-user');
-            if (currentUser) {
-                document.body.classList.add('role-' + currentUser.role);
-            }
-            // Re-apply admin restrictions to the Settings modal (in case it's open)
-            applyAdminSettingsLock();
-        }
-
-        function applyAdminSettingsLock() {
-            const isAdmin = currentUser && currentUser.role === 'admin';
-            const inputs = [
-                'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
-                'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
-            ];
-            inputs.forEach(id => {
-                const el = document.getElementById(id);
-                if (!el) return;
-                el.disabled = isAdmin;
-                if (isAdmin) {
-                    el.title = 'Only Master can change AI settings';
-                } else {
-                    el.removeAttribute('title');
-                }
-            });
-            const saveBtn = document.getElementById('saveSettingsBtn');
-            if (saveBtn) {
-                saveBtn.disabled = isAdmin;
-                if (isAdmin) saveBtn.title = 'Only Master can change AI settings';
-                else saveBtn.removeAttribute('title');
-            }
-        }
-
-        async function doLogin() {
-            const u = document.getElementById('loginUsername').value.trim();
-            const p = document.getElementById('loginPassword').value;
-            if (!u || !p) return;
-            const btn = document.getElementById('loginSubmitBtn');
-            btn.disabled = true;
-            btn.textContent = 'Signing in…';
-            try {
-                suppressAuthRedirect = true;
-                const r = await _nativeFetch('/auth/login', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: u, password: p }),
-                });
-                if (r.ok) {
-                    const data = await r.json();
-                    currentUser = data;
-                    renderUserBadge();
-                    hideLogin();
-                    document.getElementById('loginPassword').value = '';
-                    if (data.must_change_password) {
-                        showChangePassword();
-                    } else if (!appInitialized) {
-                        await initApp();
-                    }
-                } else if (r.status === 401) {
-                    showLoginError('Invalid username or password');
-                } else {
-                    const err = await r.json().catch(() => ({}));
-                    showLoginError(err.detail || 'Login failed');
-                }
-            } catch (e) {
-                showLoginError('Login failed: ' + e.message);
-            } finally {
-                suppressAuthRedirect = false;
-                btn.disabled = false;
-                btn.textContent = 'Sign in';
-            }
-        }
-
-        async function doChangePassword() {
-            const oldP = document.getElementById('cpOld').value;
-            const newP = document.getElementById('cpNew').value;
-            const conf = document.getElementById('cpConfirm').value;
-            if (newP !== conf) {
-                showChangePasswordError('New passwords do not match');
-                return;
-            }
-            if (newP.length < 6) {
-                showChangePasswordError('New password must be at least 6 characters');
-                return;
-            }
-            const btn = document.getElementById('changePasswordBtn');
-            btn.disabled = true;
-            btn.textContent = 'Changing…';
-            try {
-                suppressAuthRedirect = true;
-                const r = await _nativeFetch('/auth/change-password', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ old_password: oldP, new_password: newP }),
-                });
-                if (r.ok) {
-                    hideChangePassword();
-                    document.getElementById('cpOld').value = '';
-                    document.getElementById('cpNew').value = '';
-                    document.getElementById('cpConfirm').value = '';
-                    if (currentUser) currentUser.must_change_password = false;
-                    if (!appInitialized) {
-                        await initApp();
-                    }
-                } else {
-                    const err = await r.json().catch(() => ({}));
-                    showChangePasswordError(err.detail || 'Password change failed');
-                }
-            } catch (e) {
-                showChangePasswordError('Change failed: ' + e.message);
-            } finally {
-                suppressAuthRedirect = false;
-                btn.disabled = false;
-                btn.textContent = 'Change Password';
-            }
-        }
-
-        async function doLogout() {
-            try {
-                suppressAuthRedirect = true;
-                await _nativeFetch('/auth/logout', { method: 'POST', credentials: 'include' });
-            } catch (e) { /* ignore */ }
-            suppressAuthRedirect = false;
-            currentUser = null;
-            appInitialized = false;
-            renderUserBadge();
-            // Reset the app: hide everything, show login
-            document.getElementById('fileListSection').classList.add('hidden');
-            document.getElementById('reviewSection').classList.add('hidden');
-            document.getElementById('searchSection').classList.add('hidden');
-            document.getElementById('uploadSection').classList.remove('hidden');
-            uploadedFiles = [];
-            currentFileIndex = -1;
-            isConnected = false;
-            updateConnectionUI();
-            showLogin();
-        }
-
-        // Returns true if the current role is allowed to use admin/master
-        // features (uploading, processing, deleting, etc.).
-        function canModify() {
-            return currentUser && (currentUser.role === 'admin' || currentUser.role === 'master');
-        }
-        function isMaster() {
-            return currentUser && currentUser.role === 'master';
-        }
-
-        // ─── Users Management (master only) ──────────────────
-        let usersCache = [];
-        let editingUserId = null;
-
-        function showUsersError(msg) {
-            const e = document.getElementById('usersError');
-            e.textContent = msg;
-            e.classList.remove('hidden');
-        }
-        function clearUsersError() {
-            document.getElementById('usersError').classList.add('hidden');
-        }
-
-        async function openUsersModal() {
-            if (!isMaster()) return;
-            clearUsersError();
-            hideAddUserForm();
-            hideEditUserForm();
-            document.getElementById('usersModal').classList.add('active');
-            await loadUsersTable();
-        }
-
-        async function loadUsersTable() {
-            try {
-                const r = await apiFetch('/users');
-                if (!r.ok) throw new Error('Failed to load users');
-                usersCache = await r.json();
-                renderUsersTable();
-            } catch (e) {
-                showUsersError('Failed to load users: ' + e.message);
-            }
-        }
-
-        function renderUsersTable() {
-            const totalMasterCount = usersCache.filter(u => u.role === 'master').length;
-            const container = document.getElementById('usersTable');
-            if (usersCache.length === 0) {
-                container.innerHTML = '<div style="padding:20px;text-align:center;color:#888">No users found.</div>';
-                return;
-            }
-            const esc = (s) => String(s == null ? '' : s)
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
-            const rows = usersCache.map(u => {
-                const isSelf = currentUser && u.id === currentUser.id;
-                // Hard delete (the only delete option now) is blocked if the target
-                // is the last master of any status. Self-delete is always blocked.
-                const isLastMaster = u.role === 'master' && totalMasterCount <= 1;
-                const canDelete = !isSelf && !isLastMaster;
-                let deleteTitle = 'Permanently delete user';
-                if (isSelf) deleteTitle = 'Cannot delete yourself';
-                else if (isLastMaster) deleteTitle = 'Cannot delete the last master';
-                const status = u.active
-                    ? '<span style="color:#27ae60">● active</span>'
-                    : '<span style="color:#999">○ inactive</span>';
-                const lastLogin = u.last_login
-                    ? new Date(u.last_login + (u.last_login.endsWith('Z') ? '' : 'Z')).toLocaleString()
-                    : '—';
-                const created = u.created_at
-                    ? new Date(u.created_at + (u.created_at.endsWith('Z') ? '' : 'Z')).toLocaleString()
-                    : '—';
-                const roleClass = `role-tag ${u.role}`;
-                return `<tr>
-                    <td>${u.id}</td>
-                    <td>${esc(u.username)}</td>
-                    <td><span class="${roleClass}">${esc(u.role)}</span></td>
-                    <td>${status}</td>
-                    <td style="font-size:12px">${esc(lastLogin)}</td>
-                    <td style="font-size:12px">${esc(created)}</td>
-                    <td>
-                        <button class="btn btn-sm btn-primary" onclick="showEditUserForm(${u.id})">Edit</button>
-                        <button class="btn btn-sm btn-danger" ${canDelete ? '' : 'disabled title="' + deleteTitle + '"'} onclick="confirmDeleteUser(${u.id}, '${esc(u.username).replace(/'/g, "\\'")}')">Delete</button>
-                    </td>
-                </tr>`;
-            }).join('');
-            container.innerHTML = `
-                <table style="width:100%;border-collapse:collapse;font-size:13px">
-                    <thead>
-                        <tr style="background:#f8f9fa;text-align:left">
-                            <th style="padding:8px">ID</th>
-                            <th style="padding:8px">Username</th>
-                            <th style="padding:8px">Role</th>
-                            <th style="padding:8px">Status</th>
-                            <th style="padding:8px">Last Login</th>
-                            <th style="padding:8px">Created</th>
-                            <th style="padding:8px">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>`;
-        }
-
-        function showAddUserForm() {
-            clearUsersError();
-            hideEditUserForm();
-            document.getElementById('addUserForm').classList.remove('hidden');
-            document.getElementById('newUsername').value = '';
-            document.getElementById('newPassword').value = '';
-            document.getElementById('newRole').value = 'admin';
-            document.getElementById('newUsername').focus();
-        }
-        function hideAddUserForm() {
-            document.getElementById('addUserForm').classList.add('hidden');
-        }
-
-        function showEditUserForm(userId) {
-            clearUsersError();
-            hideAddUserForm();
-            hideHardDeleteForm();
-            const u = usersCache.find(x => x.id === userId);
-            if (!u) return;
-            editingUserId = userId;
-            document.getElementById('editUserTitle').textContent = `Edit user: ${u.username}`;
-            document.getElementById('editRole').value = u.role;
-            document.getElementById('editPassword').value = '';
-            document.getElementById('editActive').checked = !!u.active;
-            document.getElementById('editUserForm').classList.remove('hidden');
-        }
-        function hideEditUserForm() {
-            document.getElementById('editUserForm').classList.add('hidden');
-            editingUserId = null;
-        }
-
-        async function submitAddUser() {
-            const username = document.getElementById('newUsername').value.trim();
-            const password = document.getElementById('newPassword').value;
-            const role = document.getElementById('newRole').value;
-            if (!username) { showUsersError('Username is required'); return; }
-            if (password.length < 6) { showUsersError('Password must be at least 6 characters'); return; }
-            try {
-                const r = await apiFetch('/users', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password, role }),
-                });
-                if (!r.ok) {
-                    const err = await r.json().catch(() => ({}));
-                    throw new Error(err.detail || `HTTP ${r.status}`);
-                }
-                hideAddUserForm();
-                await loadUsersTable();
-            } catch (e) {
-                showUsersError(e.message);
-            }
-        }
-
-        async function submitEditUser() {
-            if (!editingUserId) return;
-            const role = document.getElementById('editRole').value;
-            const newPassword = document.getElementById('editPassword').value;
-            const active = document.getElementById('editActive').checked;
-            if (newPassword && newPassword.length < 6) {
-                showUsersError('New password must be at least 6 characters');
-                return;
-            }
-            try {
-                const body = { role, active };
-                if (newPassword) body.new_password = newPassword;
-                const r = await apiFetch(`/users/${editingUserId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                if (!r.ok) {
-                    const err = await r.json().catch(() => ({}));
-                    throw new Error(err.detail || `HTTP ${r.status}`);
-                }
-                hideEditUserForm();
-                await loadUsersTable();
-            } catch (e) {
-                showUsersError(e.message);
-            }
-        }
-
-        // Hard delete state + functions (master only, irreversible)
-        let hardDeletingUserId = null;
-
-        function showHardDeleteForm(userId, username) {
-            clearUsersError();
-            hideAddUserForm();
-            hideEditUserForm();
-            const u = usersCache.find(x => x.id === userId);
-            if (!u) return;
-            hardDeletingUserId = userId;
-            document.getElementById('hardDeleteTarget').textContent = username;
-            document.getElementById('hardDeleteConfirm').value = '';
-            document.getElementById('hardDeleteBtn').disabled = true;
-            document.getElementById('hardDeleteForm').classList.remove('hidden');
-            // Live-validate the confirm input
-            const inp = document.getElementById('hardDeleteConfirm');
-            inp.oninput = () => {
-                document.getElementById('hardDeleteBtn').disabled =
-                    inp.value.trim() !== username;
-            };
-            setTimeout(() => inp.focus(), 50);
-        }
-        function hideHardDeleteForm() {
-            document.getElementById('hardDeleteForm').classList.add('hidden');
-            hardDeletingUserId = null;
-        }
-
-        async function submitHardDelete() {
-            if (!hardDeletingUserId) return;
-            const btn = document.getElementById('hardDeleteBtn');
-            btn.disabled = true;
-            btn.textContent = 'Deleting…';
-            try {
-                const r = await apiFetch(`/users/${hardDeletingUserId}?hard=true`, { method: 'DELETE' });
-                if (!r.ok) {
-                    const err = await r.json().catch(() => ({}));
-                    throw new Error(err.detail || `HTTP ${r.status}`);
-                }
-                hideHardDeleteForm();
-                await loadUsersTable();
-            } catch (e) {
-                showUsersError(e.message);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Delete Permanently';
-            }
-        }
-
-        async function confirmDeleteUser(userId, username) {
-            clearUsersError();
-            // Use the dedicated hard-delete form (with type-to-confirm) instead of a popup
-            showHardDeleteForm(userId, username);
-        }
-
-        // === Preferences Menu ===
-        function togglePrefsMenu() {
-            const menu = document.getElementById('prefsMenu');
-            menu.classList.toggle('hidden');
-        }
-
-        function closePrefsMenu() {
-            document.getElementById('prefsMenu').classList.add('hidden');
-        }
-
-        // Load popup duration + version are now called from initApp() after auth.
-
-        // Close menu when clicking outside
-        document.addEventListener('click', (e) => {
-            const menu = document.getElementById('prefsMenu');
-            if (!e.target.closest('#prefsMenu') && !e.target.closest('[onclick*="togglePrefsMenu"]')) {
-                menu.classList.add('hidden');
-            }
-        });
-
-        // === Settings ===
-        async function openSettings() {
-            try {
-                const resp = await fetch('/config');
-                const cfg = await resp.json();
-                document.getElementById('settingsEndpoint').value = cfg.ai_endpoint || '';
-                document.getElementById('settingsModel').value = cfg.model || '';
-                document.getElementById('settingsExternalUrl').value = cfg.external_url || '';
-                document.getElementById('settingsTimeout').value = cfg.timeout || 120;
-                document.getElementById('settingsRetries').value = cfg.max_retries || 2;
-                document.getElementById('settingsPopupDuration').value = cfg.popup_duration || 3;
-                document.getElementById('settingsModal').classList.add('active');
-                applyAdminSettingsLock();
-            } catch (e) {
-                showBriefPopup('Failed to load settings');
-            }
-        }
-
-        async function saveSettings() {
-            const endpoint = document.getElementById('settingsEndpoint').value.trim();
-            const model = document.getElementById('settingsModel').value.trim();
-            const externalUrl = document.getElementById('settingsExternalUrl').value.trim();
-            const timeout = parseInt(document.getElementById('settingsTimeout').value) || 120;
-            const retries = parseInt(document.getElementById('settingsRetries').value) || 2;
-            const popupDuration = parseInt(document.getElementById('settingsPopupDuration').value) || 3;
-
-            if (!endpoint) { showBriefPopup('AI endpoint URL is required'); return; }
-            if (!model) { showBriefPopup('Model name is required'); return; }
-
-            try {
-                const resp = await fetch('/config', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ai_endpoint: endpoint, model: model, external_url: externalUrl, timeout: timeout, max_retries: retries, popup_duration: popupDuration })
-                });
-                const result = await resp.json();
-                if (result.status === 'saved') {
-                    popupDurationSec = popupDuration;
-                    closeModal('settingsModal');
-                    showBriefPopup('Settings saved!');
-                }
-            } catch (e) {
-                showBriefPopup('Failed to save settings: ' + e.message);
-            }
-        }
-
-        // === AI Connection ===
-        function updateConnectionUI() {
-            const btn = document.getElementById('connectBtn');
-            const dot = document.getElementById('statusDot');
-            const text = document.getElementById('statusText');
-            if (isConnected) {
-                btn.className = 'btn btn-danger';
-                btn.textContent = 'Disconnect';
-                dot.className = 'status-dot green';
-                text.className = 'status-text connected';
-                text.textContent = 'CONNECTED';
-                document.getElementById('processAllBtn').disabled = false;
-            } else {
-                btn.className = 'btn btn-primary';
-                btn.textContent = 'Connect to AI Server';
-                dot.className = 'status-dot red';
-                text.className = 'status-text disconnected';
-                text.textContent = 'DISCONNECTED';
-                document.getElementById('processAllBtn').disabled = true;
-            }
-            btn.disabled = false;
-        }
-
-        async function toggleConnection() {
-            if (isConnected) {
-                isConnected = false;
-                updateConnectionUI();
-                return;
-            }
-            const btn = document.getElementById('connectBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px"></span> Connecting...';
-            try {
-                const response = await fetch('/ai/connect', { method: 'POST' });
-                const data = await response.json();
-                if (data.status === 'connected') {
-                    isConnected = true;
-                    updateConnectionUI();
-                } else {
-                    throw new Error(data.error || 'Connection failed');
-                }
-            } catch (err) {
-                document.getElementById('connectError').textContent = err.message || 'Unable to connect to AI server';
-                document.getElementById('connectFailedModal').classList.add('active');
-                updateConnectionUI();
-            }
-        }
-
-        function retryConnect() {
-            closeModal('connectFailedModal');
-            toggleConnection();
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).classList.remove('active');
-        }
-
-        // === Brief Popup ===
-        let popupDurationSec = 3;
-
-        async function loadPopupDuration() {
-            try {
-                const resp = await fetch('/config');
-                const cfg = await resp.json();
-                popupDurationSec = cfg.popup_duration || 3;
-            } catch (e) { popupDurationSec = 3; }
-        }
-
-        // === Version Display ===
-        async function loadVersion() {
-            try {
-                const resp = await fetch('/version');
-                const data = await resp.json();
-                const label = document.getElementById('versionLabel');
-                if (label && data.version) {
-                    label.textContent = `v${data.version} (${data.commit})`;
-                }
-            } catch (e) { /* keep default */ }
-        }
-
-        function showBriefPopup(message) {
-            const overlay = document.createElement('div');
-            overlay.className = 'modal-overlay active';
-            overlay.innerHTML = `
-                <div class="modal" style="max-width:350px">
-                    <p style="font-size:15px;margin:0">${message}</p>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-            setTimeout(() => {
-                overlay.classList.remove('active');
-                setTimeout(() => overlay.remove(), 300);
-            }, popupDurationSec * 1000);
-        }
-
-        function showConfirmPopup(message, onConfirm) {
-            const overlay = document.createElement('div');
-            overlay.className = 'modal-overlay active';
-            overlay.innerHTML = `
-                <div class="modal" style="max-width:400px">
-                    <p style="font-size:15px;margin:0 0 16px 0">${message}</p>
-                    <div class="actions" style="justify-content:center">
-                        <button class="btn btn-danger btn-sm" id="confirmYes">Yes, Delete</button>
-                        <button class="btn btn-secondary btn-sm" id="confirmNo">Cancel</button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-            overlay.querySelector('#confirmYes').onclick = () => {
-                overlay.remove();
-                onConfirm();
-            };
-            overlay.querySelector('#confirmNo').onclick = () => {
-                overlay.remove();
-            };
-        }
-
-        // === Connect/Disconnect from Settings ===
-        async function connectFromSettings() {
-            const btn = document.getElementById('settingsConnectBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px"></span> Connecting...';
-            try {
-                const response = await fetch('/ai/connect', { method: 'POST' });
-                const data = await response.json();
-                if (data.status === 'connected') {
-                    isConnected = true;
-                    updateConnectionUI();
-                    btn.classList.add('hidden');
-                    document.getElementById('settingsDisconnectBtn').classList.remove('hidden');
-                } else {
-                    throw new Error(data.error || 'Connection failed');
-                }
-            } catch (err) {
-                showBriefPopup('Connection failed: ' + err.message);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Connect to AI Server';
-            }
-        }
-
-        async function disconnectFromSettings() {
-            isConnected = false;
-            updateConnectionUI();
-            document.getElementById('settingsConnectBtn').classList.remove('hidden');
-            document.getElementById('settingsDisconnectBtn').classList.add('hidden');
-        }
-
-        function updateSettingsConnectionUI() {
-            if (isConnected) {
-                document.getElementById('settingsConnectBtn').classList.add('hidden');
-                document.getElementById('settingsDisconnectBtn').classList.remove('hidden');
-            } else {
-                document.getElementById('settingsConnectBtn').classList.remove('hidden');
-                document.getElementById('settingsDisconnectBtn').classList.add('hidden');
-            }
-        }
-
-        // === Backup / Restore ===
-        function openBackupRestore() {
-            document.getElementById('backupModal').classList.add('active');
-        }
-
-        // === Save Logs ===
-        function saveLogs() {
-            document.getElementById('logsModal').classList.add('active');
-        }
-
-        async function downloadLogs() {
-            const level = document.getElementById('logLevel').value;
-            try {
-                const resp = await fetch(`/logs?level=${level}`);
-                const data = await resp.json();
-                const blob = new Blob([data.logs || 'No logs available'], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `quodb_logs_${new Date().toISOString().slice(0, 10)}.txt`;
-                a.click();
-                URL.revokeObjectURL(url);
-                closeModal('logsModal');
-            } catch (e) {
-                showBriefPopup('Failed to get logs: ' + e.message);
-            }
-        }
-
-        // === File Upload ===
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-
-        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
-        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
-        });
-        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
-
-        async function handleFiles(files) {
-            for (const file of files) {
-                if (file.type !== 'application/pdf') continue;
-                const formData = new FormData();
-                formData.append('file', file);
-                const resp = await fetch('/upload', { method: 'POST', body: formData });
-                const data = await resp.json();
-                data.backendIndex = data.file_index;
-                // Check for duplicates
-                try {
-                    const dupResp = await fetch(`/check-duplicate?filename=${encodeURIComponent(file.name)}`);
-                    const dup = await dupResp.json();
-                    if (dup.exists || dup.in_database) {
-                        data.duplicate = true;
-                    }
-                } catch (e) { /* ignore check errors */ }
-                uploadedFiles.push(data);
-                renderFileList();
-            }
-        }
-
-        function renderFileList() {
-            const section = document.getElementById('fileListSection');
-            const list = document.getElementById('fileList');
-            if (uploadedFiles.length === 0) {
-                section.classList.add('hidden');
-                return;
-            }
-            section.classList.remove('hidden');
-            const pendingCount = uploadedFiles.filter(f => f.status === 'pending').length;
-            const doneCount = uploadedFiles.filter(f => f.status === 'done' || f.status === 'saved').length;
-            list.innerHTML = uploadedFiles.map((f, i) => {
-                let statusHtml = '';
-                if (f.status === 'pending') statusHtml = '<span class="file-status pending">Pending</span>';
-                else if (f.status === 'processing') statusHtml = `<span class="file-status processing">${f.progress || 'Processing...'}</span>`;
-                else if (f.status === 'done') statusHtml = '<span class="file-status done">✓ Ready to review</span>';
-                else if (f.status === 'saved') statusHtml = '<span class="file-status done">✓ Saved</span>';
-                else if (f.status === 'error') statusHtml = '<span class="file-status error">✗ Error</span>';
-                else if (f.status === 'skipped') statusHtml = '<span class="file-status" style="color:#999">Skipped</span>';
-                const dupBadge = f.duplicate ? '<span class="file-status" style="background:#fef9e7;color:#e67e22;margin-right:6px">⚠ Duplicate</span>' : '';
-                const canMove = f.status === 'pending';
-                const moveHtml = canMove ? `
-                    <span style="display:inline-flex;gap:2px;margin-right:8px">
-                        <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up" style="padding:2px 6px;font-size:11px">▲</button>
-                        <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, 1)" ${i === uploadedFiles.length - 1 ? 'disabled' : ''} title="Move down" style="padding:2px 6px;font-size:11px">▼</button>
-                    </span>
-                ` : '';
-                return `
-                    <div class="file-item">
-                        <span class="file-name">${moveHtml}${dupBadge}${f.filename} (${f.pages} page${f.pages !== 1 ? 's' : ''})</span>
-                        ${statusHtml}
-                    </div>
-                `;
-            }).join('');
-            const summary = document.getElementById('queueSummary');
-            if (summary) {
-                if (pendingCount > 0) {
-                    summary.textContent = `${doneCount} of ${uploadedFiles.length} done — ${pendingCount} pending`;
-                    summary.classList.remove('hidden');
-                } else {
-                    summary.classList.add('hidden');
-                }
-            }
-        }
-
-        function moveFile(index, direction) {
-            const newIndex = index + direction;
-            if (newIndex < 0 || newIndex >= uploadedFiles.length) return;
-            const item = uploadedFiles.splice(index, 1)[0];
-            uploadedFiles.splice(newIndex, 0, item);
-            renderFileList();
-        }
-
-        async function clearFiles() {
-            await fetch('/clear', { method: 'POST' });
-            uploadedFiles = [];
-            renderFileList();
-        }
-
-        // === Process All Pages (streaming progress) ===
-        async function processAll() {
-            if (!isConnected) { showBriefPopup('Please connect to AI server first.'); return; }
-            if (uploadedFiles.length === 0) return;
-
-            let fileIdx = uploadedFiles.findIndex(f => f.status === 'pending');
-            if (fileIdx === -1) { showBriefPopup('No pending files to process.'); return; }
-
-            const file = uploadedFiles[fileIdx];
-            const backendIdx = file.backendIndex;
-            currentFileIndex = backendIdx;
-
-            // Mark as processing
-            uploadedFiles[fileIdx].status = 'processing';
-            uploadedFiles[fileIdx].progress = 'Starting...';
-            renderFileList();
-
-            document.getElementById('processingModal').classList.add('active');
-            processing = true;
-            abortController = new AbortController();
-            document.getElementById('processingText').textContent = `Starting ${file.filename}...`;
-            document.getElementById('processingDetail').textContent = '';
-            document.getElementById('progressFill').style.width = '0%';
-
-            try {
-                const resp = await fetch('/process-stream', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ file_index: backendIdx }),
-                    signal: abortController.signal
-                });
-
-                const reader = resp.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop(); // Keep incomplete line in buffer
-
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        const jsonStr = line.slice(6);
-                        try {
-                            const msg = JSON.parse(jsonStr);
-                            if (msg.type === 'progress') {
-                                document.getElementById('processingText').textContent = msg.message;
-                                document.getElementById('progressFill').style.width = msg.percent + '%';
-                                uploadedFiles[fileIdx].progress = `Page ${msg.page}/${msg.total}`;
-                                renderFileList();
-                            } else if (msg.type === 'page_done') {
-                                document.getElementById('processingDetail').textContent = `Found ${msg.items_found} item(s) on page ${msg.page}`;
-                                document.getElementById('progressFill').style.width = msg.percent + '%';
-                                uploadedFiles[fileIdx].progress = `Page ${msg.page}/${msg.total} ✓`;
-                                renderFileList();
-                            } else if (msg.type === 'page_error') {
-                                document.getElementById('processingDetail').textContent = `Page ${msg.page}: ${msg.error}`;
-                            } else if (msg.type === 'done') {
-                                document.getElementById('progressFill').style.width = '100%';
-                                extractedData = msg.data;
-                                uploadedFiles[fileIdx].status = 'done';
-                                uploadedFiles[fileIdx].progress = '';
-                                renderFileList();
-
-                                const pagesResp = await fetch(`/next-file?file_index=${backendIdx}`);
-                                const pagesData = await pagesResp.json();
-                                reviewPages = pagesData.pages;
-                                reviewCurrentPage = 0;
-
-                                showReview(file.filename);
-                            }
-                        } catch (e) { /* skip parse errors */ }
-                    }
-                }
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    showBriefPopup('Processing failed: ' + err.message);
-                    uploadedFiles[fileIdx].status = 'error';
-                    uploadedFiles[fileIdx].progress = '';
-                    renderFileList();
-                }
-            } finally {
-                processing = false;
-                // Only close modal if not already closed by cancelProcessing
-                if (document.getElementById('processingModal').classList.contains('active')) {
-                    document.getElementById('processingModal').classList.remove('active');
-                }
-            }
-        }
-
-        function cancelProcessing() {
-            if (abortController) {
-                abortController.abort();
-                abortController = null;
-            }
-            processing = false;
-            // Reset current file status to pending
-            if (currentFileIndex >= 0) {
-                const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
-                if (fileIdx !== -1) {
-                    uploadedFiles[fileIdx].status = 'pending';
-                    uploadedFiles[fileIdx].progress = '';
-                    renderFileList();
-                }
-            }
-            document.getElementById('processingModal').classList.remove('active');
-        }
-
-        // === Review (PDF + Data side by side) ===
-        function showReview(filename) {
-            document.getElementById('reviewFilename').textContent = filename;
-            document.getElementById('supplierName').value = extractedData.supplier || '';
-            const tbody = document.getElementById('itemsTable');
-            tbody.innerHTML = '';
-            (extractedData.items || []).forEach(item => addRow(item));
-            updateItemCount();
-            updateReviewPdf();
-            document.getElementById('reviewSection').classList.remove('hidden');
-            document.getElementById('uploadSection').classList.add('hidden');
-            document.getElementById('searchSection').classList.add('hidden');
-        }
-
-        function updateReviewPdf() {
-            if (reviewPages.length > 0) {
-                document.getElementById('reviewPdfImg').src = reviewPages[reviewCurrentPage];
-                document.getElementById('reviewPageInfo').textContent = `Page ${reviewCurrentPage + 1} of ${reviewPages.length}`;
-            }
-        }
-
-        function reviewPrevPage() {
-            if (reviewCurrentPage > 0) { reviewCurrentPage--; updateReviewPdf(); }
-        }
-
-        function reviewNextPage() {
-            if (reviewCurrentPage < reviewPages.length - 1) { reviewCurrentPage++; updateReviewPdf(); }
-        }
-
-        function updateItemCount() {
-            const count = document.querySelectorAll('#itemsTable tr').length;
-            document.getElementById('itemCount').textContent = count;
-        }
-
-        function findAndReplace() {
-            const find = document.getElementById('findInput').value;
-            const replace = document.getElementById('replaceInput').value;
-            const caseSensitive = document.getElementById('findCaseSensitive').checked;
-            if (!find) { showBriefPopup('Enter a search term.'); return; }
-
-            let count = 0;
-            const rows = document.querySelectorAll('#itemsTable tr');
-            rows.forEach(row => {
-                row.querySelectorAll('input, textarea').forEach(el => {
-                    let val = el.value;
-                    let searchVal = find;
-                    let replaceVal = replace;
-                    if (!caseSensitive) {
-                        const idx = val.toLowerCase().indexOf(searchVal.toLowerCase());
-                        if (idx !== -1) {
-                            // Rebuild with correct case from original
-                            el.value = val.substring(0, idx) + replaceVal + val.substring(idx + searchVal.length);
-                            count++;
-                            // Continue replacing remaining occurrences
-                            let remaining = el.value;
-                            let offset = idx + replaceVal.length;
-                            while (offset < remaining.length) {
-                                const nextIdx = remaining.toLowerCase().indexOf(searchVal.toLowerCase(), offset);
-                                if (nextIdx === -1) break;
-                                el.value = el.value.substring(0, nextIdx) + replaceVal + el.value.substring(nextIdx + searchVal.length);
-                                remaining = el.value;
-                                offset = nextIdx + replaceVal.length;
-                                count++;
-                            }
-                        }
-                    } else {
-                        let offset = 0;
-                        while (offset < val.length) {
-                            const idx = val.indexOf(find, offset);
-                            if (idx === -1) break;
-                            el.value = el.value.substring(0, idx) + replace + el.value.substring(idx + find.length);
-                            val = el.value;
-                            offset = idx + replace.length;
-                            count++;
-                        }
-                    }
-                });
-            });
-            showBriefPopup(count > 0 ? `Replaced ${count} occurrence(s).` : 'No matches found.');
-        }
-
-        function addRow(item = {}) {
-            const tbody = document.getElementById('itemsTable');
-            const tr = document.createElement('tr');
-            const supplierVal = item.supplier || document.getElementById('supplierName').value || '';
-            tr.innerHTML = `
-                <td><input type="text" value="${item.brand || ''}" placeholder="Brand"></td>
-                <td><input type="text" value="${item.model || ''}" placeholder="Model"></td>
-                <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${item.description || ''}</textarea></td>
-                <td><input type="text" class="price-input" value="${item.unit_price || item.price || ''}" placeholder="0.00"></td>
-                <td><input type="text" class="text-right" value="${item.date || ''}" placeholder="YYYY-MM-DD"></td>
-                <td><input type="text" value="${supplierVal}" placeholder="Supplier"></td>
-                <td><input type="text" value="${item.currency || ''}" placeholder="Currency"></td>
-                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount()">✕</button></td>
-            `;
-            tbody.appendChild(tr);
-            updateItemCount();
-        }
-
-        function getEditedData() {
-            const rows = document.querySelectorAll('#itemsTable tr');
-            const items = [];
-            rows.forEach(row => {
-                const inputs = row.querySelectorAll('input, textarea');
-                items.push({
-                    brand: inputs[0].value,
-                    model: inputs[1].value,
-                    description: inputs[2].value,
-                    unit_price: inputs[3].value,
-                    date: inputs[4].value,
-                    supplier: inputs[5].value,
-                    currency: inputs[6].value
-                });
-            });
-            return {
-                supplier: document.getElementById('supplierName').value,
-                items: items
-            };
-        }
-
-        async function confirmSave() {
-            const data = getEditedData();
-            const resp = await fetch('/confirm', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file_index: currentFileIndex, data: data })
-            });
-            const result = await resp.json();
-            if (result.status === 'saved') {
-                // Update frontend status
-                const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
-                if (fileIdx !== -1) {
-                    uploadedFiles[fileIdx].status = 'saved';
-                    renderFileList();
-                }
-                showBriefPopup('Saved successfully!');
-                setTimeout(async () => {
-                    await backToUpload();
-                    autoProcessNext();
-                }, popupDurationSec * 1000);
-            } else {
-                showBriefPopup('Save failed: ' + result.error);
-            }
-        }
-
-        function backToUpload() {
-            document.getElementById('reviewSection').classList.add('hidden');
-            document.getElementById('uploadSection').classList.remove('hidden');
-            document.getElementById('searchSection').classList.add('hidden');
-            document.getElementById('tabUpload').classList.add('active');
-            document.getElementById('tabSearch').classList.remove('active');
-            extractedData = null;
-            reviewPages = [];
-            renderFileList();
-        }
-
-        function autoProcessNext() {
-            if (!isConnected) return;
-            const nextIdx = uploadedFiles.findIndex(f => f.status === 'pending');
-            if (nextIdx !== -1) {
-                processAll();
-            }
-        }
-
-        // === Navigation ===
-        function showUpload() {
-            document.getElementById('uploadSection').classList.remove('hidden');
-            document.getElementById('searchSection').classList.add('hidden');
-            document.getElementById('reviewSection').classList.add('hidden');
-            document.getElementById('tabUpload').classList.add('active');
-            document.getElementById('tabSearch').classList.remove('active');
-        }
-
-        function showSearch() {
-            document.getElementById('uploadSection').classList.add('hidden');
-            document.getElementById('reviewSection').classList.add('hidden');
-            document.getElementById('searchSection').classList.remove('hidden');
-            document.getElementById('tabUpload').classList.remove('active');
-            document.getElementById('tabSearch').classList.add('active');
-            // Load all results
-            document.getElementById('searchInput').value = '';
-            searchQuotations();
-        }
-
-        // === Search ===
-        let searchSelectedIds = new Set();
-        let sortField = '';
-        let sortDir = 'asc'; // asc or desc
-        let lastSearchItems = [];
-        let searchDebounceTimer = null;
-
-        function debounceSearch() {
-            clearTimeout(searchDebounceTimer);
-            searchDebounceTimer = setTimeout(() => searchQuotations(), 300);
-        }
-
-        function toggleSelectAll(cb) {
-            document.querySelectorAll('.search-cb').forEach(c => { c.checked = cb.checked; });
-            updateSelection();
-        }
-
-        function updateSelection() {
-            searchSelectedIds.clear();
-            document.querySelectorAll('.search-cb:checked').forEach(c => {
-                searchSelectedIds.add(c.dataset.id);
-            });
-            const count = searchSelectedIds.size;
-            const bar = document.getElementById('searchActions');
-            if (count > 0) {
-                bar.classList.remove('hidden');
-                document.getElementById('searchSelectedCount').textContent = count;
-            } else {
-                bar.classList.add('hidden');
-            }
-        }
-
-        function sortBy(field) {
-            if (sortField === field) {
-                sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-            } else {
-                sortField = field;
-                sortDir = 'asc';
-            }
-            renderSearchResults();
-        }
-
-        function sortItems(items) {
-            if (!sortField) return items;
-            const sorted = [...items];
-            sorted.sort((a, b) => {
-                let va = (a[sortField] || '').toString().toLowerCase();
-                let vb = (b[sortField] || '').toString().toLowerCase();
-                // For numeric-like fields (unit_price), parse as number
-                if (sortField === 'unit_price' || sortField === 'price') {
-                    va = parseFloat((va || '0').replace(/,/g, '')) || 0;
-                    vb = parseFloat((vb || '0').replace(/,/g, '')) || 0;
-                    return sortDir === 'asc' ? va - vb : vb - va;
-                }
-                // For date fields, try date parsing
-                if (sortField === 'date' || sortField === '_date') {
-                    const da = Date.parse(va) || 0;
-                    const db = Date.parse(vb) || 0;
-                    return sortDir === 'asc' ? da - db : db - da;
-                }
-                // Text comparison
-                if (va < vb) return sortDir === 'asc' ? -1 : 1;
-                if (va > vb) return sortDir === 'asc' ? 1 : -1;
-                return 0;
-            });
-            return sorted;
-        }
-
-        function renderSearchResults() {
-            const allItems = lastSearchItems;
-            const container = document.getElementById('searchResults');
-            const sorted = sortItems(allItems);
-
-            const sortClass = (field) => {
-                if (sortField !== field) return 'sortable';
-                return `sortable sort-${sortDir}`;
-            };
-
-            const tableHeader = `
-                <tr>
-                    <th style="width:40px"><input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this)"></th>
-                    <th class="${sortClass('brand')}" onclick="sortBy('brand')">Brand</th>
-                    <th class="${sortClass('model')}" onclick="sortBy('model')">Model</th>
-                    <th class="${sortClass('description')}" onclick="sortBy('description')">Description</th>
-                    <th class="${sortClass('unit_price')}" style="text-align:right" onclick="sortBy('unit_price')">Unit Price</th>
-                    <th class="${sortClass('date')}" style="text-align:right" onclick="sortBy('date')">Date</th>
-                    <th class="${sortClass('supplier')}" onclick="sortBy('supplier')">Supplier</th>
-                    <th class="${sortClass('currency')}" onclick="sortBy('currency')">Currency</th>
-                    <th style="text-align:center">Pg</th>
-                </tr>`;
-
-            const renderItem = (item) => `
-                <tr ondblclick="viewPdf('${item._filename}')" style="cursor:pointer" title="Double-click to view PDF">
-                    <td><input type="checkbox" class="search-cb" data-id="${item._id}" data-file="${item._filename}" onchange="updateSelection()"></td>
-                    <td>${item.brand || ''}</td>
-                    <td>${item.model || ''}</td>
-                    <td style="word-wrap:break-word;max-width:300px">${item.description || ''}</td>
-                    <td class="text-right nowrap-cell">${item.unit_price || item.price || ''}</td>
-                    <td class="text-right nowrap-cell">${item.date || ''}</td>
-                    <td style="word-wrap:break-word;max-width:150px">${item.supplier || item._supplier || ''}</td>
-                    <td class="nowrap-cell">${item.currency || ''}</td>
-                    <td style="text-align:center"><span style="color:#3498db;cursor:pointer;text-decoration:underline" onclick="event.stopPropagation(); viewPdf('${item._filename}')">${item.page || '-'}</span></td>
-                </tr>`;
-
-            container.innerHTML = `
-                <div style="background:#fff;border-radius:12px;overflow:hidden">
-                    <table>
-                        <thead>${tableHeader}</thead>
-                        <tbody>${sorted.map(item => renderItem(item)).join('')}</tbody>
-                    </table>
-                </div>
-            `;
-        }
-
-        async function searchQuotations() {
-            const q = document.getElementById('searchInput').value;
-            sortField = '';
-            sortDir = 'asc';
-            const resp = await fetch(`/search?q=${encodeURIComponent(q)}`);
-            const results = await resp.json();
-            const container = document.getElementById('searchResults');
-            searchSelectedIds.clear();
-            document.getElementById('searchActions').classList.add('hidden');
-
-            if (results.length === 0) {
-                container.innerHTML = '<p style="padding:20px;text-align:center;color:#666">No results found</p>';
-                lastSearchItems = [];
-                return;
-            }
-
-            let allItems = [];
-            results.forEach(r => {
-                (r.items || []).forEach(item => {
-                    allItems.push({ ...item, _id: r.id, _filename: r.filename, _supplier: r.supplier || '', _date: r.quotation_date || '' });
-                });
-            });
-
-            lastSearchItems = allItems;
-            renderSearchResults();
-        }
-
-        // === PDF Viewer ===
-        function viewPdf(filename) {
-            document.getElementById('pdfViewerFrame').src = `/archive/${encodeURIComponent(filename)}`;
-            document.getElementById('pdfViewerModal').classList.add('active');
-        }
-
-        async function deleteSelected() {
-            const ids = [...searchSelectedIds].map(Number);
-            if (ids.length === 0) return;
-            showConfirmPopup(`Delete ${ids.length} quotation(s)? This will also remove the archived PDFs.`, async () => {
-                try {
-                    const resp = await fetch('/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ids: ids })
-                    });
-                    const result = await resp.json();
-                    if (result.status === 'deleted') {
-                        searchQuotations();
-                    }
-                } catch (e) {
-                    showBriefPopup('Delete failed: ' + e.message);
-                }
-            });
-        }
-
-        let editQuotationId = null;
-
-        async function editSelected() {
-            const ids = [...searchSelectedIds].map(Number);
-            if (ids.length === 0) return;
-            // For now, edit the first selected quotation
-            editQuotationId = ids[0];
-            // Fetch the quotation data
-            const resp = await fetch(`/search?q=`);
-            const results = await resp.json();
-            const quotation = results.find(r => r.id === editQuotationId);
-            if (!quotation) { showBriefPopup('Quotation not found.'); return; }
-
-            document.getElementById('editSupplier').value = quotation.supplier || '';
-            const tbody = document.getElementById('editItemsTable');
-            tbody.innerHTML = '';
-            (quotation.items || []).forEach(item => editAddRow(item));
-            document.getElementById('editModal').classList.add('active');
-        }
-
-        function editFindAndReplace() {
-            const find = document.getElementById('editFindInput').value;
-            const replace = document.getElementById('editReplaceInput').value;
-            const caseSensitive = document.getElementById('editFindCaseSensitive').checked;
-            if (!find) { showBriefPopup('Enter a search term.'); return; }
-
-            let count = 0;
-            const rows = document.querySelectorAll('#editItemsTable tr');
-            rows.forEach(row => {
-                row.querySelectorAll('input, textarea').forEach(el => {
-                    let val = el.value;
-                    if (!caseSensitive) {
-                        let offset = 0;
-                        while (offset < val.length) {
-                            const idx = val.toLowerCase().indexOf(find.toLowerCase(), offset);
-                            if (idx === -1) break;
-                            el.value = el.value.substring(0, idx) + replace + el.value.substring(idx + find.length);
-                            val = el.value;
-                            offset = idx + replace.length;
-                            count++;
-                        }
-                    } else {
-                        let offset = 0;
-                        while (offset < val.length) {
-                            const idx = val.indexOf(find, offset);
-                            if (idx === -1) break;
-                            el.value = el.value.substring(0, idx) + replace + el.value.substring(idx + find.length);
-                            val = el.value;
-                            offset = idx + replace.length;
-                            count++;
-                        }
-                    }
-                });
-            });
-            showBriefPopup(count > 0 ? `Replaced ${count} occurrence(s).` : 'No matches found.');
-        }
-
-        function editAddRow(item = {}) {
-            const tbody = document.getElementById('editItemsTable');
-            const tr = document.createElement('tr');
-            const supplierVal = item.supplier || document.getElementById('editSupplier').value || '';
-            tr.innerHTML = `
-                <td><input type="text" value="${item.brand || ''}" placeholder="Brand"></td>
-                <td><input type="text" value="${item.model || ''}" placeholder="Model"></td>
-                <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${item.description || ''}</textarea></td>
-                <td><input type="text" class="price-input" value="${item.unit_price || item.price || ''}" placeholder="0.00"></td>
-                <td><input type="text" class="text-right" value="${item.date || ''}" placeholder="YYYY-MM-DD"></td>
-                <td><input type="text" value="${supplierVal}" placeholder="Supplier"></td>
-                <td><input type="text" value="${item.currency || ''}" placeholder="Currency"></td>
-                <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">✕</button></td>
-            `;
-            tbody.appendChild(tr);
-        }
-
-        async function saveEdit() {
-            const rows = document.querySelectorAll('#editItemsTable tr');
-            const items = [];
-            rows.forEach(row => {
-                const inputs = row.querySelectorAll('input, textarea');
-                items.push({
-                    brand: inputs[0].value,
-                    model: inputs[1].value,
-                    description: inputs[2].value,
-                    unit_price: inputs[3].value,
-                    date: inputs[4].value,
-                    supplier: inputs[5].value,
-                    currency: inputs[6].value
-                });
-            });
-            const data = {
-                supplier: document.getElementById('editSupplier').value,
-                items: items
-            };
-            try {
-                const resp = await fetch('/update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: editQuotationId, data: data })
-                });
-                const result = await resp.json();
-                if (result.status === 'updated') {
-                    closeModal('editModal');
-                    searchQuotations();
-                }
-            } catch (e) {
-                showBriefPopup('Update failed: ' + e.message);
-            }
-        }
-
-        function closePdfViewer() {
-            document.getElementById('pdfViewerFrame').src = '';
-            document.getElementById('pdfViewerModal').classList.remove('active');
-        }
-
-        // === Export / Import ===
-        async function exportDatabase() {
-            const btn = document.getElementById('exportBtn');
-            const prog = document.getElementById('exportProgress');
-            btn.disabled = true;
-            prog.classList.remove('hidden');
-            prog.textContent = 'Preparing backup...';
-            try {
-                const resp = await fetch('/export');
-                prog.textContent = 'Creating archive with PDFs...';
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `quodb_backup_${new Date().toISOString().slice(0, 10)}.zip`;
-                a.click();
-                URL.revokeObjectURL(url);
-                prog.textContent = 'Done!';
-                setTimeout(() => { prog.classList.add('hidden'); }, 2000);
-            } catch (e) {
-                showBriefPopup('Export failed: ' + e.message);
-                prog.classList.add('hidden');
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        async function importDatabase(input) {
-            const file = input.files[0];
-            if (!file) return;
-            const btn = document.getElementById('importBtn');
-            const prog = document.getElementById('importProgress');
-            const result = document.getElementById('importResult');
-            btn.disabled = true;
-            prog.classList.remove('hidden');
-            result.classList.add('hidden');
-            prog.textContent = `Reading ${file.name}...`;
-            const formData = new FormData();
-            formData.append('file', file);
-            try {
-                prog.textContent = 'Uploading and importing...';
-                const resp = await fetch('/import/upload', { method: 'POST', body: formData });
-                const data = await resp.json();
-                if (data.status === 'imported') {
-                    let msg = `✓ Imported ${data.count} quotation(s) successfully.`;
-                    if (data.pdfs_restored > 0) msg += ` ${data.pdfs_restored} PDF file(s) restored.`;
-                    result.textContent = msg;
-                    result.style.color = '#27ae60';
-                    result.classList.remove('hidden');
-                    prog.classList.add('hidden');
-                    // Auto-refresh search if on search page
-                    if (!document.getElementById('searchSection').classList.contains('hidden')) {
-                        searchQuotations();
-                    }
-                } else {
-                    result.textContent = '✗ ' + (data.error || 'Import failed');
-                    result.style.color = '#e74c3c';
-                    result.classList.remove('hidden');
-                    prog.classList.add('hidden');
-                }
-            } catch (e) {
-                result.textContent = '✗ Import failed: ' + e.message;
-                result.style.color = '#e74c3c';
-                result.classList.remove('hidden');
-                prog.classList.add('hidden');
-            } finally {
-                btn.disabled = false;
-                input.value = '';
-            }
-        }
-
-        // Close PDF viewer on Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closePdfViewer();
-        });
-
-        // ─── Auth-aware startup ──────────────────────────────
-        async function initApp() {
-            if (appInitialized) return;
-            // Anything that used to be called on script load goes here.
-            try { await loadPopupDuration(); } catch (e) { /* offline / not auth */ }
-            try { await loadVersion();       } catch (e) { /* offline / not auth */ }
-            // Default landing: Upload tab (admin/master) or Search tab (user).
-            if (currentUser && currentUser.role === 'user') {
-                showSearch();
-            } else {
-                showUpload();
-            }
-            appInitialized = true;
-        }
-
-        async function checkAuthAndBoot() {
-            try {
-                suppressAuthRedirect = true;
-                const r = await _nativeFetch('/auth/me', { credentials: 'include' });
-                if (r.ok) {
-                    const data = await r.json();
-                    currentUser = data;
-                    renderUserBadge();
-                    if (data.must_change_password) {
-                        showChangePassword();
-                    } else {
-                        await initApp();
-                    }
-                } else {
-                    showLogin();
-                }
-            } catch (e) {
-                showLogin();
-            } finally {
-                suppressAuthRedirect = false;
-            }
-        }
-
-        // Boot once the DOM is ready.
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', checkAuthAndBoot);
-        } else {
-            checkAuthAndBoot();
-        }
-    </script>
+    <!-- Scripts (defer = run in order after DOM is parsed) -->
+    <script src="/static/js/app.js" defer></script>
+    <script src="/static/js/auth.js" defer></script>
+    <script src="/static/js/nav.js" defer></script>
+    <script src="/static/js/upload.js" defer></script>
+    <script src="/static/js/search.js" defer></script>
+    <script src="/static/js/settings.js" defer></script>
+    <script src="/static/js/users.js" defer></script>
 </body>
 </html>

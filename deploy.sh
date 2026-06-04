@@ -42,6 +42,7 @@ fi
 
 # Get the current commit hash (local, no network needed)
 GIT_COMMIT=$(git rev-parse --short HEAD)
+export GIT_COMMIT
 echo ">> Current commit: $GIT_COMMIT"
 
 # Build the image with commit hash baked in

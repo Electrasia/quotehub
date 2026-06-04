@@ -423,7 +423,7 @@ async def upload(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         return JSONResponse(status_code=400, content={"error": "Only PDF files allowed"})
 
-    filepath = UPLOAD_DIR / file.filename
+    filepath = UPLOAD_DIR / Path(file.filename).name
     with open(filepath, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -440,6 +440,18 @@ async def upload(file: UploadFile = File(...)):
             page_images.append(f"/images/{Path(file.filename).stem}/page_{i+1}.png")
     except Exception as e:
         print(f"PDF conversion error: {e}")
+        if filepath.exists():
+            filepath.unlink()
+        return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
+
+    # Reject PDFs that yielded 0 pages (corrupt files that did not raise)
+    if len(page_images) == 0:
+        try:
+            if filepath.exists():
+                filepath.unlink()
+        except OSError:
+            pass
+        return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
 
     entry = {
         "filename": file.filename,
@@ -723,6 +735,12 @@ async def process_stream(req: ProcessRequest):
         shared_date = ""
         errors = []
 
+        if total_pages == 0:
+            uploaded_files[req.file_index]["status"] = "error"
+            save_upload_state()
+            yield f"data: {json.dumps({'type': 'done', 'data': {'supplier': '', 'items': []}, 'pages_processed': 0, 'errors': ['No pages to process']})}\n\n"
+            return
+
         for page_idx in range(total_pages):
             # Send progress: processing this page
             progress = int(((page_idx) / total_pages) * 100)
@@ -771,7 +789,12 @@ async def process_stream(req: ProcessRequest):
                     item["date"] = shared_date
 
         merged = {"supplier": supplier, "items": all_items}
-        uploaded_files[req.file_index]["status"] = "processed"
+        if all_items:
+            uploaded_files[req.file_index]["status"] = "processed"
+        elif errors:
+            uploaded_files[req.file_index]["status"] = "error"
+        else:
+            uploaded_files[req.file_index]["status"] = "processed"
         save_upload_state()
 
         # Send final result
@@ -782,6 +805,10 @@ async def process_stream(req: ProcessRequest):
 # ─── Confirm / Save ───────────────────────────────────────
 @app.post("/confirm", dependencies=[Depends(require_role("admin", "master"))])
 async def confirm(req: ConfirmRequest):
+    if req.file_index < 0 or req.file_index >= len(uploaded_files):
+        raise HTTPException(status_code=404, detail="File not found")
+    if uploaded_files[req.file_index]["status"] != "processed":
+        raise HTTPException(status_code=400, detail="File must be processed before confirming")
     data = req.data
     items = data.get("items", [])
     supplier = data.get("supplier", "") or (items[0].get("supplier", "") if items else "")
@@ -837,28 +864,35 @@ async def delete(req: DeleteRequest):
     conn = sqlite3.connect(db_path)
     placeholders = ",".join("?" * len(req.ids))
     rows = conn.execute(f"SELECT filename FROM quotations WHERE id IN ({placeholders})", req.ids).fetchall()
-    for row in rows:
-        archive_path = ARCHIVE_DIR / row[0]
-        if archive_path.exists():
-            archive_path.unlink()
     conn.execute(f"DELETE FROM quotations WHERE id IN ({placeholders})", req.ids)
     conn.commit()
     conn.close()
+    for row in rows:
+        archive_path = ARCHIVE_DIR / row[0]
+        try:
+            if archive_path.exists():
+                archive_path.unlink()
+        except OSError:
+            pass
     return {"status": "deleted", "count": len(req.ids)}
 
 @app.post("/update", dependencies=[Depends(require_role("admin", "master"))])
 async def update_quotation(req: UpdateRequest):
     data = req.data
     items = data.get("items", [])
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be a list")
     supplier = data.get("supplier", "")
     quotation_date = items[0].get("date", "") if items else ""
     conn = sqlite3.connect(db_path)
-    conn.execute(
+    cur = conn.execute(
         "UPDATE quotations SET supplier=?, quotation_date=?, items=? WHERE id=?",
         (supplier, quotation_date, json.dumps(items), req.id)
     )
     conn.commit()
     conn.close()
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Quotation not found")
     return {"status": "updated"}
 
 # ─── Export / Import ──────────────────────────────────────
@@ -927,21 +961,24 @@ async def import_upload(file: UploadFile = File(...)):
     if file.filename.endswith(".zip"):
         # Import from zip
         import io
-        with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
-            # Read quotations.json
-            if "quotations.json" in zf.namelist():
-                data = json.loads(zf.read("quotations.json"))
-                quotations = data.get("quotations", [])
-            # Restore PDFs
-            ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-            for name in zf.namelist():
-                if name.startswith("archive/") and name.endswith(".pdf"):
-                    pdf_name = name.split("/", 1)[1]
-                    pdf_data = zf.read(name)
-                    pdf_path = ARCHIVE_DIR / pdf_name
-                    with open(pdf_path, "wb") as f:
-                        f.write(pdf_data)
-                    pdf_restored += 1
+        try:
+            with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
+                # Read quotations.json
+                if "quotations.json" in zf.namelist():
+                    data = json.loads(zf.read("quotations.json"))
+                    quotations = data.get("quotations", [])
+                # Restore PDFs
+                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+                for name in zf.namelist():
+                    if name.startswith("archive/") and name.endswith(".pdf"):
+                        pdf_name = Path(name.split("/", 1)[1]).name
+                        pdf_data = zf.read(name)
+                        pdf_path = ARCHIVE_DIR / pdf_name
+                        with open(pdf_path, "wb") as f:
+                            f.write(pdf_data)
+                        pdf_restored += 1
+        except zipfile.BadZipFile:
+            return JSONResponse(status_code=400, content={"error": "Invalid or corrupt zip file"})
     elif file.filename.endswith(".json"):
         # Import from JSON (legacy format, no PDFs)
         try:
@@ -1131,6 +1168,8 @@ async def serve_frontend():
     return FileResponse(str(FRONTEND_PATH))
 
 # ─── Static Files ─────────────────────────────────────────
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend-static")
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 if __name__ == "__main__":
