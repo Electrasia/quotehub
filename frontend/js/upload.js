@@ -344,20 +344,74 @@ function reviewFitWidth() {
         img.onload = () => reviewFitWidth();
         return;
     }
-    const container = document.getElementById('reviewPdf');
-    const containerWidth = container.clientWidth - 32;
+    const container = document.getElementById('reviewPdfScroll');
+    const containerWidth = container.clientWidth;
     reviewZoom = containerWidth / img.naturalWidth;
     applyReviewZoom();
 }
 
 function reviewOpenNewWindow() {
-    const filename = document.getElementById('reviewFilename').textContent;
-    if (!filename) {
+    if (!reviewPages || !reviewPages[0]) {
         showBriefPopup('No PDF loaded.');
         return;
     }
+    // reviewPages[0] is like /images/{stem}/page_1.png — extract {stem} and reconstruct filename
+    const match = reviewPages[0].match(/\/images\/([^/]+)\/page_\d+\.png/);
+    if (!match) {
+        showBriefPopup('Cannot determine PDF filename from page URL.');
+        return;
+    }
+    const filename = `${match[1]}.pdf`;
     window.open(`/archive/${encodeURIComponent(filename)}`, '_blank');
 }
+
+// ─── Review PDF mouse controls (wheel zoom + drag pan) ──────
+function setupReviewMouseControls() {
+    const img = document.getElementById('reviewPdfImg');
+    const container = document.getElementById('reviewPdfScroll');
+    if (!img || !container) return;
+
+    let isPanning = false;
+    let startX = 0, startY = 0, scrollLeft = 0, scrollTop = 0;
+
+    // Mouse wheel: zoom only when CTRL is pressed; normal scroll otherwise
+    img.addEventListener('wheel', (e) => {
+        if (!e.ctrlKey) return;  // allow normal scroll
+        e.preventDefault();
+        if (e.deltaY < 0) reviewZoomIn();
+        else reviewZoomOut();
+    }, { passive: false });
+
+    // Click + drag = pan
+    img.addEventListener('mousedown', (e) => {
+        isPanning = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        scrollLeft = container.scrollLeft;
+        scrollTop = container.scrollTop;
+        img.style.cursor = 'grabbing';
+        img.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    const onMove = (e) => {
+        if (!isPanning) return;
+        container.scrollLeft = scrollLeft - (e.clientX - startX);
+        container.scrollTop = scrollTop - (e.clientY - startY);
+    };
+    const onUp = () => {
+        if (!isPanning) return;
+        isPanning = false;
+        img.style.cursor = 'grab';
+        img.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+
+    img.style.cursor = 'grab';
+}
+
+setupReviewMouseControls();
 
 function updateItemCount() {
     const count = document.querySelectorAll('#itemsTable tr').length;

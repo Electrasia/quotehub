@@ -128,8 +128,9 @@ body.role-user .ai-admin-master { display: none !important; }
 
 /* Preview layout: PDF on left, data on right */
 .review-layout { display: flex; gap: 24px; align-items: flex-start; }
-.review-pdf { flex: 0 0 40%; position: sticky; top: 24px; background: #fff; border-radius: 12px; padding: 16px; max-height: calc(100vh - 48px); overflow-y: auto; }
-.review-pdf img { width: 100%; border-radius: 8px; border: 1px solid #eee; }
+.review-pdf { flex: 0 0 40%; position: sticky; top: 24px; background: #fff; border-radius: 12px; padding: 16px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; }
+.review-pdf-image-wrap { flex: 1 1 auto; overflow: auto; min-height: 0; }
+.review-pdf img { display: block; border-radius: 8px; border: 1px solid #eee; }
 .review-pdf .page-nav { margin-top: 12px; display: flex; justify-content: center; gap: 12px; align-items: center; }
 .review-data { flex: 1; min-width: 0; }
 
