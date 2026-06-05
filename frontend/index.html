@@ -192,23 +192,24 @@
                             </div>
 
                             <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
+
+                            <!-- Bulk apply: Brand -->
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
+                                <span style="font-size:13px;color:#666;font-weight:500">Brand:</span>
+                                <input type="text" id="bulkBrandInput" placeholder="Bulk value..."
+                                       oninput="updateBulkCount(0, 'bulkCount')"
+                                       style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+                                <button class="btn btn-sm btn-primary"
+                                        onclick="bulkApplyColumn(0, 'bulkBrandInput', 'bulkCount')"
+                                        title="Apply value to empty Brand cells only">Apply</button>
+                                <span style="font-size:13px;color:#666">(<span id="bulkCount" title="Empty Brand cells in table">0</span> empty)</span>
+                            </div>
+
                             <div style="overflow-x:auto">
                                 <table>
                                     <thead>
                                         <tr>
-                                            <th>
-                                                Brand
-                                                <div style="display:flex;gap:4px;margin-top:6px;align-items:center">
-                                                    <input type="text" id="bulkBrandInput" placeholder="Bulk"
-                                                           oninput="updateBulkCount(0, 'bulkCount')"
-                                                           style="flex:1;min-width:60px;padding:3px 6px;font-size:11px;border:1px solid #ddd;border-radius:3px">
-                                                    <button class="btn btn-sm btn-secondary"
-                                                            onclick="bulkApplyColumn(0, 'bulkBrandInput', 'bulkCount')"
-                                                            style="padding:3px 8px;font-size:11px"
-                                                            title="Apply value to empty Brand cells only">Apply</button>
-                                                    <span id="bulkCount" style="font-size:10px;color:#888;min-width:14px;text-align:center" title="Empty rows in Brand column">0</span>
-                                                </div>
-                                            </th>
+                                            <th>Brand</th>
                                             <th>Model</th>
                                             <th>Description</th>
                                             <th class="price-cell">Unit Price</th>
