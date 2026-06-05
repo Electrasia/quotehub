@@ -271,6 +271,7 @@ function showReview(filename) {
     tbody.innerHTML = '';
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
+    updateBulkCount(0, 'bulkCount');
     reviewAutoFit = true;
     updateReviewPdf();
     goToStep(4);
@@ -477,10 +478,59 @@ function addRow(item = {}) {
         <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD"></td>
         <td><input type="text" value="${escapeHtml(supplierVal)}" placeholder="Supplier"></td>
         <td><input type="text" value="${escapeHtml(item.currency || '')}" placeholder="Currency"></td>
-        <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount()">✕</button></td>
+        <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount(); updateBulkCount(0, 'bulkCount')">✕</button></td>
     `;
     tbody.appendChild(tr);
     updateItemCount();
+    updateBulkCount(0, 'bulkCount');
+}
+
+function updateBulkCount(columnIndex, countSpanId) {
+    const rows = document.querySelectorAll('#itemsTable tr');
+    let emptyCount = 0;
+    rows.forEach(row => {
+        const inputs = row.querySelectorAll('input, textarea');
+        const target = inputs[columnIndex];
+        if (target && !target.value.trim()) {
+            emptyCount++;
+        }
+    });
+    const span = document.getElementById(countSpanId);
+    if (span) {
+        span.textContent = emptyCount;
+        span.title = emptyCount === 0
+            ? 'No empty rows in this column'
+            : `${emptyCount} empty row(s) in this column`;
+    }
+}
+
+function bulkApplyColumn(columnIndex, inputId, countSpanId) {
+    const value = document.getElementById(inputId).value.trim();
+    if (!value) {
+        showBriefPopup('Enter a value first.');
+        return;
+    }
+    const rows = document.querySelectorAll('#itemsTable tr');
+    let count = 0;
+    rows.forEach(row => {
+        const inputs = row.querySelectorAll('input, textarea');
+        const target = inputs[columnIndex];
+        if (target && !target.value.trim()) {
+            target.value = value;
+            count++;
+        }
+    });
+    showBriefPopup(
+        count > 0
+            ? `Applied to ${count} empty row(s).`
+            : 'No empty rows to fill.'
+    );
+    if (count > 0) {
+        document.getElementById(inputId).value = '';
+    }
+    if (countSpanId) {
+        updateBulkCount(columnIndex, countSpanId);
+    }
 }
 
 function getEditedData() {
@@ -551,3 +601,8 @@ function autoProcessNext() {
         processAll();
     }
 }
+
+// Keep the Brand bulk-apply count in sync when the user edits cells directly
+document.getElementById('itemsTable').addEventListener('input', () => {
+    updateBulkCount(0, 'bulkCount');
+});
