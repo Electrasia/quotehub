@@ -1306,6 +1306,55 @@ async def search(q: str = ""):
         results.append(d)
     return results
 
+# ─── Brand Suggestion ─────────────────────────────────────
+@app.get("/items/by-model", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def items_by_model(model: str = ""):
+    """Return the most frequent brand for items matching a given model.
+    Brands are normalized (lowercased) before counting to treat case
+    variations ('Sony' and 'SONY') as the same brand, but the returned
+    brand preserves the most common original casing.
+    """
+    from collections import Counter
+    if not model.strip():
+        return {"model": model, "brand": None, "count": 0}
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT items FROM quotations").fetchall()
+    conn.close()
+    # NOTE: may optimize later using indexed model field if DB grows
+
+    model_lc = model.strip().lower()
+    # Group original brand strings by their lowercased key
+    normalized_groups = {}  # e.g. {"sony": ["Sony", "SONY", "Sony"]}
+    for r in rows:
+        items_raw = r["items"]
+        if not items_raw:
+            continue
+        try:
+            items = json.loads(items_raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if (item.get("model") or "").strip().lower() == model_lc:
+                brand = (item.get("brand") or "").strip()
+                if brand:
+                    key = brand.lower()
+                    normalized_groups.setdefault(key, []).append(brand)
+
+    if not normalized_groups:
+        return {"model": model, "brand": None, "count": 0}
+
+    # Find the normalized group with the largest count
+    most_common_key = max(normalized_groups, key=lambda k: len(normalized_groups[k]))
+    candidates = normalized_groups[most_common_key]
+    # Return the most common original casing
+    most_common_brand = Counter(candidates).most_common(1)[0][0]
+    return {"model": model, "brand": most_common_brand, "count": len(candidates)}
+
 # ─── Duplicate Check ──────────────────────────────────────
 @app.get("/check-duplicate", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def check_duplicate(filename: str = ""):

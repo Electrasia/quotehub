@@ -487,8 +487,16 @@ function addRow(item = {}) {
     const tr = document.createElement('tr');
     const supplierVal = item.supplier || document.getElementById('supplierName').value || '';
     tr.innerHTML = `
-        <td><input type="text" value="${escapeHtml(item.brand || '')}" placeholder="Brand"></td>
-        <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"></td>
+        <td>
+            <div style="display:flex;align-items:center;gap:4px">
+                <input type="text" value="${escapeHtml(item.brand || '')}" placeholder="Brand" style="flex:1;min-width:0"
+                       oninput="hideBrandSuggestion(this)">
+                <span class="brand-suggestion" style="display:none;font-size:11px;color:#2980b9;background:#ebf5fb;padding:2px 6px;border-radius:3px;white-space:nowrap;cursor:pointer;opacity:0.9"
+                      title="Click to apply suggestion" onclick="applyBrandSuggestion(this)"></span>
+            </div>
+        </td>
+        <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"
+                   oninput="onModelInput(this)"></td>
         <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${escapeHtml(item.description || '')}</textarea></td>
         <td><input type="text" class="price-input" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
         <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD"></td>
@@ -499,6 +507,61 @@ function addRow(item = {}) {
     tbody.appendChild(tr);
     updateItemCount();
     updateBulkCount(0, 'bulkCount');
+}
+
+// ─── Brand Suggestion (per-row) ────────────────────────────
+function onModelInput(input) {
+    // Per-input debounce (each input owns its own timer, not a global)
+    if (input._brandDebounceTimer) clearTimeout(input._brandDebounceTimer);
+    input._brandDebounceTimer = setTimeout(() => fetchBrandSuggestion(input), 300);
+}
+
+async function fetchBrandSuggestion(modelInput) {
+    const model = modelInput.value.trim();
+    const row = modelInput.closest('tr');
+    const brandInput = row ? row.querySelector('input[placeholder="Brand"]') : null;
+    const badge = row ? row.querySelector('.brand-suggestion') : null;
+    if (!badge) return;
+
+    if (!model) {
+        badge.style.display = 'none';
+        modelInput._lastBrandQueried = '';
+        return;
+    }
+    // Skip if the value hasn't changed since the last successful query
+    if (modelInput._lastBrandQueried === model) return;
+
+    try {
+        const resp = await fetch(`/items/by-model?model=${encodeURIComponent(model)}`);
+        const data = await resp.json();
+        modelInput._lastBrandQueried = model;  // remember regardless of result
+        if (data.brand && brandInput && !brandInput.value.trim()) {
+            badge.textContent = `💡 ${data.brand}`;
+            badge.title = `Used ${data.count} time(s). Click to apply.`;
+            badge.dataset.brand = data.brand;
+            badge.style.display = 'inline';
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (e) {
+        // Silently fail (network error, server down, etc.) — user can still type manually
+    }
+}
+
+function applyBrandSuggestion(badge) {
+    const row = badge.closest('tr');
+    const brandInput = row ? row.querySelector('input[placeholder="Brand"]') : null;
+    if (brandInput && badge.dataset.brand) {
+        brandInput.value = badge.dataset.brand;
+        badge.style.display = 'none';
+        updateBulkCount(0, 'bulkCount');
+    }
+}
+
+function hideBrandSuggestion(brandInput) {
+    const row = brandInput.closest('tr');
+    const badge = row ? row.querySelector('.brand-suggestion') : null;
+    if (badge) badge.style.display = 'none';
 }
 
 function updateBulkCount(columnIndex, countSpanId) {
