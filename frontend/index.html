@@ -77,6 +77,7 @@
             <button class="nav-item nav-process active" id="navProcess" onclick="showUpload()">Process</button>
             <button class="nav-item" id="navSearch" onclick="showSearch()">Search</button>
             <button class="nav-item" id="navSettings" onclick="showSettings()">Settings</button>
+            <button class="nav-item" id="navHelp" onclick="showHelp()">Help</button>
         </div>
         <div class="nav-right">
             <div class="user-badge hidden" id="userBadge">
@@ -411,6 +412,123 @@
                     <span id="usersError" class="hidden" style="color:#e74c3c;font-size:13px;flex:1"></span>
                 </div>
                 <div id="usersTable" style="max-height:400px;overflow-y:auto;border:1px solid #eee;border-radius:6px"></div>
+            </div>
+        </div>
+
+        <!-- ═══════════════ HELP VIEW ═══════════════ -->
+        <div id="helpView" class="hidden">
+            <h2 style="margin-bottom:16px">QuoteHub – Quick User Guide</h2>
+
+            <!-- 1. Purpose -->
+            <div class="settings-card">
+                <h3>📖 Purpose</h3>
+                <p style="font-size:14px;color:#444;line-height:1.6">QuoteHub is an AI-powered quotation database. Upload PDF quotations, let the AI extract the data automatically, review and edit, then store everything for fast search and reuse.</p>
+            </div>
+
+            <!-- 2. Upload Documents -->
+            <div class="settings-card">
+                <h3>⬆️ Upload Documents</h3>
+                <ol style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Go to <strong>Process</strong></li>
+                    <li>Drag &amp; drop or select one or more PDF files</li>
+                    <li>Click <strong>Upload</strong></li>
+                </ol>
+            </div>
+
+            <!-- 3. File Queue -->
+            <div class="settings-card">
+                <h3>📋 File Queue</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Review the list of uploaded files</li>
+                    <li>Remove any unwanted files</li>
+                    <li>Click <strong>Process All</strong> to start</li>
+                </ul>
+            </div>
+
+            <!-- 4. Processing -->
+            <div class="settings-card">
+                <h3>⚙️ Processing</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>The AI extracts data from each page automatically</li>
+                    <li>Wait for the current file to complete (or click <strong>Cancel</strong> to stop)</li>
+                </ul>
+            </div>
+
+            <!-- 5. Review & Edit -->
+            <div class="settings-card">
+                <h3>✏️ Review &amp; Edit</h3>
+                <p style="font-size:14px;color:#444;line-height:1.6">Verify each field before saving:</p>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li><strong>Brand</strong>, <strong>Model</strong>, <strong>Description</strong>, <strong>Price</strong>, <strong>Supplier</strong>, <strong>Date</strong></li>
+                    <li>Edit any incorrect or missing values directly in the table</li>
+                    <li>Use <strong>Bulk Apply</strong> for repeated values (e.g. same Brand across many rows)</li>
+                </ul>
+            </div>
+
+            <!-- 6. Save Data -->
+            <div class="settings-card">
+                <h3>💾 Save Data</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Click <strong>Confirm &amp; Save</strong> to store the data</li>
+                    <li>The quotation is then searchable for future use</li>
+                </ul>
+            </div>
+
+            <!-- 7. Search & Reuse -->
+            <div class="settings-card">
+                <h3>🔍 Search &amp; Reuse</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Go to <strong>Search</strong></li>
+                    <li>Type a supplier, date, or item description</li>
+                    <li>Browse, filter, and reuse past quotations</li>
+                </ul>
+            </div>
+
+            <!-- 8. System Cleanup (Master Only) — warning highlight -->
+            <div class="settings-card" style="border-left:4px solid #e74c3c">
+                <h3>🧹 System Cleanup <span style="font-size:13px;color:#888;font-weight:normal">(Master Only)</span></h3>
+                <p style="font-size:14px;color:#444;line-height:1.6">Permanently delete old quotations and (optionally) their files.</p>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Set a time period (in months)</li>
+                    <li>Click <strong>Preview</strong> first to see what will be deleted</li>
+                    <li>Optionally enable file deletion</li>
+                    <li>Type the word <strong>DELETE</strong> to confirm</li>
+                </ul>
+                <p style="font-size:13px;color:#e74c3c;margin-top:12px"><strong>⚠ Warning:</strong> This action is irreversible. Once deleted, data cannot be recovered.</p>
+            </div>
+
+            <!-- 9. User Roles -->
+            <div class="settings-card">
+                <h3>👤 User Roles</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li><strong>User</strong> — search and browse existing data</li>
+                    <li><strong>Admin</strong> — all User actions, plus upload, process, edit, and read AI settings</li>
+                    <li><strong>Master</strong> — full control, including user management and system cleanup</li>
+                </ul>
+            </div>
+
+            <!-- 10. Important Notes -->
+            <div class="settings-card">
+                <h3>⚠️ Important Notes</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Always review extracted data before saving</li>
+                    <li>System Cleanup is permanent and cannot be undone</li>
+                    <li>Processing time depends on file size and number of pages</li>
+                </ul>
+            </div>
+
+            <!-- 11. Support & Contacts -->
+            <div class="settings-card">
+                <h3>📞 Support &amp; Contacts</h3>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li><strong>GitHub:</strong> <a href="https://github.com/Electrasia/quotehub" target="_blank" rel="noopener">https://github.com/Electrasia/quotehub</a></li>
+                    <li><strong>Website:</strong> <a href="https://electrasia.com/" target="_blank" rel="noopener">https://electrasia.com/</a></li>
+                </ul>
+                <p style="font-size:14px;color:#444;margin-top:12px"><strong>Contact Persons:</strong></p>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Fabio Monteiro — <a href="mailto:fabio@electrasia.com">fabio@electrasia.com</a></li>
+                    <li>Antonio Ferrao — <a href="mailto:ajferrao@electrasia.com">ajferrao@electrasia.com</a></li>
+                </ul>
             </div>
         </div>
     </div>

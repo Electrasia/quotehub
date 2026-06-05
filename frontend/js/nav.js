@@ -38,9 +38,11 @@ function showProcessView() {
     document.getElementById('processView').classList.remove('hidden');
     document.getElementById('searchView').classList.add('hidden');
     document.getElementById('settingsView').classList.add('hidden');
+    document.getElementById('helpView').classList.add('hidden');
     document.getElementById('navProcess').classList.add('active');
     document.getElementById('navSearch').classList.remove('active');
     document.getElementById('navSettings').classList.remove('active');
+    document.getElementById('navHelp').classList.remove('active');
 }
 
 function showUpload() {
@@ -52,9 +54,11 @@ function showSearch() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.remove('hidden');
     document.getElementById('settingsView').classList.add('hidden');
+    document.getElementById('helpView').classList.add('hidden');
     document.getElementById('navProcess').classList.remove('active');
     document.getElementById('navSearch').classList.add('active');
     document.getElementById('navSettings').classList.remove('active');
+    document.getElementById('navHelp').classList.remove('active');
     // Load all results
     document.getElementById('searchInput').value = '';
     searchQuotations();
@@ -64,9 +68,11 @@ async function showSettings() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.add('hidden');
     document.getElementById('settingsView').classList.remove('hidden');
+    document.getElementById('helpView').classList.add('hidden');
     document.getElementById('navProcess').classList.remove('active');
     document.getElementById('navSearch').classList.remove('active');
     document.getElementById('navSettings').classList.add('active');
+    document.getElementById('navHelp').classList.remove('active');
     // Load settings data into the page
     try {
         const resp = await fetch('/config');
@@ -88,4 +94,15 @@ async function showSettings() {
     if (isMaster()) {
         await loadUsersTable();
     }
+}
+
+function showHelp() {
+    document.getElementById('processView').classList.add('hidden');
+    document.getElementById('searchView').classList.add('hidden');
+    document.getElementById('settingsView').classList.add('hidden');
+    document.getElementById('helpView').classList.remove('hidden');
+    document.getElementById('navProcess').classList.remove('active');
+    document.getElementById('navSearch').classList.remove('active');
+    document.getElementById('navSettings').classList.remove('active');
+    document.getElementById('navHelp').classList.add('active');
 }
