@@ -1,5 +1,7 @@
 # ─── Auth: passwords, session helpers, role dependencies ───
 import os
+import json
+import time
 import sqlite3
 import secrets
 import warnings
@@ -18,9 +20,25 @@ from pydantic import BaseModel, Field
 DATA_DIR = Path(__file__).parent.parent / "data"
 DB_PATH = DATA_DIR / "quotations.db"
 INIT_PASSWORD_FILE = DATA_DIR / "init_password.txt"
+CONFIG_PATH = DATA_DIR.parent / "config.json"   # single source of truth (main.py imports this)
 
 # ─── Session constants ────────────────────────────────────
 SESSION_USER_ID = "user_id"
+
+# ─── App config access (for idle-timeout enforcement) ─────
+# Reads the SAME config.json file as backend/main.py.
+# Path is the single source of truth (CONFIG_PATH above).
+_DEFAULT_IDLE_TIMEOUT_MINUTES = 60
+
+def _read_app_config() -> dict:
+    """Read app config from disk. Returns empty dict on error.
+    Used by get_current_user to enforce idle timeout.
+    Tolerant of partial/missing keys; no schema validation."""
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
 
 # ─── Password hashing (bcrypt, cost factor 12) ────────────
 def hash_password(plain: str) -> str:
@@ -177,6 +195,27 @@ def get_current_user(request: Request) -> Optional[dict]:
     user_id = request.session.get(SESSION_USER_ID)
     if not user_id:
         return None
+    # Idle timeout enforcement (configurable; <= 0 = disabled)
+    cfg = _read_app_config()
+    try:
+        timeout_minutes = int(cfg.get("idle_timeout_minutes", _DEFAULT_IDLE_TIMEOUT_MINUTES))
+    except (TypeError, ValueError):
+        timeout_minutes = _DEFAULT_IDLE_TIMEOUT_MINUTES
+    if timeout_minutes > 0:
+        last_activity = request.session.get("last_activity")
+        if last_activity is not None:
+            try:
+                elapsed = time.time() - float(last_activity)
+                if elapsed > timeout_minutes * 60:
+                    # Idle expired — clear entire session (no leftover keys)
+                    request.session.clear()
+                    return None
+            except (TypeError, ValueError):
+                # Corrupt timestamp — treat as expired
+                request.session.clear()
+                return None
+        # After the check (and only if not expired), refresh activity timestamp
+        request.session["last_activity"] = time.time()
     user = get_user_by_id(user_id)
     if not user or not user.get("active"):
         # Stale or deleted user — clear session

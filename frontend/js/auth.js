@@ -95,6 +95,7 @@ function applyAdminSettingsLock() {
     const inputs = [
         'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
+        'settingsSessionMaxAgeDays', 'settingsIdleTimeout',
     ];
     inputs.forEach(id => {
         const el = document.getElementById(id);
@@ -111,6 +112,12 @@ function applyAdminSettingsLock() {
         saveBtn.disabled = isAdmin;
         if (isAdmin) saveBtn.title = 'Only Master can change AI settings';
         else saveBtn.removeAttribute('title');
+    }
+    const sessionSaveBtn = document.getElementById('saveSessionSettingsBtn');
+    if (sessionSaveBtn) {
+        sessionSaveBtn.disabled = isAdmin;
+        if (isAdmin) sessionSaveBtn.title = 'Only Master can change Session settings';
+        else sessionSaveBtn.removeAttribute('title');
     }
 }
 

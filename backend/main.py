@@ -24,6 +24,7 @@ from . import auth
 from .auth import (
     require_role, LoginRequest, ChangePasswordRequest,
     UserCreate, UserUpdate, SESSION_USER_ID, DATA_DIR,
+    CONFIG_PATH,
     read_init_password, acknowledge_init_password,
 )
 
@@ -42,14 +43,25 @@ APP_VERSION = read_file_text(VERSION_PATH, "0.0.0")
 APP_COMMIT = read_file_text(GIT_COMMIT_PATH, "unknown")
 
 # ─── Config ───────────────────────────────────────────────
-CONFIG_PATH = Path(__file__).parent.parent / "config.json"
+# CONFIG_PATH is imported from auth (single source of truth).
+
+_CONFIG_DEFAULTS = {
+    "ai_endpoint": "",
+    "model": "",
+    "external_url": "",
+    "timeout": 120,
+    "max_retries": 3,
+    "popup_duration": 3,
+    "session_max_age": 14 * 24 * 60 * 60,     # 14 days, in seconds
+    "idle_timeout_minutes": 60,                # 60 minutes; 0 = disabled
+}
 
 def load_config():
     try:
         with open(CONFIG_PATH) as f:
             return json.load(f)
     except FileNotFoundError:
-        return {"ai_endpoint": "", "model": "", "timeout": 30, "max_retries": 5}
+        return dict(_CONFIG_DEFAULTS)
 
 def save_config(cfg):
     with open(CONFIG_PATH, "w") as f:
@@ -57,7 +69,8 @@ def save_config(cfg):
 
 def get_config_data():
     cfg = load_config()
-    cfg.setdefault("external_url", "")
+    for k, v in _CONFIG_DEFAULTS.items():
+        cfg.setdefault(k, v)
     return cfg
 
 CONFIG = load_config()
@@ -217,6 +230,7 @@ app.add_middleware(
     session_cookie="quotahub_session",
     same_site="lax",
     https_only=False,
+    max_age=get_config_data().get("session_max_age", 14 * 24 * 60 * 60),
 )
 
 # ─── Models ───────────────────────────────────────────────
@@ -234,6 +248,8 @@ class ConfigRequest(BaseModel):
     timeout: int = 180
     max_retries: int = 2
     popup_duration: int = 3
+    session_max_age: int = 14 * 24 * 60 * 60
+    idle_timeout_minutes: int = 60
 
 # ─── Config Endpoints ─────────────────────────────────────
 # GET is allowed for admin+master (admin can READ settings to populate the
@@ -251,6 +267,8 @@ async def update_config(req: ConfigRequest):
     cfg["timeout"] = req.timeout
     cfg["max_retries"] = req.max_retries
     cfg["popup_duration"] = req.popup_duration
+    cfg["session_max_age"] = req.session_max_age
+    cfg["idle_timeout_minutes"] = req.idle_timeout_minutes
     save_config(cfg)
     return {"status": "saved", "config": cfg}
 

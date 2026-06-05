@@ -60,9 +60,18 @@ async function saveSettings() {
     const endpoint = document.getElementById('settingsEndpoint').value.trim();
     const model = document.getElementById('settingsModel').value.trim();
     const externalUrl = document.getElementById('settingsExternalUrl').value.trim();
-    const timeout = parseInt(document.getElementById('settingsTimeout').value) || 120;
-    const retries = parseInt(document.getElementById('settingsRetries').value) || 2;
-    const popupDuration = parseInt(document.getElementById('settingsPopupDuration').value) || 3;
+    const timeoutRaw       = parseInt(document.getElementById('settingsTimeout').value);
+    const retriesRaw       = parseInt(document.getElementById('settingsRetries').value);
+    const popupDurationRaw = parseInt(document.getElementById('settingsPopupDuration').value);
+    const sessionDaysRaw   = parseInt(document.getElementById('settingsSessionMaxAgeDays').value);
+    const idleTimeoutRaw   = parseInt(document.getElementById('settingsIdleTimeout').value);
+
+    // Numeric safety: Number.isFinite() rejects NaN/Infinity, but allows 0 to pass through
+    const timeout           = Number.isFinite(timeoutRaw)         ? timeoutRaw         : 120;
+    const retries           = Number.isFinite(retriesRaw)         ? retriesRaw         : 3;
+    const popupDuration     = Number.isFinite(popupDurationRaw)   ? popupDurationRaw   : 3;
+    const sessionMaxAgeDays = Number.isFinite(sessionDaysRaw)     ? sessionDaysRaw     : 14;
+    const idleTimeout       = Number.isFinite(idleTimeoutRaw)     ? idleTimeoutRaw     : 60;
 
     if (!endpoint) { showBriefPopup('AI endpoint URL is required'); return; }
     if (!model) { showBriefPopup('Model name is required'); return; }
@@ -71,12 +80,23 @@ async function saveSettings() {
         const resp = await fetch('/config', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ ai_endpoint: endpoint, model: model, external_url: externalUrl, timeout: timeout, max_retries: retries, popup_duration: popupDuration })
+            body: JSON.stringify({
+                ai_endpoint: endpoint,
+                model: model,
+                external_url: externalUrl,
+                timeout: timeout,
+                max_retries: retries,
+                popup_duration: popupDuration,
+                session_max_age: sessionMaxAgeDays * 86400,
+                idle_timeout_minutes: idleTimeout,
+            })
         });
         const result = await resp.json();
         if (result.status === 'saved') {
             popupDurationSec = popupDuration;
-            showBriefPopup('Settings saved!');
+            // Hot-apply idle-timeout to front-end detector (no restart needed)
+            updateIdleTimeoutFromConfig(result.config);
+            showBriefPopup('Settings saved! Restart the app for Session Duration changes.');
         }
     } catch (e) {
         showBriefPopup('Failed to save settings: ' + e.message);
@@ -180,3 +200,39 @@ async function downloadLogs() {
         showBriefPopup('Failed to get logs: ' + e.message);
     }
 }
+
+// ─── Idle detection (UX improvement; backend is source of truth) ─
+let idleTimeoutMs = 60 * 60 * 1000;  // default 60 min; updated from config
+let idleTimer = null;
+
+function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (idleTimeoutMs <= 0) return;  // disabled
+    idleTimer = setTimeout(() => {
+        // Only auto-logout if user is currently logged in
+        if (typeof currentUser !== 'undefined' && currentUser) {
+            showBriefPopup('Session expired due to inactivity');
+            // Brief delay so user sees the popup before the login overlay appears
+            setTimeout(() => doLogout(), 500);
+        }
+    }, idleTimeoutMs);
+}
+
+function startIdleDetection() {
+    ['mousemove', 'click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
+        document.addEventListener(evt, resetIdleTimer, { passive: true });
+    });
+    resetIdleTimer();
+}
+
+function updateIdleTimeoutFromConfig(cfg) {
+    if (!cfg) return;
+    const minutes = parseInt(cfg.idle_timeout_minutes);
+    if (Number.isFinite(minutes)) {
+        idleTimeoutMs = minutes * 60 * 1000;
+        resetIdleTimer();
+    }
+}
+
+// Boot idle detection once settings.js loads (defer → DOM ready)
+startIdleDetection();
