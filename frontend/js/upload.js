@@ -62,12 +62,17 @@ function renderFileList() {
     const list = document.getElementById('fileList');
     if (uploadedFiles.length === 0) {
         section.classList.add('hidden');
+        // Also clear processing view's file list
+        const procSection = document.getElementById('processingFileListSection');
+        if (procSection) {
+            procSection.classList.add('hidden');
+        }
         return;
     }
     section.classList.remove('hidden');
     const pendingCount = uploadedFiles.filter(f => f.status === 'pending').length;
     const doneCount = uploadedFiles.filter(f => f.status === 'done' || f.status === 'saved').length;
-    list.innerHTML = uploadedFiles.map((f, i) => {
+    const html = uploadedFiles.map((f, i) => {
         let statusHtml = '';
         if (f.status === 'pending') statusHtml = '<span class="file-status pending">Pending</span>';
         else if (f.status === 'processing') statusHtml = `<span class="file-status processing">${f.progress || 'Processing...'}</span>`;
@@ -94,6 +99,14 @@ function renderFileList() {
             </div>
         `;
     }).join('');
+    list.innerHTML = html;
+    // Also render to processing view (step 3) so per-file status is visible during processing
+    const procSection = document.getElementById('processingFileListSection');
+    const procList = document.getElementById('processingFileList');
+    if (procSection && procList) {
+        procSection.classList.remove('hidden');
+        procList.innerHTML = html;
+    }
     const summary = document.getElementById('queueSummary');
     if (summary) {
         if (pendingCount > 0) {
@@ -259,6 +272,9 @@ function cancelProcessing() {
         }
     }
     document.getElementById('processingModal').classList.remove('active');
+    // Return to file list (step 3 has no cancel/progress, so don't leave user stuck there)
+    const hasPending = uploadedFiles.some(f => f.status === 'pending');
+    goToStep(hasPending ? 2 : 1);
 }
 
 // ─── Review (PDF + Data side by side) ────────────────────────
