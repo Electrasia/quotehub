@@ -236,3 +236,104 @@ function updateIdleTimeoutFromConfig(cfg) {
 
 // Boot idle detection once settings.js loads (defer → DOM ready)
 startIdleDetection();
+
+// ─── System Cleanup (master only) ─────────────────────────
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const k = 1024;
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1);
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + units[i];
+}
+
+function previewCleanup() {
+    if (!isMaster()) { showBriefPopup('Only Master can run cleanup'); return; }
+    const monthsRaw = parseInt(document.getElementById('cleanupMonths').value);
+    const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 ? monthsRaw : 6;
+
+    const btn = document.getElementById('cleanupPreviewBtn');
+    btn.disabled = true;
+    btn.textContent = 'Calculating…';
+
+    apiFetch('/cleanup/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: months })
+    })
+    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.detail || 'Preview failed');
+        document.getElementById('cleanupPreviewEntries').textContent = data.entries;
+        document.getElementById('cleanupPreviewFiles').textContent = data.files;
+        document.getElementById('cleanupPreviewSize').textContent = formatBytes(data.estimated_size);
+        document.getElementById('cleanupPreviewCutoff').textContent = data.cutoff_date;
+        document.getElementById('cleanupPreviewResult').classList.remove('hidden');
+        document.getElementById('cleanupExecuteForm').classList.remove('hidden');
+        document.getElementById('cleanupDeleteFiles').checked = false;
+        document.getElementById('cleanupConfirmInput').value = '';
+        document.getElementById('cleanupExecuteBtn').disabled = true;
+    })
+    .catch(e => {
+        showBriefPopup('Preview failed: ' + e.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Preview';
+    });
+}
+
+function executeCleanup() {
+    if (!isMaster()) { showBriefPopup('Only Master can run cleanup'); return; }
+    const monthsRaw = parseInt(document.getElementById('cleanupMonths').value);
+    const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 ? monthsRaw : 6;
+    const deleteFiles = document.getElementById('cleanupDeleteFiles').checked;
+    const confirmText = document.getElementById('cleanupConfirmInput').value.trim();
+
+    if (confirmText !== 'DELETE') {
+        showBriefPopup('Type DELETE exactly to confirm');
+        return;
+    }
+
+    const btn = document.getElementById('cleanupExecuteBtn');
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+
+    apiFetch('/cleanup/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: months, delete_files: deleteFiles })
+    })
+    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.detail || 'Cleanup failed');
+        showBriefPopup(
+            `Cleanup complete. Deleted ${data.entries_deleted} entries, ${data.files_deleted} files, freed ${formatBytes(data.bytes_freed)}.`
+        );
+        hideCleanupForm();
+    })
+    .catch(e => {
+        showBriefPopup('Cleanup failed: ' + e.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Delete Permanently';
+    });
+}
+
+function hideCleanupForm() {
+    document.getElementById('cleanupExecuteForm').classList.add('hidden');
+    document.getElementById('cleanupPreviewResult').classList.add('hidden');
+    document.getElementById('cleanupConfirmInput').value = '';
+    document.getElementById('cleanupExecuteBtn').disabled = true;
+}
+
+// Live-validate the DELETE confirmation input
+document.addEventListener('DOMContentLoaded', () => {
+    const inp = document.getElementById('cleanupConfirmInput');
+    if (inp) {
+        inp.addEventListener('input', () => {
+            document.getElementById('cleanupExecuteBtn').disabled =
+                inp.value.trim() !== 'DELETE';
+        });
+    }
+});

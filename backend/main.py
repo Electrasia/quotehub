@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import calendar
 import sqlite3
 import shutil
 import re
@@ -9,12 +10,13 @@ import zipfile
 import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, File, UploadFile, Query, Request, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import httpx
 from pdf2image import convert_from_path
 from PIL import Image
@@ -250,6 +252,13 @@ class ConfigRequest(BaseModel):
     popup_duration: int = 3
     session_max_age: int = 14 * 24 * 60 * 60
     idle_timeout_minutes: int = 60
+
+class CleanupPreviewRequest(BaseModel):
+    months: int = Field(ge=1, le=120)   # 1 month to 10 years
+
+class CleanupExecuteRequest(BaseModel):
+    months: int = Field(ge=1, le=120)
+    delete_files: bool = False
 
 # ─── Config Endpoints ─────────────────────────────────────
 # GET is allowed for admin+master (admin can READ settings to populate the
@@ -1104,6 +1113,123 @@ async def import_upload(file: UploadFile = File(...)):
     conn.commit()
     conn.close()
     return {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
+
+# ─── System Cleanup (master only) ────────────────────────
+def _cleanup_cutoff(months: int) -> str:
+    """Return ISO date (YYYY-MM-DD) for 'X months ago'.
+    Calendar-month accurate. Day is clamped to the last day of the target month."""
+    now = datetime.now()
+    year = now.year
+    month = now.month - months
+    while month <= 0:
+        month += 12
+        year -= 1
+    # Clamp day to last valid day of target month (e.g. Mar 31 - 1 month → Feb 28/29)
+    day = now.day
+    last_day = calendar.monthrange(year, month)[1]
+    if day > last_day:
+        day = last_day
+    cutoff = now.replace(year=year, month=month, day=day)
+    return cutoff.date().isoformat()
+
+def _get_old_quotations(conn, cutoff_date: str) -> list:
+    """Return list of (id, filename) for quotations older than cutoff_date."""
+    rows = conn.execute(
+        "SELECT id, filename FROM quotations WHERE date(created_at) < ?",
+        (cutoff_date,)
+    ).fetchall()
+    return [(row["id"], row["filename"]) for row in rows]
+
+@app.post("/cleanup/preview", dependencies=[Depends(require_role("master"))])
+async def cleanup_preview(req: CleanupPreviewRequest):
+    """Preview what would be deleted: counts + total file size. Does NOT delete."""
+    cutoff_date = _cleanup_cutoff(req.months)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = _get_old_quotations(conn, cutoff_date)
+        entries = len(rows)
+        file_count = 0
+        total_size = 0
+        seen = set()
+        for _id, filename in rows:
+            if not filename or filename in seen:
+                continue
+            seen.add(filename)
+            pdf_path = ARCHIVE_DIR / filename
+            if pdf_path.exists():
+                file_count += 1
+                try:
+                    total_size += pdf_path.stat().st_size
+                except OSError:
+                    pass
+        return {
+            "months": req.months,
+            "cutoff_date": cutoff_date,
+            "entries": entries,
+            "files": file_count,
+            "estimated_size": total_size,
+        }
+    finally:
+        conn.close()
+
+@app.post("/cleanup/execute", dependencies=[Depends(require_role("master"))])
+async def cleanup_execute(req: CleanupExecuteRequest):
+    """Delete old quotations. Optionally also delete their files + images.
+    Runs VACUUM after commit to reclaim disk space."""
+    cutoff_date = _cleanup_cutoff(req.months)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = _get_old_quotations(conn, cutoff_date)
+        # Collect unique filenames (and their paths) BEFORE deleting rows
+        seen = set()
+        targets = []
+        for _id, filename in rows:
+            if filename and filename not in seen:
+                seen.add(filename)
+                pdf_path = ARCHIVE_DIR / filename
+                img_dir = IMAGES_DIR / Path(filename).stem
+                targets.append((filename, pdf_path, img_dir))
+        # DB delete in a single transaction (FTS triggers clean up FTS)
+        cur = conn.execute(
+            "DELETE FROM quotations WHERE date(created_at) < ?",
+            (cutoff_date,)
+        )
+        entries_deleted = cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    # File deletion runs AFTER DB commit (best-effort; never rolls back DB)
+    file_count_deleted = 0
+    bytes_freed = 0
+    if req.delete_files:
+        for _filename, pdf_path, img_dir in targets:
+            try:
+                if pdf_path.exists():
+                    bytes_freed += pdf_path.stat().st_size
+                    pdf_path.unlink()
+                    file_count_deleted += 1
+            except OSError:
+                pass  # missing or locked — skip
+            try:
+                if img_dir.exists():
+                    shutil.rmtree(img_dir, ignore_errors=True)
+            except OSError:
+                pass
+    # Reclaim disk space (VACUUM must run outside a transaction)
+    try:
+        vacuum_conn = sqlite3.connect(db_path)
+        vacuum_conn.execute("VACUUM")
+        vacuum_conn.close()
+    except Exception as e:
+        print(f"VACUUM warning: {e}")
+    return {
+        "status": "completed",
+        "entries_deleted": entries_deleted,
+        "files_deleted": file_count_deleted,
+        "bytes_freed": bytes_freed,
+    }
 
 # ─── Search ───────────────────────────────────────────────
 @app.get("/search", dependencies=[Depends(require_role("user", "admin", "master"))])
