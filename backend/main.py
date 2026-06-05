@@ -534,19 +534,49 @@ async def call_ai(image_paths, page_num, file_stem):
 
     prompt = f"""Analyze this document image. Classify the document type AND extract ALL information. Return ONLY valid JSON.
 
-DOCUMENT TYPE CLASSIFICATION (REQUIRED):
-You MUST classify the document as ONE of:
-- "QUO" = Quotation (price proposal from supplier to client)
+STRICT ITEM FILTERING:
+- A valid item MUST have a model (part number) AND a numeric unit price.
+- Ignore rows that contain "Optional", "no need", missing/non-numeric price, or are category/group headers.
+
+MODEL RULES (CRITICAL):
+- Extract ONLY ONE model per item. If multiple, use ONLY the primary; ignore optional alternatives.
+- "change to X" → use ONLY X. "include in ..." → IGNORE the entire row.
+
+ROW STRUCTURE RULE:
+- Each item = ONE table row. DO NOT merge, mix, or infer values from adjacent rows.
+
+BRAND RULES:
+- Brand must be a real manufacturer name. DO NOT use category headers, group names, or descriptions. If no brand → leave empty.
+
+DESCRIPTION RULES:
+- Copy full description exactly. Merge multiline into ONE field. Do NOT shorten.
+- Inch marks: replace " with ' (e.g. 10.1" → 10.1').
+
+DOCUMENT TYPE CLASSIFICATION:
+- "QUO" = Quotation (price offer from supplier to client)
 - "PO"  = Purchase Order (order issued by client to supplier)
 - "PL"  = Price List (catalog or list of products with prices)
+- If uncertain → "unknown" (default)
 
-Rules:
-- If the document contains "Purchase Order", "PO", or similar → classify as PO
-- If the document is clearly a supplier quotation or proposal → classify as QUO
-- If the document is a list of multiple items with prices but not a specific transaction → classify as PL
-- If uncertain, return "unknown"
+FIELD NORMALIZATION:
+- PRICE:
+  - Extract numeric value only.
+  - MUST be formatted with: comma as thousand separator, period as decimal separator.
+  - Always 2 decimal places.
+  - REQUIRED format: X,XXX.XX
+  - Examples: 1157 → 1,157.00, 15700 → 15,700.00, 99.5 → 99.50
+  - Remove ALL currency symbols (e.g. $, HK$, €, £)
+  - DO NOT output: 1157.00, 1.157,00, $1,157.00
+- CURRENCY:
+  - If document explicitly states currency (e.g. "Unit Price (HKD)") → use it for ALL items
+  - "$" inherits the document currency (e.g. HKD in this case)
+  - Only use USD if explicitly stated
+  - Otherwise infer from document context (header or table title)
+  - Use ISO 4217 codes (HKD, USD, EUR, etc.)
+- DATE: Always convert to YYYY-MM-DD. Example: 20/1/2026 → 2026-01-20, "January 20 2026" → 2026-01-20.
 
-Return ONLY one of: "QUO", "PO", "PL", or "unknown" for document_type.
+FINAL STRICT RULE:
+- If an item does not meet ALL rules above → SKIP it completely.
 
 Return this exact structure:
 {{
@@ -564,13 +594,7 @@ Return this exact structure:
   ]
 }}
 
-CRITICAL RULES:
-- description: Copy EVERY word from the description column verbatim. If it contains inch marks like 10.1", replace the " with a single quote ' like 10.1'. Do NOT skip any text.
-- unit_price: Format as X,XXX.XX — always use comma as thousands separator and period as decimal separator. Always show exactly 2 decimal places. Remove ALL currency symbols ($, €, £, HK$, MOP$, etc.). Examples: 2000 → 2,000.00, 12345.6 → 12,345.60, 99.9 → 99.90
-- date: ALWAYS convert to YYYY-MM-DD format. Example: 20/1/2026 becomes 2026-01-20, January 20 2026 becomes 2026-01-20.
-- currency: $ alone = USD, HK$ = HKD, € = EUR, £ = GBP, MOP$ = MOP
-- document_type: Must be exactly one of "QUO", "PO", "PL", or "unknown". Default to "unknown" if unsure.
-- Return ONLY valid parseable JSON, no markdown, no explanation"""
+Return ONLY valid parseable JSON, no markdown, no explanation"""
 
     content_parts = []
     for i, img_path in enumerate(image_paths):
