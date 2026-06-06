@@ -1433,6 +1433,28 @@ async def get_logs(level: str = "all"):
         lines = [l for l in lines if "error" in l.lower() or "ERROR" in l or "Traceback" in l]
     return {"logs": "\n".join(lines)}
 
+# ─── Debug: Local PDF Parsers (master only, Phase 1 of v0.037.0) ──
+# Read-only inspection endpoint. Runs pdfplumber + PyMuPDF on an
+# uploaded file and returns the extracted text + tables. Does NOT
+# call the LLM, does NOT save anything, does NOT touch the existing
+# processing flow. Used to validate parser quality on real PDFs
+# before wiring the new pipeline into /process-all.
+@app.get("/debug/parse", dependencies=[Depends(require_role("master"))])
+async def debug_parse(file_index: int):
+    if file_index < 0 or file_index >= len(uploaded_files):
+        raise HTTPException(status_code=404, detail="File not found")
+    entry = uploaded_files[file_index]
+    filepath = entry.get("filepath", "")
+    if not filepath or not Path(filepath).exists():
+        raise HTTPException(status_code=404, detail="File path missing or file no longer on disk")
+    # Local import so the parser module is optional at startup.
+    from .parser import parse_pdf
+    result = parse_pdf(filepath)
+    # Add context the UI needs to display the result.
+    result["file_index"] = file_index
+    result["upload_filename"] = entry.get("filename", "")
+    return result
+
 # ─── Serve Frontend ───────────────────────────────────────
 FRONTEND_PATH = Path(__file__).parent.parent / "frontend" / "index.html"
 

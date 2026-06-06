@@ -404,6 +404,23 @@
                 </div>
             </div>
 
+            <!-- Developer Tools / Debug Parse (master only) — v0.037.0 Phase 1 -->
+            <div class="settings-card debug-parse-section ai-master-only">
+                <h3>🔧 Developer Tools</h3>
+                <p style="font-size:13px;color:#666;margin-bottom:12px">
+                    Read-only inspection of an uploaded PDF using local parsers
+                    (pdfplumber + PyMuPDF). Does <strong>not</strong> call the AI,
+                    does <strong>not</strong> save anything. Used to validate parser
+                    quality before the new pipeline is wired in.
+                </p>
+                <div class="settings-field" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <label style="margin:0">File index:</label>
+                    <input type="number" id="debugParseIndex" value="0" min="0" style="width:80px">
+                    <button class="btn btn-primary" id="debugParseBtn" onclick="runDebugParse()">Parse PDF (debug)</button>
+                    <span id="debugParseStatus" style="font-size:12px;color:#666"></span>
+                </div>
+            </div>
+
             <!-- Users Management Section (master only) -->
             <div class="settings-card users-management-section">
                 <h3>👥 Users Management</h3>
@@ -726,6 +743,28 @@
             <div class="actions" style="justify-content:center">
                 <button class="btn btn-primary" onclick="showSettings(); closeModal('logsModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('logsModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Parse Result Modal (master only) — v0.037.0 Phase 1 -->
+    <div class="modal-overlay" id="debugParseModal">
+        <div class="modal" style="max-width:1000px;text-align:left;max-height:90vh;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <h3 style="margin:0">🔍 Debug Parse Result</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('debugParseModal')">Close</button>
+            </div>
+            <div id="debugParseSummary" style="margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:13px"></div>
+            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-secondary" id="debugTabPlumber" onclick="switchDebugTab('plumber')">pdfplumber text</button>
+                <button class="btn btn-sm btn-secondary" id="debugTabPlumberTables" onclick="switchDebugTab('plumberTables')">pdfplumber tables</button>
+                <button class="btn btn-sm btn-secondary" id="debugTabMupdf" onclick="switchDebugTab('mupdf')">pymupdf text</button>
+                <button class="btn btn-sm btn-secondary" id="debugTabRaw" onclick="switchDebugTab('raw')">raw JSON</button>
+            </div>
+            <div id="debugParseContent" style="flex:1;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;font-family:monospace;font-size:12px;white-space:pre-wrap;line-height:1.5"></div>
+            <div id="debugParseActions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+                <button class="btn btn-secondary btn-sm" onclick="copyDebugJson()">Copy JSON</button>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('debugParseModal')">Close</button>
             </div>
         </div>
     </div>

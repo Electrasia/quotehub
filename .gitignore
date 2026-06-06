@@ -25,6 +25,7 @@ build/
 *.egg
 .eggs/
 venv/
+.venv/
 env/
 
 # Docker

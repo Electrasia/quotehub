@@ -55,6 +55,11 @@ function closeModal(id) {
     document.getElementById(id).classList.remove('active');
 }
 
+function openModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+}
+
 async function loadPopupDuration() {
     try {
         const resp = await fetch('/config');
