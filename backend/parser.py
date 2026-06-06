@@ -245,3 +245,70 @@ def parse_pdf(pdf_path: str) -> dict[str, Any]:
             "pymupdf": parse_with_pymupdf(pdf_path),
         },
     }
+
+
+def format_for_llm(parse_result: dict) -> str:
+    """Format a parse_pdf() result into a CSV-like string the LLM can
+    read in Phase 3 to extract structured data.
+
+    Phase 2 (v0.037.0): preview only. The text is shaped for an LLM
+    prompt but no LLM call is made here. Phase 3 will design the
+    actual normalization prompt.
+
+    Structure of the output (one section per page):
+        === Page N ===
+        [text]
+        <full text from pdfplumber>
+        [pymupdf]
+        <full text from pymupdf, for cross-checking>
+        [tables]
+        <pipe-delimited rows from pdfplumber, with row index>
+
+    All pipes inside cell values are replaced with ' / ' to keep the
+    CSV unambiguous. Truncated cells are marked.
+    """
+    import re as _re
+
+    def _clean(s):
+        if s is None:
+            return ""
+        s = str(s).replace("|", " / ").replace("\r", " ").replace("\n", " ⏎ ")
+        return _re.sub(r"\s+", " ", s).strip()
+
+    lines = []
+    lines.append(f"[Document]")
+    lines.append(f"filename: {parse_result.get('filename', '?')}")
+    lines.append(f"pages: {parse_result.get('num_pages', 0)}")
+    lines.append("")
+
+    pp = parse_result.get("parsers", {}).get("pdfplumber", {})
+    pm = parse_result.get("parsers", {}).get("pymupdf", {})
+
+    for page_idx in range(parse_result.get("num_pages", 0)):
+        page_no = page_idx + 1
+        lines.append(f"=== Page {page_no} ===")
+        # pdfplumber text
+        pp_page = next((p for p in pp.get("pages", []) if p.get("page") == page_no), None)
+        if pp_page:
+            lines.append(f"[pdfplumber text — {pp_page.get('text_chars', 0)} chars]")
+            lines.append(pp_page.get("text", "").rstrip())
+        # pymupdf text
+        pm_page = next((p for p in pm.get("pages", []) if p.get("page") == page_no), None)
+        if pm_page:
+            lines.append("")
+            lines.append(f"[pymupdf text — {pm_page.get('text_chars', 0)} chars]")
+            lines.append(pm_page.get("text", "").rstrip())
+        # pdfplumber tables (CSV)
+        if pp_page and pp_page.get("tables"):
+            lines.append("")
+            lines.append(f"[pdfplumber tables — {len(pp_page['tables'])} table(s)]")
+            for t in pp_page["tables"]:
+                lines.append(f"  -- table {t.get('table_index')}: "
+                             f"{t.get('row_count')} rows x "
+                             f"{len(t['rows'][0]) if t.get('rows') else 0} cols --")
+                for r_idx, row in enumerate(t.get("rows", [])):
+                    cells = [_clean(c) for c in row]
+                    lines.append(f"  [{r_idx}] " + " | ".join(cells))
+        lines.append("")
+
+    return "\n".join(lines)

@@ -417,8 +417,13 @@
                     <label style="margin:0">File index:</label>
                     <input type="number" id="debugParseIndex" value="0" min="0" style="width:80px">
                     <button class="btn btn-primary" id="debugParseBtn" onclick="runDebugParse()">Parse PDF (debug)</button>
+                    <button class="btn btn-secondary" onclick="showDebug()">Open Debug Workspace →</button>
                     <span id="debugParseStatus" style="font-size:12px;color:#666"></span>
                 </div>
+                <p style="font-size:12px;color:#888;margin-top:8px;margin-bottom:0">
+                    Tip: the <strong>Debug Workspace</strong> shows all uploaded files with
+                    side-by-side parser output and a format-for-LLM preview.
+                </p>
             </div>
 
             <!-- Users Management Section (master only) -->
@@ -546,6 +551,68 @@
                     <li>Fabio Monteiro — <a href="mailto:fabio@electrasia.com">fabio@electrasia.com</a></li>
                     <li>Antonio Ferrao — <a href="mailto:ajferrao@electrasia.com">ajferrao@electrasia.com</a></li>
                 </ul>
+            </div>
+        </div>
+
+        <!-- ═══════════════ DEBUG WORKSPACE (Phase 2 of v0.037.0, master only) ═══════════════ -->
+        <div id="debugView" class="hidden">
+            <h2 style="margin-bottom:8px">🔧 Debug Workspace <span style="font-size:12px;color:#888;font-weight:400">(master only · v0.037.0)</span></h2>
+            <p style="font-size:13px;color:#666;margin-bottom:16px">Inspect how local PDF parsers see a file before wiring them into the main processing flow. Read-only — does not call the LLM and does not save anything.</p>
+
+            <div style="display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start">
+                <!-- File picker (left) -->
+                <div class="settings-card" style="padding:12px;max-height:80vh;overflow-y:auto">
+                    <h3 style="margin-top:0">📁 Uploaded Files</h3>
+                    <div id="debugFileList" style="font-size:13px">
+                        <p style="color:#999;margin:8px 0">Loading…</p>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="loadDebugFiles()" style="margin-top:8px;width:100%">Refresh</button>
+                </div>
+
+                <!-- Comparison (right) -->
+                <div style="display:flex;flex-direction:column;gap:12px">
+                    <!-- File metadata bar -->
+                    <div id="debugFileMeta" class="settings-card" style="padding:12px">
+                        <p style="color:#999;margin:0">Select a file from the list to inspect.</p>
+                    </div>
+
+                    <!-- Page selector (only shown when a file is selected) -->
+                    <div id="debugPageNav" class="settings-card hidden" style="padding:10px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-secondary" onclick="debugPrevPage()">◀ Prev</button>
+                        <span id="debugPageLabel" style="font-size:13px;font-weight:600">Page 1 of 1</span>
+                        <button class="btn btn-sm btn-secondary" onclick="debugNextPage()">Next ▶</button>
+                        <span style="flex:1"></span>
+                        <button class="btn btn-sm btn-primary" onclick="openDebugParseModal()">Open Debug Modal</button>
+                    </div>
+
+                    <!-- 3-column comparison -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+                        <!-- Column 1: pdfplumber text -->
+                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
+                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
+                                📄 pdfplumber text
+                                <span id="debugPpChars" style="float:right;color:#888;font-weight:400">—</span>
+                            </div>
+                            <pre id="debugPpText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
+                        </div>
+                        <!-- Column 2: pymupdf text -->
+                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
+                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
+                                📄 pymupdf text
+                                <span id="debugPmChars" style="float:right;color:#888;font-weight:400">—</span>
+                            </div>
+                            <pre id="debugPmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
+                        </div>
+                        <!-- Column 3: format-for-LLM (CSV) -->
+                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
+                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
+                                🤖 format for LLM
+                                <span style="float:right;color:#888;font-weight:400">preview</span>
+                            </div>
+                            <pre id="debugLlmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -777,5 +844,6 @@
     <script src="/static/js/search.js" defer></script>
     <script src="/static/js/settings.js" defer></script>
     <script src="/static/js/users.js" defer></script>
+    <script src="/static/js/debug.js" defer></script>
 </body>
 </html>

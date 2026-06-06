@@ -1433,12 +1433,36 @@ async def get_logs(level: str = "all"):
         lines = [l for l in lines if "error" in l.lower() or "ERROR" in l or "Traceback" in l]
     return {"logs": "\n".join(lines)}
 
-# ─── Debug: Local PDF Parsers (master only, Phase 1 of v0.037.0) ──
-# Read-only inspection endpoint. Runs pdfplumber + PyMuPDF on an
-# uploaded file and returns the extracted text + tables. Does NOT
-# call the LLM, does NOT save anything, does NOT touch the existing
+# ─── Debug: Local PDF Parsers (master only, Phase 1+2 of v0.037.0) ──
+# Read-only inspection endpoints. Run pdfplumber + PyMuPDF on
+# uploaded files and return text + tables + preview URLs. Do NOT
+# call the LLM, do NOT save anything, do NOT touch the existing
 # processing flow. Used to validate parser quality on real PDFs
 # before wiring the new pipeline into /process-all.
+
+@app.get("/debug/files", dependencies=[Depends(require_role("master"))])
+async def debug_files():
+    """List all currently uploaded files (not yet archived) for the
+    debug workspace file picker."""
+    out = []
+    for i, entry in enumerate(uploaded_files):
+        filepath = entry.get("filepath", "")
+        try:
+            size = Path(filepath).stat().st_size if filepath else 0
+        except OSError:
+            size = 0
+        stem = Path(entry.get("filename", "")).stem
+        out.append({
+            "file_index": i,
+            "filename": entry.get("filename", ""),
+            "file_stem": stem,
+            "status": entry.get("status", "pending"),
+            "num_pages": entry.get("num_pages", 0),
+            "file_size": size,
+            "page_urls": [f"/images/{stem}/page_{p+1}.png" for p in range(entry.get("num_pages", 0))],
+        })
+    return {"files": out}
+
 @app.get("/debug/parse", dependencies=[Depends(require_role("master"))])
 async def debug_parse(file_index: int):
     if file_index < 0 or file_index >= len(uploaded_files):
@@ -1448,11 +1472,25 @@ async def debug_parse(file_index: int):
     if not filepath or not Path(filepath).exists():
         raise HTTPException(status_code=404, detail="File path missing or file no longer on disk")
     # Local import so the parser module is optional at startup.
-    from .parser import parse_pdf
+    from .parser import parse_pdf, format_for_llm
     result = parse_pdf(filepath)
     # Add context the UI needs to display the result.
     result["file_index"] = file_index
     result["upload_filename"] = entry.get("filename", "")
+    stem = Path(entry.get("filename", "")).stem
+    result["file_stem"] = stem
+    result["page_urls"] = [
+        f"/images/{stem}/page_{p+1}.png"
+        for p in range(result.get("num_pages", 0))
+    ]
+    # Phase 2 addition: a CSV-like "format for LLM" preview that the
+    # LLM normalization step (Phase 3) will use. Cheap to compute, so
+    # always included.
+    try:
+        llm_preview = format_for_llm(result)
+        result["format_for_llm"] = llm_preview
+    except Exception as e:
+        result["format_for_llm"] = f"(format_for_llm failed: {e})"
     return result
 
 # ─── Serve Frontend ───────────────────────────────────────

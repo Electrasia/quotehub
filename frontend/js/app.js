@@ -88,6 +88,9 @@ async function initApp() {
     // Default landing: Upload tab (admin/master) or Search tab (user).
     if (currentUser && currentUser.role === 'user') {
         showSearch();
+    } else if (window.__openDebugOnBoot && isMaster && isMaster()) {
+        // Phase 2 of v0.037.0: ?debug=1 deep link, master only.
+        showDebug();
     } else {
         showUpload();
     }
