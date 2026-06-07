@@ -343,9 +343,9 @@ def _merge_ocr_into_pymupdf(result: dict, ocr_result: dict) -> None:
         parser_dict["total_text_chars"] = total
 
 
-async def parse_pdf_with_ocr(pdf_path: str, ocr_enabled: bool = True,
-                              use_llm_fallback: bool = True) -> dict[str, Any]:
-    """Async version of parse_pdf() that uses OCR. Use this from
+async def _parse_pdf_with_ocr_impl(pdf_path: str, ocr_enabled: bool = True,
+                                     use_llm_fallback: bool = True) -> dict[str, Any]:
+    """Async implementation of parse_pdf() that uses OCR. Use this from
     FastAPI handlers to avoid the RuntimeError when an event loop
     is already running.
 
@@ -404,6 +404,171 @@ async def parse_pdf_with_ocr(pdf_path: str, ocr_enabled: bool = True,
             }
 
     return result
+
+
+# Public alias used by main.py and other callers
+parse_pdf_with_ocr = _parse_pdf_with_ocr_impl
+
+
+def parse_xlsx(xlsx_path: str) -> dict[str, Any]:
+    """Extract text + tables from a .xlsx file with openpyxl.
+
+    Each sheet becomes one "page" in the result dict, and all rows
+    of that sheet become a single "table" in that page. This matches
+    the pdfplumber shape, so the rules-based extractor can handle
+    .xlsx files without any changes.
+
+    Cell values are coerced to strings (matching pdfplumber's behavior).
+    Merged cells: only the top-left cell of a merged range gets the
+    value; other cells in the range are left as None (openpyxl's
+    default behavior).
+    """
+    out: dict[str, Any] = {
+        "available": True,
+        "parser": "xlsx",
+        "time_ms": 0,
+        "pages": [],
+        "total_text_chars": 0,
+        "total_tables": 0,
+        "total_table_rows": 0,
+    }
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:
+        out["available"] = False
+        out["error"] = f"openpyxl not installed: {e}"
+        return out
+
+    t0 = time.time()
+    try:
+        # data_only=True: read the cached value, not the formula
+        wb = load_workbook(xlsx_path, data_only=True, read_only=True)
+        try:
+            for sheet_idx, sheet_name in enumerate(wb.sheetnames, start=1):
+                ws = wb[sheet_name]
+                rows = []
+                for row in ws.iter_rows(values_only=True):
+                    # Convert to list of strings or None
+                    row_list = []
+                    for cell in row:
+                        if cell is None:
+                            row_list.append(None)
+                        else:
+                            row_list.append(str(cell) if cell is not None else None)
+                    # Drop fully-empty trailing rows
+                    if any(c is not None and str(c).strip() for c in row_list):
+                        rows.append(row_list)
+                if not rows:
+                    continue
+                # Truncate like pdfplumber
+                if len(rows) > MAX_TABLE_ROWS:
+                    rows = rows[:MAX_TABLE_ROWS]
+                # Build the page-text view: a CSV-ish rendering
+                text_lines = []
+                for r in rows:
+                    cells = [str(c) if c is not None else "" for c in r]
+                    text_lines.append(" | ".join(cells))
+                page_text = "\n".join(text_lines)
+                page_text = _truncate(page_text, MAX_TEXT_CHARS_PER_PAGE)
+                table_dict = {
+                    "table_index": 1,
+                    "row_count": len(rows),
+                    "shown_rows": len(rows),
+                    "rows": rows,
+                }
+                out["pages"].append({
+                    "page": sheet_idx,
+                    "text": page_text,
+                    "text_chars": len(page_text),
+                    "tables": [table_dict],
+                    "sheet_name": sheet_name,
+                })
+                out["total_text_chars"] += len(page_text)
+                out["total_tables"] += 1
+                out["total_table_rows"] += len(rows)
+        finally:
+            wb.close()
+    except Exception as e:
+        out["available"] = False
+        out["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        out["time_ms"] = int((time.time() - t0) * 1000)
+    return out
+
+
+def parse_xlsx_full(xlsx_path: str) -> dict[str, Any]:
+    """Top-level parse for .xlsx files. Returns a parse_result in the
+    same shape as parse_pdf() so the rules-based extractor can use it.
+
+    The output has only one parser: 'xlsx'.
+    """
+    p = Path(xlsx_path)
+    if not p.exists():
+        return {"error": f"File not found: {xlsx_path}"}
+
+    file_size = p.stat().st_size
+    result = parse_xlsx(xlsx_path)
+    if not result.get("available"):
+        return {
+            "filename": p.name,
+            "file_size": file_size,
+            "num_pages": 0,
+            "error": result.get("error", "openpyxl failed"),
+        }
+    return {
+        "filename": p.name,
+        "file_size": file_size,
+        "num_pages": len(result["pages"]),
+        "parsers": {
+            "xlsx": result,
+            # Aliases for compatibility with code that reads pdfplumber/pymupdf
+            "pdfplumber": result,  # extract.py reads pdfplumber.pages[].tables
+            "pymupdf": result,     # also read for text
+        },
+    }
+
+
+def parse_file(file_path: str, ocr_enabled: bool = True,
+               use_llm_fallback: bool = True) -> dict[str, Any]:
+    """Dispatch parser by file extension.
+
+    Supports .pdf (via parse_pdf) and .xlsx (via parse_xlsx_full).
+    Returns a parse_result dict in the unified shape consumed by
+    extract_items().
+    """
+    p = Path(file_path)
+    if not p.exists():
+        return {"error": f"File not found: {file_path}"}
+    suffix = p.suffix.lower()
+    if suffix == ".pdf":
+        return parse_pdf(file_path, ocr_enabled=ocr_enabled,
+                         use_llm_fallback=use_llm_fallback)
+    if suffix == ".xlsx":
+        return parse_xlsx_full(file_path)
+    return {
+        "error": f"Unsupported file type: {suffix}. Supported: .pdf, .xlsx",
+    }
+
+
+async def parse_file_with_ocr(file_path: str, ocr_enabled: bool = True,
+                                use_llm_fallback: bool = True) -> dict[str, Any]:
+    """Async version of parse_file() — uses OCR for PDFs only.
+
+    Same return shape as parse_file(). For .xlsx files, no OCR is
+    needed (spreadsheets always have structured data).
+    """
+    p = Path(file_path)
+    if not p.exists():
+        return {"error": f"File not found: {file_path}"}
+    suffix = p.suffix.lower()
+    if suffix == ".pdf":
+        return await parse_pdf_with_ocr(file_path, ocr_enabled=ocr_enabled,
+                                         use_llm_fallback=use_llm_fallback)
+    if suffix == ".xlsx":
+        return parse_xlsx_full(file_path)
+    return {
+        "error": f"Unsupported file type: {suffix}. Supported: .pdf, .xlsx",
+    }
 
 
 def format_for_llm(parse_result: dict) -> str:

@@ -459,28 +459,34 @@ async def ai_status():
     return {"connected": ai_connected}
 
 # ─── Upload ───────────────────────────────────────────────
+ALLOWED_FILE_EXTENSIONS = (".pdf", ".xlsx")
+
 @app.post("/upload", dependencies=[Depends(require_role("admin", "master"))])
 async def upload(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
-        return JSONResponse(status_code=400, content={"error": "Only PDF files allowed"})
+    if not file.filename.lower().endswith(ALLOWED_FILE_EXTENSIONS):
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Only {', '.join(ALLOWED_FILE_EXTENSIONS)} files allowed"},
+        )
 
     filepath = UPLOAD_DIR / Path(file.filename).name
     with open(filepath, "wb") as f:
         content = await file.read()
         f.write(content)
 
-    # Convert PDF pages to images
+    # Convert PDF pages to images. Skip for .xlsx files (no pages to render).
     page_images = []
-    try:
-        images = convert_from_path(str(filepath), dpi=300)
-        file_dir = IMAGES_DIR / Path(file.filename).stem
-        file_dir.mkdir(parents=True, exist_ok=True)
-        for i, img in enumerate(images):
-            img_path = file_dir / f"page_{i+1}.png"
-            img.save(str(img_path), "PNG")
-            page_images.append(f"/images/{Path(file.filename).stem}/page_{i+1}.png")
-    except Exception as e:
-        print(f"PDF conversion error: {e}")
+    if file.filename.lower().endswith(".pdf"):
+        try:
+            images = convert_from_path(str(filepath), dpi=300)
+            file_dir = IMAGES_DIR / Path(file.filename).stem
+            file_dir.mkdir(parents=True, exist_ok=True)
+            for i, img in enumerate(images):
+                img_path = file_dir / f"page_{i+1}.png"
+                img.save(str(img_path), "PNG")
+                page_images.append(f"/images/{Path(file.filename).stem}/page_{i+1}.png")
+        except Exception as e:
+            print(f"PDF conversion error: {e}")
         if filepath.exists():
             filepath.unlink()
         return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
@@ -1481,8 +1487,8 @@ async def debug_parse(file_index: int):
     if not filepath or not Path(filepath).exists():
         raise HTTPException(status_code=404, detail="File path missing or file no longer on disk")
     # Local import so the parser module is optional at startup.
-    from .parser import parse_pdf, format_for_llm
-    result = parse_pdf(filepath)
+    from .parser import parse_file, format_for_llm
+    result = parse_file(filepath)
     # Add context the UI needs to display the result.
     result["file_index"] = file_index
     result["upload_filename"] = entry.get("filename", "")
