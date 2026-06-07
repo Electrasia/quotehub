@@ -57,6 +57,8 @@ _CONFIG_DEFAULTS = {
     "session_max_age": 14 * 24 * 60 * 60,     # 14 days, in seconds
     "idle_timeout_minutes": 60,                # 60 minutes; 0 = disabled
     "llm_fallback_enabled": False,             # v0.037.0: use LLM if local returns 0 items
+    "ocr_enabled": True,                        # v0.038.0: use OCR (pytesseract) for scanned PDFs
+    "ocr_fallback_to_llm": True,               # v0.038.0: fall back to vision LLM if tesseract quality is low
 }
 
 def load_config():
@@ -254,6 +256,8 @@ class ConfigRequest(BaseModel):
     session_max_age: int = 14 * 24 * 60 * 60
     idle_timeout_minutes: int = 60
     llm_fallback_enabled: bool = False
+    ocr_enabled: bool = True
+    ocr_fallback_to_llm: bool = True
 
 class CleanupPreviewRequest(BaseModel):
     months: int = Field(ge=1, le=120)   # 1 month to 10 years
@@ -281,6 +285,8 @@ async def update_config(req: ConfigRequest):
     cfg["session_max_age"] = req.session_max_age
     cfg["idle_timeout_minutes"] = req.idle_timeout_minutes
     cfg["llm_fallback_enabled"] = req.llm_fallback_enabled
+    cfg["ocr_enabled"] = req.ocr_enabled
+    cfg["ocr_fallback_to_llm"] = req.ocr_fallback_to_llm
     save_config(cfg)
     return {"status": "saved", "config": cfg}
 
@@ -1501,6 +1507,8 @@ class DebugExtractRequest(BaseModel):
     file_index: int = Field(..., description="Index into uploaded_files")
     model_source: str = Field("auto", description="auto | model | part_no")
     use_llm_fallback: bool = Field(False, description="If true and local returns 0 items, call LLM")
+    ocr_enabled: bool = Field(True, description="If true, run OCR on scanned PDFs (pytesseract + vision LLM fallback)")
+    use_ocr_llm_fallback: bool = Field(True, description="If true and tesseract quality is low, use vision LLM")
 
 @app.post("/debug/extract", dependencies=[Depends(require_role("master"))])
 async def debug_extract(req: DebugExtractRequest):
@@ -1520,13 +1528,20 @@ async def debug_extract(req: DebugExtractRequest):
     if not filepath or not Path(filepath).exists():
         raise HTTPException(status_code=404, detail="File path missing or file no longer on disk")
 
-    from .parser import parse_pdf
+    from .parser import parse_pdf_with_ocr
     from .extract import extract_items
 
-    parse_result = parse_pdf(filepath)
+    parse_result = await parse_pdf_with_ocr(
+        filepath,
+        ocr_enabled=req.ocr_enabled,
+        use_llm_fallback=req.use_ocr_llm_fallback,
+    )
     pp = parse_result.get("parsers", {}).get("pdfplumber", {})
     pages = pp.get("pages", [])
     full_text = "\n\n".join(p.get("text", "") for p in pages)
+
+    # Include OCR info in response for transparency
+    ocr_info = parse_result.get("parsers", {}).get("ocr", {})
 
     # 1) Try the rules-based extractor
     result = extract_items(parse_result, full_text, parse_result.get("filename", ""),
@@ -1534,6 +1549,14 @@ async def debug_extract(req: DebugExtractRequest):
     result["extraction_method"] = "local"
     result["file_index"] = req.file_index
     result["upload_filename"] = entry.get("filename", "")
+    result["ocr"] = {
+        "triggered": bool(ocr_info),
+        "source": ocr_info.get("source", ""),
+        "time_ms": ocr_info.get("time_ms", 0),
+        "avg_confidence": ocr_info.get("avg_confidence"),
+        "total_num_count": ocr_info.get("total_num_count"),
+        "error": ocr_info.get("error"),
+    }
 
     # 2) Fall back to LLM if requested AND local returned 0 items
     if req.use_llm_fallback and not result.get("items"):

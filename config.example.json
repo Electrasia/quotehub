@@ -4,5 +4,8 @@
   "timeout": 90,
   "max_retries": 2,
   "external_url": "",
-  "popup_duration": 3
+  "popup_duration": 3,
+  "llm_fallback_enabled": false,
+  "ocr_enabled": true,
+  "ocr_fallback_to_llm": true
 }

@@ -309,6 +309,26 @@
                     </label>
                 </div>
 
+                <h3 style="margin:18px 0 4px 0;font-size:14px">OCR (scanned PDFs)</h3>
+                <p style="font-size:12px;color:#666;margin:0 0 8px 0">
+                    Scanned/image-only PDFs have no text for the local extractor to read.
+                    Enable OCR to run pytesseract on each page. If tesseract's quality
+                    is low (avg confidence &lt; 40% or fewer than 5 numbers detected),
+                    a vision LLM can be used as a second pass.
+                </p>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" id="settingsOcrEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px" checked>
+                    <label for="settingsOcrEnabled" style="cursor:pointer;margin:0">
+                        Enable OCR for scanned PDFs (pytesseract)
+                    </label>
+                </div>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                    <input type="checkbox" id="settingsOcrLlmFallback" class="ai-master-only" style="cursor:pointer;width:16px;height:16px" checked>
+                    <label for="settingsOcrLlmFallback" style="cursor:pointer;margin:0">
+                        Use vision LLM as fallback when OCR quality is low
+                    </label>
+                </div>
+
                 <div class="actions">
                     <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
                 </div>
@@ -643,6 +663,14 @@
                             <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
                                 <input type="checkbox" id="debugLlmFallback" style="cursor:pointer">
                                 Use LLM fallback if local returns 0 items
+                            </label>
+                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
+                                <input type="checkbox" id="debugOcrEnabled" style="cursor:pointer" checked>
+                                OCR for scanned PDFs
+                            </label>
+                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
+                                <input type="checkbox" id="debugOcrLlmFallback" style="cursor:pointer" checked>
+                                Vision LLM if OCR is low quality
                             </label>
                             <button class="btn btn-primary btn-sm" id="debugRunExtractBtn" onclick="runDebugExtract()" style="margin-left:auto">
                                 Run extraction

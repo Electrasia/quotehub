@@ -84,6 +84,8 @@ async function showSettings() {
         document.getElementById('settingsRetries').value = cfg.max_retries || 2;
         document.getElementById('settingsPopupDuration').value = cfg.popup_duration || 3;
         document.getElementById('settingsLlmFallbackEnabled').checked = !!cfg.llm_fallback_enabled;
+        document.getElementById('settingsOcrEnabled').checked = cfg.ocr_enabled !== false;
+        document.getElementById('settingsOcrLlmFallback').checked = cfg.ocr_fallback_to_llm !== false;
         // Session settings — numeric safety via Number.isFinite (allows 0, rejects NaN)
         const days = Number.isFinite(cfg.session_max_age) ? Math.round(cfg.session_max_age / 86400) : 14;
         document.getElementById('settingsSessionMaxAgeDays').value = days;

@@ -3,6 +3,9 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     ghostscript \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

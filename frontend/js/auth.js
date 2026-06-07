@@ -96,6 +96,7 @@ function applyAdminSettingsLock() {
         'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
         'settingsLlmFallbackEnabled',
+        'settingsOcrEnabled', 'settingsOcrLlmFallback',
         'settingsSessionMaxAgeDays', 'settingsIdleTimeout',
     ];
     inputs.forEach(id => {

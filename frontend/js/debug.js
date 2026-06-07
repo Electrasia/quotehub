@@ -77,6 +77,8 @@ async function selectDebugFile(idx) {
     _debugExtractResult = null;
     document.getElementById('debugModelSource').value = 'auto';
     document.getElementById('debugLlmFallback').checked = false;
+    document.getElementById('debugOcrEnabled').checked = true;
+    document.getElementById('debugOcrLlmFallback').checked = true;
     document.getElementById('debugExtractStatus').innerHTML = '';
     document.getElementById('debugExtractMetadata').innerHTML = '';
     document.getElementById('debugExtractWarnings').innerHTML = '';
@@ -251,12 +253,15 @@ async function runDebugExtract() {
     const itemsEl = document.getElementById('debugExtractItems');
     const modelSource = document.getElementById('debugModelSource').value;
     const useLlm = document.getElementById('debugLlmFallback').checked;
+    const ocrEnabled = document.getElementById('debugOcrEnabled').checked;
+    const ocrLlmFallback = document.getElementById('debugOcrLlmFallback').checked;
 
     btn.disabled = true;
     status.textContent = 'Running extraction…';
     meta.innerHTML = '';
     warns.innerHTML = '';
     itemsEl.innerHTML = '';
+
     try {
         const resp = await apiFetch('/debug/extract', {
             method: 'POST',
@@ -265,6 +270,8 @@ async function runDebugExtract() {
                 file_index: _debugResult.file_index,
                 model_source: modelSource,
                 use_llm_fallback: useLlm,
+                ocr_enabled: ocrEnabled,
+                use_ocr_llm_fallback: ocrLlmFallback,
             }),
         });
         const data = await resp.json().then(d => ({ ok: resp.ok, data: d }));
@@ -298,6 +305,14 @@ function renderDebugExtract() {
         ['Currency', r.currency],
         ['Document type', r.document_type],
     ];
+    // If OCR ran, surface its info in the metadata grid
+    if (r.ocr && r.ocr.triggered) {
+        const ocrSource = r.ocr.source || 'unknown';
+        const ocrConf = r.ocr.avg_confidence != null
+            ? ` (${r.ocr.avg_confidence}% conf)` : '';
+        const ocrTime = r.ocr.time_ms ? ` · ${r.ocr.time_ms}ms` : '';
+        fields.push(['OCR source', `${ocrSource}${ocrConf}${ocrTime}`]);
+    }
     meta.innerHTML = fields.map(([k, v]) => `
         <div class="settings-card" style="padding:8px 10px;background:#f9f9f9">
             <div style="font-size:11px;color:#888;font-weight:600">${escapeHtml(k)}</div>

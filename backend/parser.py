@@ -197,8 +197,15 @@ def parse_with_pymupdf(pdf_path: str) -> dict[str, Any]:
     return out
 
 
-def parse_pdf(pdf_path: str) -> dict[str, Any]:
+def parse_pdf(pdf_path: str, ocr_enabled: bool = True, use_llm_fallback: bool = True) -> dict[str, Any]:
     """Run all available parsers and return a combined debug response.
+
+    If both pdfplumber and PyMuPDF return little or no text from a page
+    (typical for scanned/image-only PDFs) and `ocr_enabled` is True,
+    triggers an OCR pass on that PDF and includes the OCR result under
+    parsers["ocr"]. The OCR text is also merged into pymupdf's per-page
+    text so downstream code that reads pymupdf's text gets the OCR text
+    when available.
 
     Top-level shape:
         {
@@ -207,7 +214,8 @@ def parse_pdf(pdf_path: str) -> dict[str, Any]:
           "num_pages": int,
           "parsers": {
             "pdfplumber": { ... },
-            "pymupdf": { ... }
+            "pymupdf": { ... },
+            "ocr": { ... }   # only if OCR was triggered
           }
         }
     """
@@ -236,7 +244,7 @@ def parse_pdf(pdf_path: str) -> dict[str, Any]:
                 "error": f"Could not open PDF with either parser: {e}",
             }
 
-    return {
+    result = {
         "filename": p.name,
         "file_size": file_size,
         "num_pages": num_pages,
@@ -245,6 +253,157 @@ def parse_pdf(pdf_path: str) -> dict[str, Any]:
             "pymupdf": parse_with_pymupdf(pdf_path),
         },
     }
+
+    # OCR fallback: if both parsers return little text per page (e.g.
+    # scanned PDFs), trigger OCR. We measure average per-page chars.
+    # Threshold: 50 chars/page average = clearly image-only PDF.
+    if ocr_enabled and num_pages > 0:
+        try:
+            pp_total = result["parsers"]["pdfplumber"].get("total_text_chars", 0)
+            pm_total = result["parsers"]["pymupdf"].get("total_text_chars", 0)
+            avg_per_page = max(pp_total, pm_total) / num_pages
+            if avg_per_page < 50:
+                # Run OCR synchronously for pytesseract (no LLM) and
+                # asynchronously for the LLM fallback. We do this in a
+                # sync context here for simplicity — pytesseract is the
+                # common case, the LLM fallback is rare.
+                import asyncio as _asyncio
+                from .ocr import ocr_pdf
+                try:
+                    ocr_result = _asyncio.run(
+                        ocr_pdf(pdf_path, use_llm_fallback=use_llm_fallback)
+                    )
+                except RuntimeError:
+                    # Already inside an event loop (e.g. from FastAPI).
+                    # The caller should use parse_pdf_with_ocr() instead.
+                    ocr_result = {
+                        "source": "skipped",
+                        "text": "",
+                        "error": "OCR skipped: event loop already running. "
+                                 "Use parse_pdf_with_ocr() from async context.",
+                        "time_ms": 0,
+                    }
+                result["parsers"]["ocr"] = ocr_result
+                # Merge OCR text into pymupdf pages so downstream code
+                # that reads pymupdf text sees the OCR output.
+                if ocr_result.get("text"):
+                    _merge_ocr_into_pymupdf(result, ocr_result)
+        except Exception as e:
+            # OCR is best-effort — never let it fail the parse
+            result["parsers"]["ocr"] = {
+                "source": "error",
+                "text": "",
+                "error": f"{type(e).__name__}: {e}",
+                "time_ms": 0,
+            }
+
+    return result
+
+
+def _merge_ocr_into_pymupdf(result: dict, ocr_result: dict) -> None:
+    """Replace per-page text with OCR text in BOTH pdfplumber and pymupdf.
+
+    The rules-based extractor reads text from pdfplumber (and tables
+    from pdfplumber too), so for scanned PDFs the OCR text must be
+    visible there. We update both parser dicts so callers don't have
+    to know OCR was used.
+    """
+    pymu = result.get("parsers", {}).get("pymupdf", {})
+    pp = result.get("parsers", {}).get("pdfplumber", {})
+    ocr_pages = ocr_result.get("pages") or []
+    if not ocr_pages:
+        # Vision LLM doesn't return per-page text — just store the full
+        # text on the first page so extract_items can still find it.
+        full = ocr_result.get("text", "")
+        if full:
+            if pymu.get("pages"):
+                pymu["pages"][0]["text"] = full
+                pymu["pages"][0]["text_chars"] = len(full)
+            if pp.get("pages"):
+                pp["pages"][0]["text"] = full
+                pp["pages"][0]["text_chars"] = len(full)
+                # Also bump the total_text_chars so the merge heuristic
+                # downstream can see we got text
+                pp["total_text_chars"] = max(
+                    pp.get("total_text_chars", 0), len(full),
+                )
+        return
+    # Map page number → OCR text
+    ocr_by_page = {p.get("page"): p.get("text", "") for p in ocr_pages}
+    for parser_dict in (pymu, pp):
+        for page in parser_dict.get("pages", []):
+            page_no = page.get("page")
+            ocr_text = ocr_by_page.get(page_no, "")
+            if ocr_text:
+                page["text"] = ocr_text
+                page["text_chars"] = len(ocr_text)
+        # Update totals so any downstream code that checks the totals sees
+        # the new content
+        total = sum(p.get("text_chars", 0) for p in parser_dict.get("pages", []))
+        parser_dict["total_text_chars"] = total
+
+
+async def parse_pdf_with_ocr(pdf_path: str, ocr_enabled: bool = True,
+                              use_llm_fallback: bool = True) -> dict[str, Any]:
+    """Async version of parse_pdf() that uses OCR. Use this from
+    FastAPI handlers to avoid the RuntimeError when an event loop
+    is already running.
+
+    Same return shape as parse_pdf().
+    """
+    p = Path(pdf_path)
+    if not p.exists():
+        return {"error": f"File not found: {pdf_path}"}
+
+    file_size = p.stat().st_size
+    num_pages = 0
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            num_pages = len(pdf.pages)
+    except Exception:
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            num_pages = len(doc)
+            doc.close()
+        except Exception as e:
+            return {
+                "filename": p.name,
+                "file_size": file_size,
+                "error": f"Could not open PDF with either parser: {e}",
+            }
+
+    result = {
+        "filename": p.name,
+        "file_size": file_size,
+        "num_pages": num_pages,
+        "parsers": {
+            "pdfplumber": parse_with_pdfplumber(pdf_path),
+            "pymupdf": parse_with_pymupdf(pdf_path),
+        },
+    }
+
+    if ocr_enabled and num_pages > 0:
+        try:
+            pp_total = result["parsers"]["pdfplumber"].get("total_text_chars", 0)
+            pm_total = result["parsers"]["pymupdf"].get("total_text_chars", 0)
+            avg_per_page = max(pp_total, pm_total) / num_pages
+            if avg_per_page < 50:
+                from .ocr import ocr_pdf
+                ocr_result = await ocr_pdf(pdf_path, use_llm_fallback=use_llm_fallback)
+                result["parsers"]["ocr"] = ocr_result
+                if ocr_result.get("text"):
+                    _merge_ocr_into_pymupdf(result, ocr_result)
+        except Exception as e:
+            result["parsers"]["ocr"] = {
+                "source": "error",
+                "text": "",
+                "error": f"{type(e).__name__}: {e}",
+                "time_ms": 0,
+            }
+
+    return result
 
 
 def format_for_llm(parse_result: dict) -> str:
