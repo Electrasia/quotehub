@@ -187,8 +187,8 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
             "error": str | None,
         }
     """
-    # Lazy imports to avoid circular import (main.py imports parser).
-    from .main import load_config
+    # Import from utils to avoid circular dependency with main.py
+    from .utils import load_config
     import httpx
 
     t0 = time.time()

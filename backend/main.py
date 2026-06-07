@@ -29,6 +29,7 @@ from .auth import (
     CONFIG_PATH,
     read_init_password, acknowledge_init_password,
 )
+from .utils import load_config, save_config, get_config_data, repair_json_quotes
 
 # ─── Version Info ────────────────────────────────────────
 VERSION_PATH = Path(__file__).parent.parent / "VERSION"
@@ -45,39 +46,8 @@ APP_VERSION = read_file_text(VERSION_PATH, "0.0.0")
 APP_COMMIT = read_file_text(GIT_COMMIT_PATH, "unknown")
 
 # ─── Config ───────────────────────────────────────────────
+# Config functions are imported from utils.py to avoid circular dependencies.
 # CONFIG_PATH is imported from auth (single source of truth).
-
-_CONFIG_DEFAULTS = {
-    "ai_endpoint": "",
-    "model": "",
-    "external_url": "",
-    "timeout": 120,
-    "max_retries": 3,
-    "popup_duration": 3,
-    "session_max_age": 14 * 24 * 60 * 60,     # 14 days, in seconds
-    "idle_timeout_minutes": 60,                # 60 minutes; 0 = disabled
-    "llm_fallback_enabled": False,             # v0.037.0: use LLM if local returns 0 items
-    "ocr_enabled": True,                        # v0.038.0: use OCR (pytesseract) for scanned PDFs
-    "ocr_fallback_to_llm": True,               # v0.038.0: fall back to vision LLM if tesseract quality is low
-}
-
-def load_config():
-    try:
-        with open(CONFIG_PATH) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return dict(_CONFIG_DEFAULTS)
-
-def save_config(cfg):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=2)
-
-def get_config_data():
-    cfg = load_config()
-    for k, v in _CONFIG_DEFAULTS.items():
-        cfg.setdefault(k, v)
-    return cfg
-
 CONFIG = load_config()
 
 # ─── State ────────────────────────────────────────────────
@@ -537,28 +507,7 @@ async def next_file(file_index: int = 0):
     return {"pages": uploaded_files[file_index]["pages"]}
 
 # ─── Process ──────────────────────────────────────────────
-def repair_json_quotes(raw):
-    """Fix unescaped double quotes inside JSON string values."""
-    result = []
-    in_string = False
-    i = 0
-    while i < len(raw):
-        ch = raw[i]
-        if ch == '"' and (i == 0 or raw[i-1] != '\\'):
-            if not in_string:
-                in_string = True
-                result.append(ch)
-            else:
-                rest = raw[i+1:i+20].lstrip()
-                if rest and rest[0] in ':,}]\n':
-                    in_string = False
-                    result.append(ch)
-                else:
-                    result.append('\\"')
-        else:
-            result.append(ch)
-        i += 1
-    return ''.join(result)
+# repair_json_quotes is imported from utils.py
 
 def compress_image(img_path, max_width=1280, quality=80):
     """Compress image for AI processing while keeping it readable."""

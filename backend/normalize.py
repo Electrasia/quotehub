@@ -162,8 +162,8 @@ async def normalize_text_with_llm(text, cfg=None):
 
     Returns ({}, error_string) on failure.
     """
-    # Lazy imports to avoid circular import (main.py imports this module).
-    from .main import repair_json_quotes, load_config
+    # Import from utils to avoid circular dependency with main.py
+    from .utils import repair_json_quotes, load_config
 
     if cfg is None:
         cfg = load_config()
@@ -282,7 +282,8 @@ async def normalize_pages_with_llm(pages_text: list, cfg=None):
             "per_page_errors": [...],   # populated on partial failure
         }
     """
-    from .main import load_config
+    # Import from utils to avoid circular dependency with main.py
+    from .utils import load_config
 
     if cfg is None:
         cfg = load_config()
