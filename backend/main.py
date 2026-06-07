@@ -96,9 +96,14 @@ def load_upload_state():
             for entry in saved:
                 filepath = Path(entry.get("filepath", ""))
                 if filepath.exists():
+                    # Enumerate actual image files on disk rather than relying on
+                    # stored page URLs (the previous path check was wrong:
+                    # state stores "/images/.../page.png" but filesystem is
+                    # /app/data/images/.../page.png).
                     img_dir = IMAGES_DIR / filepath.stem
-                    entry["pages"] = [p for p in entry.get("pages", []) if (Path(__file__).parent.parent / p.lstrip("/")).exists()]
-                    entry["num_pages"] = len(entry["pages"])
+                    page_files = sorted(img_dir.glob("page_*.png")) if img_dir.is_dir() else []
+                    entry["pages"] = [f"/images/{filepath.stem}/{p.name}" for p in page_files]
+                    entry["num_pages"] = len(page_files)
                     restored.append(entry)
             uploaded_files = restored
             print(f"Restored {len(restored)} file(s) from previous session")
