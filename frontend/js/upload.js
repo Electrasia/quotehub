@@ -33,7 +33,12 @@ fileInput.addEventListener('change', (e) => {
 
 async function handleFiles(files) {
     for (const file of files) {
-        if (file.type !== 'application/pdf') continue;
+        // v0.038.0: check by extension, not MIME type. .xlsx files have
+        // MIME type 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        // (or 'application/octet-stream' on some systems), so the old
+        // `file.type === 'application/pdf'` check silently dropped them.
+        const name = (file.name || '').toLowerCase();
+        if (!name.endsWith('.pdf') && !name.endsWith('.xlsx')) continue;
         const formData = new FormData();
         formData.append('file', file);
         const resp = await fetch('/upload', { method: 'POST', body: formData });
