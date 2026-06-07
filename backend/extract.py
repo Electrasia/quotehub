@@ -607,37 +607,38 @@ def _is_total_row(row):
 
 
 def _is_section_header_row(row, col_to_field):
-    """A section/category row: has some text but no model and no price.
+    """A section/category row: has some text content but no price and no total.
 
-    e.g. T1388 row "1 | | Cable | CAT. 6 Cable | | | | |" is a section
-    header for "1.1 | 884035994/10 | CS31Z1 Grey ..."
+    Real items always have a unit_price or total. Section headers / category
+    rows in PDFs like T1388 look like:
+        "1 | Cable | CAT. 6 Cable | | | | |"  (no qty, no price, no total)
+    and are followed by:
+        "1.1 | 884035994/10 | CS31Z1 Grey ... | 300 | roll | $1,157 | $347,100 | ex-stock"
+
+    The check below returns True for the first row (text present, no price)
+    and False for the second (text AND price present).
     """
     if _is_empty_row(row):
         return False
     if _is_total_row(row):
         return False
 
-    # If model is empty, this is a section header
-    model_col = None
-    for col, field in col_to_field.items():
-        if field == "model":
-            model_col = col
-            break
-
+    # If any price-like content is present, this is a real item, not a
+    # section header. The "no model" check is no longer used because some
+    # PDFs (T1388) put a category name in the model column on section rows.
     price_cols = [col for col, field in col_to_field.items()
                   if field in ("unit_price", "total")]
+    for col in price_cols:
+        if col < len(row) and row[col] is not None and str(row[col]).strip():
+            return False  # has a price = real item
 
-    if model_col is not None and model_col < len(row):
-        model_val = row[model_col]
-        if model_val is not None and str(model_val).strip():
-            return False  # has a model = real item
-        # Check no price either
-        no_price = all(
-            col >= len(row) or row[col] is None or not str(row[col]).strip()
-            for col in price_cols
-        )
-        return no_price
-    return False
+    # No price in any price column → it's a section header / category row.
+    # Still require at least SOME text content to be safe.
+    has_text = any(
+        c is not None and str(c).strip()
+        for c in row
+    )
+    return has_text
 
 
 def _is_metadata_table(rows, col_to_field):
@@ -665,6 +666,70 @@ def _is_metadata_table(rows, col_to_field):
                 if PRICE_PATTERN.match(str(c).strip()):
                     return False
     return True
+
+
+def _is_garbage_table(rows):
+    """A 'table' that is really just an email body, image caption, or other
+    unstructured content flattened into one cell by pdfplumber.
+
+    Heuristic: a real items table has multiple populated columns per row
+    (item_number, model, description, qty, price, ...). A garbage table
+    has at most one populated column — the rest are None or empty.
+
+    Example: T1388's email-forwarded table on page 1 has 9 rows where most
+    rows are one big text cell with the other 2 cells being None.
+    """
+    if not rows or len(rows) < 2:
+        return False
+    # For each row, count how many cells have any non-empty content.
+    cells_per_row = []
+    for row in rows:
+        n = sum(1 for c in row if c is not None and str(c).strip())
+        cells_per_row.append(n)
+    # Find the max cells-per-row across all rows. A real table has
+    # 4+ populated cells per row (item/model/desc/qty/price/total/remark).
+    # A garbage table has 0-1.
+    max_cells = max(cells_per_row) if cells_per_row else 0
+    return max_cells <= 1
+
+
+def _drop_phantom_columns(rows):
+    """Remove columns where every data row is None/empty.
+
+    Happens when pdfplumber misdetects column boundaries — e.g. the header
+    'Item' gets split into ['Ite', 'm'] across two columns, leaving column
+    1 as a phantom with all None data values (only the header cell has the
+    fragment 'm'). Dropping the phantom re-aligns the column mapping.
+
+    Returns a new list of rows with phantom columns removed.
+    """
+    if not rows:
+        return rows
+    n_cols = max((len(r) for r in rows), default=0)
+    if n_cols == 0:
+        return rows
+    # We need a header row to know which row is the "header" — but we
+    # don't know that here. The safer heuristic: a column is phantom if
+    # AT LEAST 80% of rows are empty AND the column is small (1-3 cells
+    # of content) — this catches 'm', 'Ite', etc. without affecting real
+    # short columns like 'Qty'.
+    phantom = set()
+    for col in range(n_cols):
+        empty_count = sum(
+            1 for r in rows
+            if col >= len(r) or r[col] is None or not str(r[col]).strip()
+        )
+        nonempty_count = len(rows) - empty_count
+        if empty_count / max(len(rows), 1) >= 0.8 and nonempty_count <= 2:
+            phantom.add(col)
+    if not phantom:
+        return rows
+    # Rebuild rows without phantom columns
+    new_rows = []
+    for r in rows:
+        new_r = [c for i, c in enumerate(r) if i not in phantom]
+        new_rows.append(new_r)
+    return new_rows
 
 
 def _extract_item_from_row(row, col_to_field):
@@ -820,6 +885,16 @@ def _process_table(table, page_num, warnings, model_source="auto"):
         return [], {"rows_scanned": len(rows), "items_extracted": 0,
                     "skipped_reason": "metadata_table"}
 
+    # Skip "garbage" tables (e.g. an email body flattened into one big cell).
+    # The _find_header_rows heuristic would otherwise misfire on them.
+    if _is_garbage_table(rows):
+        return [], {"rows_scanned": len(rows), "items_extracted": 0,
+                    "skipped_reason": "garbage_table"}
+
+    # Drop phantom columns (all-empty columns from a misdetected column
+    # boundary, e.g. ['Ite', 'm'] instead of ['Item']).
+    rows = _drop_phantom_columns(rows)
+
     # Find header rows
     header_end, confidence = _find_header_rows(rows)
     header_rows = rows[:header_end]
@@ -900,6 +975,46 @@ def extract_items(parse_result, source_text="", filename="", model_source="auto"
                 "items_extracted": len(items),
                 **t_log,
             })
+
+    # Filter out junk items: very long descriptions (>500 chars) usually mean
+    # we accidentally picked up an email body or paragraph instead of a real
+    # row. (e.g. T1388 page 1 has a single "row" that is the whole email body.)
+    filtered = []
+    for it in all_items:
+        if len(it.get("description", "")) > 500 or len(it.get("model", "")) > 500:
+            continue
+        filtered.append(it)
+    if len(filtered) < len(all_items):
+        warnings.append(
+            f"Filtered {len(all_items) - len(filtered)} junk item(s) with "
+            "suspiciously long descriptions"
+        )
+    all_items = filtered
+
+    # Deduplicate items that appear in multiple tables (e.g. T1388's items
+    # table is detected on both page 1 and page 2). Key by (item_number,
+    # model, qty, unit_price) — when duplicates are found, keep the version
+    # with the longer (more complete) description.
+    deduped = {}
+    for it in all_items:
+        key = (
+            str(it.get("item_number", "")).strip(),
+            str(it.get("model", "")).strip(),
+            str(it.get("quantity", "")).strip(),
+            str(it.get("unit_price", "")).strip(),
+        )
+        if key in deduped:
+            existing = deduped[key]
+            if len(it.get("description", "")) > len(existing.get("description", "")):
+                deduped[key] = it
+        else:
+            deduped[key] = it
+    if len(deduped) < len(all_items):
+        warnings.append(
+            f"Deduplicated {len(all_items) - len(deduped)} item(s) that appeared "
+            "in multiple tables (same item_number + model + qty + price)"
+        )
+    all_items = list(deduped.values())
 
     # Metadata
     metadata = extract_metadata(source_text, filename, pp_pages, warnings)
