@@ -65,6 +65,7 @@ async function saveSettings() {
     const popupDurationRaw = parseInt(document.getElementById('settingsPopupDuration').value);
     const sessionDaysRaw   = parseInt(document.getElementById('settingsSessionMaxAgeDays').value);
     const idleTimeoutRaw   = parseInt(document.getElementById('settingsIdleTimeout').value);
+    const llmFallbackEnabled = document.getElementById('settingsLlmFallbackEnabled').checked;
 
     // Numeric safety: Number.isFinite() rejects NaN/Infinity, but allows 0 to pass through
     const timeout           = Number.isFinite(timeoutRaw)         ? timeoutRaw         : 120;
@@ -89,6 +90,7 @@ async function saveSettings() {
                 popup_duration: popupDuration,
                 session_max_age: sessionMaxAgeDays * 86400,
                 idle_timeout_minutes: idleTimeout,
+                llm_fallback_enabled: llmFallbackEnabled,
             })
         });
         const result = await resp.json();

@@ -56,6 +56,7 @@ _CONFIG_DEFAULTS = {
     "popup_duration": 3,
     "session_max_age": 14 * 24 * 60 * 60,     # 14 days, in seconds
     "idle_timeout_minutes": 60,                # 60 minutes; 0 = disabled
+    "llm_fallback_enabled": False,             # v0.037.0: use LLM if local returns 0 items
 }
 
 def load_config():
@@ -252,6 +253,7 @@ class ConfigRequest(BaseModel):
     popup_duration: int = 3
     session_max_age: int = 14 * 24 * 60 * 60
     idle_timeout_minutes: int = 60
+    llm_fallback_enabled: bool = False
 
 class CleanupPreviewRequest(BaseModel):
     months: int = Field(ge=1, le=120)   # 1 month to 10 years
@@ -278,6 +280,7 @@ async def update_config(req: ConfigRequest):
     cfg["popup_duration"] = req.popup_duration
     cfg["session_max_age"] = req.session_max_age
     cfg["idle_timeout_minutes"] = req.idle_timeout_minutes
+    cfg["llm_fallback_enabled"] = req.llm_fallback_enabled
     save_config(cfg)
     return {"status": "saved", "config": cfg}
 
@@ -1491,6 +1494,72 @@ async def debug_parse(file_index: int):
         result["format_for_llm"] = llm_preview
     except Exception as e:
         result["format_for_llm"] = f"(format_for_llm failed: {e})"
+    return result
+
+class DebugExtractRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    file_index: int = Field(..., description="Index into uploaded_files")
+    model_source: str = Field("auto", description="auto | model | part_no")
+    use_llm_fallback: bool = Field(False, description="If true and local returns 0 items, call LLM")
+
+@app.post("/debug/extract", dependencies=[Depends(require_role("master"))])
+async def debug_extract(req: DebugExtractRequest):
+    """Run the rules-based extractor on a previously uploaded file.
+
+    Per-document options:
+      - model_source: which column to use as the model field (auto|model|part_no)
+      - use_llm_fallback: if local returns 0 items, call the LLM as a fallback
+
+    Response shape matches extract_items() output, with an extra
+    'extraction_method' field ("local" or "llm_fallback").
+    """
+    if req.file_index < 0 or req.file_index >= len(uploaded_files):
+        raise HTTPException(status_code=404, detail="File not found")
+    entry = uploaded_files[req.file_index]
+    filepath = entry.get("filepath", "")
+    if not filepath or not Path(filepath).exists():
+        raise HTTPException(status_code=404, detail="File path missing or file no longer on disk")
+
+    from .parser import parse_pdf
+    from .extract import extract_items
+
+    parse_result = parse_pdf(filepath)
+    pp = parse_result.get("parsers", {}).get("pdfplumber", {})
+    pages = pp.get("pages", [])
+    full_text = "\n\n".join(p.get("text", "") for p in pages)
+
+    # 1) Try the rules-based extractor
+    result = extract_items(parse_result, full_text, parse_result.get("filename", ""),
+                           model_source=req.model_source)
+    result["extraction_method"] = "local"
+    result["file_index"] = req.file_index
+    result["upload_filename"] = entry.get("filename", "")
+
+    # 2) Fall back to LLM if requested AND local returned 0 items
+    if req.use_llm_fallback and not result.get("items"):
+        from .normalize import normalize_text_with_llm
+        llm_result, err = await normalize_text_with_llm(full_text)
+        if err:
+            result["extraction_warnings"].append(f"LLM fallback failed: {err}")
+        elif llm_result.get("items"):
+            result["items"] = llm_result["items"]
+            result["extraction_method"] = "llm_fallback"
+            # Use LLM's metadata if local didn't find them
+            if not result.get("supplier") and llm_result.get("supplier"):
+                result["supplier"] = llm_result["supplier"]
+            if not result.get("currency") and llm_result.get("currency"):
+                result["currency"] = llm_result["currency"]
+            if not result.get("date") and llm_result.get("date"):
+                result["date"] = llm_result["date"]
+            if (not result.get("document_type") or result["document_type"] == "unknown") \
+                    and llm_result.get("document_type") not in (None, "", "unknown"):
+                result["document_type"] = llm_result["document_type"]
+            result["extraction_warnings"].append(
+                f"Used LLM fallback (local returned 0 items; LLM found {len(llm_result['items'])} items)"
+            )
+        else:
+            result["extraction_warnings"].append("LLM fallback returned 0 items")
+
     return result
 
 # ─── Serve Frontend ───────────────────────────────────────

@@ -2,9 +2,10 @@
 test_extractor.py — Quick test for the rules-based extractor.
 
 Usage:
-    python3 test_extractor.py [path-to-pdf]
+    python3 test_extractor.py [path-to-pdf] [--model-source=auto|model|part_no]
+    python3 test_extractor.py --model-source=part_no  (tests all PDFs with part_no)
 
-If no path is given, tests all PDFs in ~/Downloads/QuoDB_Test_Docs/
+If no path is given, tests all PDFs in ~/Downloads/QuoDB_Test_Docs/.
 """
 import sys
 import os
@@ -16,9 +17,9 @@ from backend.parser import parse_pdf
 from backend.extract import extract_items
 
 
-def test_one(pdf_path):
+def test_one(pdf_path, model_source="auto"):
     print("=" * 80)
-    print(f"FILE: {os.path.basename(pdf_path)}")
+    print(f"FILE: {os.path.basename(pdf_path)}    [model_source={model_source}]")
     print("=" * 80)
     try:
         result = parse_pdf(pdf_path)
@@ -30,7 +31,7 @@ def test_one(pdf_path):
             return
         pp = result["parsers"]["pdfplumber"]
         text = pp["pages"][0]["text"] if pp.get("pages") else ""
-        ext = extract_items(result, text, result["filename"])
+        ext = extract_items(result, text, result["filename"], model_source=model_source)
         print(f"  Supplier:    {ext['supplier'] or '(not detected)'}")
         print(f"  Date:        {ext['date'] or '(not detected)'}")
         print(f"  Currency:    {ext['currency'] or '(not detected)'}")
@@ -54,13 +55,25 @@ def test_one(pdf_path):
     print()
 
 
+def parse_args():
+    """Parse args. Supports --model-source=VALUE flag and optional path."""
+    model_source = "auto"
+    pdf_path = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--model-source="):
+            model_source = arg.split("=", 1)[1]
+        elif not arg.startswith("-"):
+            pdf_path = arg
+    return pdf_path, model_source
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        pdf = sys.argv[1]
-        if not os.path.exists(pdf):
-            print(f"File not found: {pdf}")
+    pdf_path, model_source = parse_args()
+    if pdf_path:
+        if not os.path.exists(pdf_path):
+            print(f"File not found: {pdf_path}")
             sys.exit(1)
-        test_one(pdf)
+        test_one(pdf_path, model_source)
     else:
         test_dir = "/home/carlos/Downloads/QuoDB_Test_Docs"
         pdfs = sorted(
@@ -70,6 +83,6 @@ if __name__ == "__main__":
         if not pdfs:
             print(f"No PDFs found in {test_dir}")
             sys.exit(1)
-        print(f"Testing {len(pdfs)} PDFs from {test_dir}\n")
+        print(f"Testing {len(pdfs)} PDFs from {test_dir}    [model_source={model_source}]\n")
         for pdf in pdfs:
-            test_one(pdf)
+            test_one(pdf, model_source)

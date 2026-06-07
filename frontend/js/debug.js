@@ -73,6 +73,14 @@ async function selectDebugFile(idx) {
     meta.innerHTML = '<p style="color:#666;margin:0">Parsing…</p>';
     document.getElementById('debugPageNav').classList.add('hidden');
     _debugPageIdx = 0;
+    // Reset per-document extraction state
+    _debugExtractResult = null;
+    document.getElementById('debugModelSource').value = 'auto';
+    document.getElementById('debugLlmFallback').checked = false;
+    document.getElementById('debugExtractStatus').innerHTML = '';
+    document.getElementById('debugExtractMetadata').innerHTML = '';
+    document.getElementById('debugExtractWarnings').innerHTML = '';
+    document.getElementById('debugExtractItems').innerHTML = '';
     try {
         const resp = await apiFetch(`/debug/parse?file_index=${idx}`);
         const data = await resp.json().then(d => ({ ok: resp.ok, data: d }));
@@ -220,3 +228,120 @@ function openDebugParseModal() {
         }
     } catch (e) { /* noop */ }
 })();
+
+// ─── Extraction (Phase 3 of v0.037.0) ─────────────────────────
+// Per-document model source choice (auto/model/part_no) and optional
+// LLM fallback when local returns 0 items.
+
+let _debugExtractResult = null;
+
+async function runDebugExtract() {
+    if (!isMaster || !isMaster()) {
+        showBriefPopup('Only Master can run extraction');
+        return;
+    }
+    if (!_debugResult) {
+        showBriefPopup('Select a file first');
+        return;
+    }
+    const btn = document.getElementById('debugRunExtractBtn');
+    const status = document.getElementById('debugExtractStatus');
+    const meta = document.getElementById('debugExtractMetadata');
+    const warns = document.getElementById('debugExtractWarnings');
+    const itemsEl = document.getElementById('debugExtractItems');
+    const modelSource = document.getElementById('debugModelSource').value;
+    const useLlm = document.getElementById('debugLlmFallback').checked;
+
+    btn.disabled = true;
+    status.textContent = 'Running extraction…';
+    meta.innerHTML = '';
+    warns.innerHTML = '';
+    itemsEl.innerHTML = '';
+    try {
+        const resp = await apiFetch('/debug/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_index: _debugResult.file_index,
+                model_source: modelSource,
+                use_llm_fallback: useLlm,
+            }),
+        });
+        const data = await resp.json().then(d => ({ ok: resp.ok, data: d }));
+        if (!data.ok) throw new Error(data.data.detail || 'Extraction failed');
+        _debugExtractResult = data.data;
+        renderDebugExtract();
+    } catch (e) {
+        status.innerHTML = `<span style="color:#e74c3c">Error: ${escapeHtml(e.message)}</span>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function renderDebugExtract() {
+    const r = _debugExtractResult;
+    if (!r) return;
+    const status = document.getElementById('debugExtractStatus');
+    const meta = document.getElementById('debugExtractMetadata');
+    const warns = document.getElementById('debugExtractWarnings');
+    const itemsEl = document.getElementById('debugExtractItems');
+
+    const method = r.extraction_method || 'local';
+    const methodLabel = method === 'llm_fallback'
+        ? '<span style="color:#9b59b6;font-weight:600">🤖 LLM fallback</span>'
+        : '<span style="color:#27ae60;font-weight:600">⚙️ Local rules</span>';
+    status.innerHTML = `${methodLabel} · <strong>${r.items.length}</strong> item${r.items.length === 1 ? '' : 's'}`;
+
+    const fields = [
+        ['Supplier', r.supplier],
+        ['Date', r.date],
+        ['Currency', r.currency],
+        ['Document type', r.document_type],
+    ];
+    meta.innerHTML = fields.map(([k, v]) => `
+        <div class="settings-card" style="padding:8px 10px;background:#f9f9f9">
+            <div style="font-size:11px;color:#888;font-weight:600">${escapeHtml(k)}</div>
+            <div style="font-size:13px;color:${v ? '#222' : '#999'};word-break:break-word">${escapeHtml(v || '(not detected)')}</div>
+        </div>
+    `).join('');
+
+    if (r.extraction_warnings && r.extraction_warnings.length) {
+        warns.innerHTML = r.extraction_warnings.map(w =>
+            `<div>⚠️ ${escapeHtml(w)}</div>`
+        ).join('');
+    } else {
+        warns.innerHTML = '';
+    }
+
+    if (!r.items.length) {
+        itemsEl.innerHTML = '<p style="color:#999;margin:8px 0">No items extracted.</p>';
+        return;
+    }
+    itemsEl.innerHTML = renderDebugItemsTable(r.items);
+}
+
+function renderDebugItemsTable(items) {
+    const headers = ['#', 'Brand', 'Model', 'Description', 'Qty', 'Unit', 'Unit price', 'Total', 'Remark'];
+    const rows = items.map((it, i) => {
+        const cells = headers.map((h) => {
+            const key = h === '#' ? '_idx'
+                : h === 'Unit price' ? 'unit_price'
+                : h.toLowerCase().replace(/\s/g, '_');
+            const v = h === '#' ? (i + 1) : (it[key] || '');
+            return `<td style="padding:6px 8px;font-size:12px;vertical-align:top;border-bottom:1px solid #eee">${escapeHtml(String(v))}</td>`;
+        }).join('');
+        return `<tr>${cells}</tr>`;
+    }).join('');
+    return `
+        <div style="overflow-x:auto;max-height:50vh;overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead style="position:sticky;top:0;background:#f5f5f5;z-index:1">
+                    <tr>${headers.map(h =>
+                        `<th style="padding:8px;text-align:left;font-size:11px;color:#666;border-bottom:1px solid #e0e0e0;white-space:nowrap">${escapeHtml(h)}</th>`
+                    ).join('')}</tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}

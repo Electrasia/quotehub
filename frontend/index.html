@@ -295,6 +295,20 @@
                     <label>Success popup duration (seconds)</label>
                     <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10">
                 </div>
+
+                <h4 style="margin-top:18px">Extraction Fallback (v0.037.0+)</h4>
+                <p style="font-size:12px;color:#666;margin:0 0 8px 0">
+                    When the local rules-based extractor returns 0 items, the LLM can be
+                    called as a fallback. The LLM is also usable per-file in the Debug
+                    Workspace regardless of this setting.
+                </p>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" id="settingsLlmFallbackEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px">
+                    <label for="settingsLlmFallbackEnabled" style="cursor:pointer;margin:0">
+                        Use LLM fallback when local returns 0 items
+                    </label>
+                </div>
+
                 <div class="actions">
                     <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
                 </div>
@@ -611,6 +625,33 @@
                             </div>
                             <pre id="debugLlmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
                         </div>
+                    </div>
+
+                    <!-- Extraction section -->
+                    <div class="settings-card" style="padding:14px;margin-top:4px">
+                        <h3 style="margin:0 0 10px 0">🧪 Extraction Test</h3>
+                        <p style="font-size:12px;color:#666;margin:0 0 12px 0">
+                            Run the rules-based extractor on this file. The choice of model column is per-document and only affects this file.
+                        </p>
+                        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                            <label style="font-size:13px;font-weight:600">Model source:</label>
+                            <select id="debugModelSource" style="padding:6px 10px;font-size:13px;border:1px solid #ccc;border-radius:4px">
+                                <option value="auto">Auto (heuristic)</option>
+                                <option value="model">Model column</option>
+                                <option value="part_no">Part No column</option>
+                            </select>
+                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
+                                <input type="checkbox" id="debugLlmFallback" style="cursor:pointer">
+                                Use LLM fallback if local returns 0 items
+                            </label>
+                            <button class="btn btn-primary btn-sm" id="debugRunExtractBtn" onclick="runDebugExtract()" style="margin-left:auto">
+                                Run extraction
+                            </button>
+                        </div>
+                        <div id="debugExtractStatus" style="font-size:12px;color:#666;margin-bottom:8px"></div>
+                        <div id="debugExtractMetadata" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;font-size:12px"></div>
+                        <div id="debugExtractWarnings" style="font-size:12px;color:#a85b00;margin-bottom:8px"></div>
+                        <div id="debugExtractItems"></div>
                     </div>
                 </div>
             </div>

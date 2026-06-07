@@ -393,6 +393,102 @@ def _score_columns_by_content(rows, col_to_field, header_end_idx):
 
 
 # -----------------------------------------------------------------------------
+# User override: which column should be the model field?
+#
+# Per-document choice passed in as model_source parameter:
+#   - "auto"    : use the auto-detected column (default; no change)
+#   - "model"   : use the column whose header is "Model" / "Model No" etc.
+#   - "part_no" : use the column whose header is "Part" / "Part No" / "P/N" etc.
+# The previously-assigned "model" column gets demoted to "description" so
+# its content is preserved (extract_items concatenates duplicates).
+# -----------------------------------------------------------------------------
+
+_MODEL_HEADER_KWS = (
+    "model", "model no", "model no.", "model number", "model #",
+)
+_PART_NO_HEADER_KWS = (
+    "part", "part no", "part no.", "part number", "part #", "part#",
+    "p/n", "pn", "p. n.", "p.n.", "part code", "partcode", "part no.",
+)
+
+
+def _apply_model_source_override(col_to_field, header_rows, model_source):
+    """Reassign the model field to a user-chosen column.
+
+    Returns a new col_to_field dict (or the original if no change applies).
+    """
+    if model_source == "auto" or not header_rows:
+        return col_to_field
+
+    if model_source == "model":
+        target_kws = _MODEL_HEADER_KWS
+    elif model_source == "part_no":
+        target_kws = _PART_NO_HEADER_KWS
+    else:
+        return col_to_field
+
+    # Find a column whose header matches the target keyword.
+    # Check every header row, in order; first match wins.
+    target_col = None
+    for hr in header_rows:
+        for col_idx, cell in enumerate(hr):
+            if cell is None:
+                continue
+            text = _normalize_header_cell(cell)
+            if not text:
+                continue
+            # Exact match (with optional trailing dot/colon)
+            for kw in target_kws:
+                if text == kw or text == kw + "." or text == kw + ":":
+                    target_col = col_idx
+                    break
+            if target_col is not None:
+                break
+            # Substring match (only for keywords >= 3 chars)
+            for kw in target_kws:
+                if len(kw) >= 3 and (kw in text or text in kw):
+                    target_col = col_idx
+                    break
+            if target_col is not None:
+                break
+        if target_col is not None:
+            break
+
+    if target_col is None:
+        return col_to_field  # no matching column — silently fall back to auto
+
+    # Find the currently-assigned model column (if any)
+    current_model_col = None
+    for col, field in col_to_field.items():
+        if field == "model":
+            current_model_col = col
+            break
+
+    if target_col == current_model_col:
+        return col_to_field  # already correct
+
+    # Build the new mapping
+    new_map = dict(col_to_field)
+
+    # Demote the previous model column to "description" so its content is kept.
+    # If there's already a description column, the two will be concatenated
+    # at extraction time.
+    if current_model_col is not None and current_model_col != target_col:
+        new_map.pop(current_model_col, None)
+        new_map[current_model_col] = "description"
+
+    # Free the target column if it was mapped to something else
+    if target_col in new_map and new_map[target_col] != "model":
+        # Drop the old field assignment on target_col
+        del new_map[target_col]
+
+    # Set target_col as "model"
+    new_map[target_col] = "model"
+
+    return new_map
+
+
+# -----------------------------------------------------------------------------
 # Cell value normalization
 # -----------------------------------------------------------------------------
 
@@ -573,6 +669,9 @@ def _extract_item_from_row(row, col_to_field):
     If only description is available (no model column), use the description
     as the model — this is the common case for many Asian quotation formats
     where the product name IS the model.
+
+    If a field is assigned to multiple columns (e.g. a demoted model column
+    and a description column both map to "description"), concatenate them.
     """
     item = {
         "brand": "",
@@ -591,7 +690,20 @@ def _extract_item_from_row(row, col_to_field):
         if value is None or not str(value).strip():
             continue
         parsed = _parse_cell(field, value)
-        if parsed:
+        if not parsed:
+            continue
+        # Use .get() in case the field (e.g. "item_number") isn't in the
+        # fixed item dict — silently skip unknown fields.
+        if field not in item:
+            continue
+        if item[field]:
+            # Concatenate duplicate field assignments with a space
+            # (newline if either side has one — preserves multiline structure)
+            if "\n" in item[field] or "\n" in parsed:
+                item[field] = f"{item[field]}\n{parsed}"
+            else:
+                item[field] = f"{item[field]} {parsed}"
+        else:
             item[field] = parsed
     # Required: (model OR description) AND (unit_price OR total)
     if not item["model"] and not item["description"]:
@@ -692,7 +804,7 @@ def _expand_multiline_cells(items):
 # Main entry points
 # -----------------------------------------------------------------------------
 
-def _process_table(table, page_num, warnings):
+def _process_table(table, page_num, warnings, model_source="auto"):
     """Process a single table. Returns (items, table_log)."""
     rows = table.get("rows", []) or []
     if not rows:
@@ -712,6 +824,9 @@ def _process_table(table, page_num, warnings):
 
     # Refine mapping with content scoring
     col_to_field = _score_columns_by_content(rows, col_to_field, header_end)
+
+    # Apply per-document model source override (if any)
+    col_to_field = _apply_model_source_override(col_to_field, header_rows, model_source)
 
     # Must have at least a model OR description column to extract items
     has_identifier = "model" in col_to_field.values() or "description" in col_to_field.values()
@@ -752,8 +867,16 @@ def _process_table(table, page_num, warnings):
     return items, log
 
 
-def extract_items(parse_result, source_text="", filename=""):
-    """Main entry point. Returns the full extraction result."""
+def extract_items(parse_result, source_text="", filename="", model_source="auto"):
+    """Main entry point. Returns the full extraction result.
+
+    Args:
+        parse_result: Output of parser.parse_pdf()
+        source_text: Full text of the PDF (for metadata extraction)
+        filename: Original filename (for document type detection)
+        model_source: Per-document override for which column is the "model"
+            field. One of "auto" (default), "model", "part_no".
+    """
     warnings = []
     pp = parse_result.get("parsers", {}).get("pdfplumber", {})
     pp_pages = pp.get("pages", [])
@@ -763,7 +886,7 @@ def extract_items(parse_result, source_text="", filename=""):
     for page_data in pp_pages:
         page_num = page_data.get("page", 0)
         for t_idx, table in enumerate(page_data.get("tables", [])):
-            items, t_log = _process_table(table, page_num, warnings)
+            items, t_log = _process_table(table, page_num, warnings, model_source)
             all_items.extend(items)
             tables_log.append({
                 "page": page_num,
@@ -787,6 +910,7 @@ def extract_items(parse_result, source_text="", filename=""):
         "document_type": metadata["document_type"],
         "items": all_items,
         "extraction_warnings": warnings,
+        "model_source": model_source,
         "extraction_log": {
             "tables_processed": len(tables_log),
             "tables_log": tables_log,
