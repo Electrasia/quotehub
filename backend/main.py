@@ -30,6 +30,7 @@ from .auth import (
     read_init_password, acknowledge_init_password,
 )
 from .utils import load_config, save_config, get_config_data, repair_json_quotes
+from .db import get_db, DB_PATH, init_db
 
 # ─── Version Info ────────────────────────────────────────
 VERSION_PATH = Path(__file__).parent.parent / "VERSION"
@@ -53,7 +54,6 @@ CONFIG = load_config()
 # ─── State ────────────────────────────────────────────────
 ai_connected = False
 uploaded_files = []
-db_path = Path(__file__).parent.parent / "data" / "quotations.db"
 UPLOAD_STATE_PATH = Path(__file__).parent.parent / "data" / "upload_state.json"
 
 def load_upload_state():
@@ -106,73 +106,8 @@ ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Database ─────────────────────────────────────────────
-def init_db():
-    conn = sqlite3.connect(db_path)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS quotations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT,
-            supplier TEXT,
-            quotation_date TEXT,
-            items TEXT,
-            document_type TEXT DEFAULT 'unknown',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    # Migration: add document_type column to existing tables
-    cols = [row[1] for row in conn.execute("PRAGMA table_info(quotations)").fetchall()]
-    if "document_type" not in cols:
-        conn.execute("ALTER TABLE quotations ADD COLUMN document_type TEXT DEFAULT 'unknown'")
-    # Create FTS virtual table for fast search
-    conn.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS quotations_fts USING fts5(
-            supplier, quotation_date, items, content='quotations', content_rowid='id'
-        )
-    """)
-    # Create triggers to keep FTS in sync
-    conn.execute("""
-        CREATE TRIGGER IF NOT EXISTS quotations_ai AFTER INSERT ON quotations BEGIN
-            INSERT INTO quotations_fts(rowid, supplier, quotation_date, items)
-            VALUES (new.id, new.supplier, new.quotation_date, new.items);
-        END
-    """)
-    conn.execute("""
-        CREATE TRIGGER IF NOT EXISTS quotations_ad AFTER DELETE ON quotations BEGIN
-            INSERT INTO quotations_fts(quotations_fts, rowid, supplier, quotation_date, items)
-            VALUES ('delete', old.id, old.supplier, old.quotation_date, old.items);
-        END
-    """)
-    conn.execute("""
-        CREATE TRIGGER IF NOT EXISTS quotations_au AFTER UPDATE ON quotations BEGIN
-            INSERT INTO quotations_fts(quotations_fts, rowid, supplier, quotation_date, items)
-            VALUES ('delete', old.id, old.supplier, old.quotation_date, old.items);
-            INSERT INTO quotations_fts(rowid, supplier, quotation_date, items)
-            VALUES (new.id, new.supplier, new.quotation_date, new.items);
-        END
-    """)
-    # Populate FTS table with existing data if empty
-    count = conn.execute("SELECT COUNT(*) FROM quotations_fts").fetchone()[0]
-    if count == 0:
-        conn.execute("""
-            INSERT INTO quotations_fts(rowid, supplier, quotation_date, items)
-            SELECT id, supplier, quotation_date, items FROM quotations
-        """)
-    # Users table for auth (master/admin/user)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('master', 'admin', 'user')),
-            must_change_password INTEGER DEFAULT 0,
-            active INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
-
+# init_db is imported from db.py to avoid code duplication.
+# It creates the necessary tables and FTS indexes.
 init_db()
 
 # ─── App ──────────────────────────────────────────────────
@@ -1013,18 +948,17 @@ async def confirm(req: ConfirmRequest):
     if document_type not in ("QUO", "PO", "PL"):
         raise HTTPException(status_code=400, detail="document_type must be QUO, PO, or PL")
 
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
-        (uploaded_files[req.file_index]["filename"],
-         supplier,
-         quotation_date,
-         json.dumps(items),
-         document_type)
-    )
-    last_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.commit()
-    conn.close()
+    # Insert quotation into database
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
+            (uploaded_files[req.file_index]["filename"],
+             supplier,
+             quotation_date,
+             json.dumps(items),
+             document_type)
+        )
+        last_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     # Move PDF to archive
     src = Path(uploaded_files[req.file_index]["filepath"])
@@ -1059,14 +993,22 @@ class UpdateRequest(BaseModel):
 
 @app.post("/delete", dependencies=[Depends(require_role("admin", "master"))])
 async def delete(req: DeleteRequest):
+    """Delete quotations by ID and remove archived PDFs."""
     if not req.ids:
         return {"status": "nothing to delete"}
-    conn = sqlite3.connect(db_path)
+    
+    # Get filenames before deleting (for PDF cleanup)
     placeholders = ",".join("?" * len(req.ids))
-    rows = conn.execute(f"SELECT filename FROM quotations WHERE id IN ({placeholders})", req.ids).fetchall()
-    conn.execute(f"DELETE FROM quotations WHERE id IN ({placeholders})", req.ids)
-    conn.commit()
-    conn.close()
+    with get_db(readonly=True) as db:
+        rows = db.execute(
+            f"SELECT filename FROM quotations WHERE id IN ({placeholders})", req.ids
+        ).fetchall()
+    
+    # Delete from database
+    with get_db() as db:
+        db.execute(f"DELETE FROM quotations WHERE id IN ({placeholders})", req.ids)
+    
+    # Delete archived PDFs
     for row in rows:
         archive_path = ARCHIVE_DIR / row[0]
         try:
@@ -1074,26 +1016,29 @@ async def delete(req: DeleteRequest):
                 archive_path.unlink()
         except OSError:
             pass
+    
     return {"status": "deleted", "count": len(req.ids)}
 
 @app.post("/update", dependencies=[Depends(require_role("admin", "master"))])
 async def update_quotation(req: UpdateRequest):
+    """Update a quotation's data."""
     data = req.data
     items = data.get("items", [])
     if not isinstance(items, list):
         raise HTTPException(status_code=400, detail="items must be a list")
+    
     supplier = data.get("supplier", "")
     quotation_date = items[0].get("date", "") if items else ""
     document_type = data.get("document_type", "unknown")
     if document_type not in ("QUO", "PO", "PL"):
         raise HTTPException(status_code=400, detail="document_type must be QUO, PO, or PL")
-    conn = sqlite3.connect(db_path)
-    cur = conn.execute(
-        "UPDATE quotations SET supplier=?, quotation_date=?, items=?, document_type=? WHERE id=?",
-        (supplier, quotation_date, json.dumps(items), document_type, req.id)
-    )
-    conn.commit()
-    conn.close()
+    
+    with get_db() as db:
+        cur = db.execute(
+            "UPDATE quotations SET supplier=?, quotation_date=?, items=?, document_type=? WHERE id=?",
+            (supplier, quotation_date, json.dumps(items), document_type, req.id)
+        )
+    
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Quotation not found")
     return {"status": "updated"}
@@ -1105,10 +1050,10 @@ async def export_db():
     from fastapi.responses import StreamingResponse
     import io
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
-    conn.close()
+    # Get all quotations
+    with get_db(readonly=True) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
 
     data = []
     for r in rows:
@@ -1195,29 +1140,29 @@ async def import_upload(file: UploadFile = File(...)):
     if not quotations:
         return JSONResponse(status_code=400, content={"error": "No quotations found in file"})
 
-    conn = sqlite3.connect(db_path)
+    # Import quotations into database
     imported = 0
-    for q in quotations:
-        supplier = q.get("supplier", "")
-        quotation_date = q.get("quotation_date", "")
-        document_type = q.get("document_type", "unknown")
-        if document_type not in ("QUO", "PO", "PL", "unknown"):
-            document_type = "unknown"
-        items = q.get("items", [])
-        if isinstance(items, str):
-            try:
-                items = json.loads(items)
-            except (json.JSONDecodeError, TypeError):
-                items = []
-        if not quotation_date and items:
-            quotation_date = items[0].get("date", "")
-        conn.execute(
-            "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
-            (q.get("filename", "imported.pdf"), supplier, quotation_date, json.dumps(items), document_type)
-        )
-        imported += 1
-    conn.commit()
-    conn.close()
+    with get_db() as db:
+        for q in quotations:
+            supplier = q.get("supplier", "")
+            quotation_date = q.get("quotation_date", "")
+            document_type = q.get("document_type", "unknown")
+            if document_type not in ("QUO", "PO", "PL", "unknown"):
+                document_type = "unknown"
+            items = q.get("items", [])
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except (json.JSONDecodeError, TypeError):
+                    items = []
+            if not quotation_date and items:
+                quotation_date = items[0].get("date", "")
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
+                (q.get("filename", "imported.pdf"), supplier, quotation_date, json.dumps(items), document_type)
+            )
+            imported += 1
+    
     return {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
 
 # ─── System Cleanup (master only) ────────────────────────
@@ -1250,10 +1195,9 @@ def _get_old_quotations(conn, cutoff_date: str) -> list:
 async def cleanup_preview(req: CleanupPreviewRequest):
     """Preview what would be deleted: counts + total file size. Does NOT delete."""
     cutoff_date = _cleanup_cutoff(req.months)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = _get_old_quotations(conn, cutoff_date)
+    
+    with get_db(readonly=True) as db:
+        rows = _get_old_quotations(db, cutoff_date)
         entries = len(rows)
         file_count = 0
         total_size = 0
@@ -1269,26 +1213,24 @@ async def cleanup_preview(req: CleanupPreviewRequest):
                     total_size += pdf_path.stat().st_size
                 except OSError:
                     pass
-        return {
-            "months": req.months,
-            "cutoff_date": cutoff_date,
-            "entries": entries,
-            "files": file_count,
-            "estimated_size": total_size,
-        }
-    finally:
-        conn.close()
+    
+    return {
+        "months": req.months,
+        "cutoff_date": cutoff_date,
+        "entries": entries,
+        "files": file_count,
+        "estimated_size": total_size,
+    }
 
 @app.post("/cleanup/execute", dependencies=[Depends(require_role("master"))])
 async def cleanup_execute(req: CleanupExecuteRequest):
     """Delete old quotations. Optionally also delete their files + images.
     Runs VACUUM after commit to reclaim disk space."""
     cutoff_date = _cleanup_cutoff(req.months)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = _get_old_quotations(conn, cutoff_date)
-        # Collect unique filenames (and their paths) BEFORE deleting rows
+    
+    # Get old quotations and collect file targets
+    with get_db(readonly=True) as db:
+        rows = _get_old_quotations(db, cutoff_date)
         seen = set()
         targets = []
         for _id, filename in rows:
@@ -1297,15 +1239,15 @@ async def cleanup_execute(req: CleanupExecuteRequest):
                 pdf_path = ARCHIVE_DIR / filename
                 img_dir = IMAGES_DIR / Path(filename).stem
                 targets.append((filename, pdf_path, img_dir))
-        # DB delete in a single transaction (FTS triggers clean up FTS)
-        cur = conn.execute(
+    
+    # Delete from database
+    with get_db() as db:
+        cur = db.execute(
             "DELETE FROM quotations WHERE date(created_at) < ?",
             (cutoff_date,)
         )
         entries_deleted = cur.rowcount
-        conn.commit()
-    finally:
-        conn.close()
+    
     # File deletion runs AFTER DB commit (best-effort; never rolls back DB)
     file_count_deleted = 0
     bytes_freed = 0
@@ -1323,9 +1265,10 @@ async def cleanup_execute(req: CleanupExecuteRequest):
                     shutil.rmtree(img_dir, ignore_errors=True)
             except OSError:
                 pass
+    
     # Reclaim disk space (VACUUM must run outside a transaction)
     try:
-        vacuum_conn = sqlite3.connect(db_path)
+        vacuum_conn = sqlite3.connect(DB_PATH)
         vacuum_conn.execute("VACUUM")
         vacuum_conn.close()
     except Exception as e:
@@ -1340,45 +1283,43 @@ async def cleanup_execute(req: CleanupExecuteRequest):
 # ─── Search ───────────────────────────────────────────────
 @app.get("/search", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def search(q: str = ""):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    """Search quotations using full-text search."""
+    with get_db(readonly=True) as db:
+        if q:
+            words = q.strip().split()
+            # Build FTS match query with prefix matching (amp* matches amplifier)
+            fts_words = [w.replace('"', '""') + '*' for w in words]
+            fts_query = " ".join(fts_words)
 
-    if q:
-        words = q.strip().split()
-        # Build FTS match query with prefix matching (amp* matches amplifier)
-        fts_words = [w.replace('"', '""') + '*' for w in words]
-        fts_query = " ".join(fts_words)
-
-        try:
-            # Use FTS for fast search
-            rows = conn.execute(
-                """SELECT q.* FROM quotations q
-                   INNER JOIN quotations_fts fts ON q.id = fts.rowid
-                   WHERE quotations_fts MATCH ?
-                   ORDER BY q.created_at DESC""",
-                (fts_query,)
-            ).fetchall()
-        except sqlite3.OperationalError:
-            # Fallback to LIKE if FTS fails (e.g., special characters)
-            if len(words) == 1:
-                rows = conn.execute(
-                    "SELECT * FROM quotations WHERE supplier LIKE ? OR quotation_date LIKE ? OR items LIKE ? ORDER BY created_at DESC",
-                    (f"%{words[0]}%", f"%{words[0]}%", f"%{words[0]}%")
+            try:
+                # Use FTS for fast search
+                rows = db.execute(
+                    """SELECT q.* FROM quotations q
+                       INNER JOIN quotations_fts fts ON q.id = fts.rowid
+                       WHERE quotations_fts MATCH ?
+                       ORDER BY q.created_at DESC""",
+                    (fts_query,)
                 ).fetchall()
-            else:
-                conditions = []
-                params = []
-                for word in words:
-                    conditions.append("(supplier LIKE ? OR quotation_date LIKE ? OR items LIKE ?)")
-                    params.extend([f"%{word}%", f"%{word}%", f"%{word}%"])
-                where_clause = " AND ".join(conditions)
-                rows = conn.execute(
-                    f"SELECT * FROM quotations WHERE {where_clause} ORDER BY created_at DESC",
-                    params
-                ).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
-    conn.close()
+            except sqlite3.OperationalError:
+                # Fallback to LIKE if FTS fails (e.g., special characters)
+                if len(words) == 1:
+                    rows = db.execute(
+                        "SELECT * FROM quotations WHERE supplier LIKE ? OR quotation_date LIKE ? OR items LIKE ? ORDER BY created_at DESC",
+                        (f"%{words[0]}%", f"%{words[0]}%", f"%{words[0]}%")
+                    ).fetchall()
+                else:
+                    conditions = []
+                    params = []
+                    for word in words:
+                        conditions.append("(supplier LIKE ? OR quotation_date LIKE ? OR items LIKE ?)")
+                        params.extend([f"%{word}%", f"%{word}%", f"%{word}%"])
+                    where_clause = " AND ".join(conditions)
+                    rows = db.execute(
+                        f"SELECT * FROM quotations WHERE {where_clause} ORDER BY created_at DESC",
+                        params
+                    ).fetchall()
+        else:
+            rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
 
     q_lower = q.lower() if q else ""
     words = q_lower.split() if q_lower else []
@@ -1414,21 +1355,15 @@ async def search(q: str = ""):
 
 # ─── Brand Suggestion ─────────────────────────────────────
 @app.get("/items/by-model", dependencies=[Depends(require_role("user", "admin", "master"))])
-async def items_by_model(model: str = ""):
-    """Return the most frequent brand for items matching a given model.
-    Brands are normalized (lowercased) before counting to treat case
-    variations ('Sony' and 'SONY') as the same brand, but the returned
-    brand preserves the most common original casing.
-    """
-    from collections import Counter
-    if not model.strip():
+async def get_brand_by_model(model: str = ""):
+    """Look up the most common brand for a given model across all quotations."""
+    if not model:
         return {"model": model, "brand": None, "count": 0}
-
-    conn = sqlite3.connect(db_path)
-    rows = conn.execute("SELECT items FROM quotations").fetchall()
-    conn.close()
-    # NOTE: may optimize later using indexed model field if DB grows
-
+    
+    # Get all items from database
+    with get_db(readonly=True) as db:
+        rows = db.execute("SELECT items FROM quotations").fetchall()
+    
     model_lc = model.strip().lower()
     # Group original brand strings by their lowercased key
     normalized_groups = {}  # e.g. {"sony": ["Sony", "SONY", "Sony"]}
@@ -1464,14 +1399,19 @@ async def items_by_model(model: str = ""):
 # ─── Duplicate Check ──────────────────────────────────────
 @app.get("/check-duplicate", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def check_duplicate(filename: str = ""):
+    """Check if a file already exists in archive or database."""
     if not filename:
         return {"exists": False}
+    
     archive_path = ARCHIVE_DIR / filename
     exists = archive_path.exists()
+    
     # Also check database
-    conn = sqlite3.connect(db_path)
-    db_count = conn.execute("SELECT COUNT(*) FROM quotations WHERE filename = ?", (filename,)).fetchone()[0]
-    conn.close()
+    with get_db(readonly=True) as db:
+        db_count = db.execute(
+            "SELECT COUNT(*) FROM quotations WHERE filename = ?", (filename,)
+        ).fetchone()[0]
+    
     return {"exists": exists, "in_database": db_count > 0, "filename": filename}
 
 # ─── View archived PDF ────────────────────────────────────
