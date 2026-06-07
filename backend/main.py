@@ -911,12 +911,20 @@ async def process_stream(req: ProcessRequest):
         supplier = result.get("supplier", "")
         document_type = result.get("document_type", "unknown")
         shared_date = result.get("date", "")
+        # v0.038.0 fix: capture local currency too (was previously dropped
+        # here, and the LLM's currency was also never read). The UI renders
+        # a per-item Currency column that was always empty because of this.
+        shared_currency = result.get("currency", "")
 
-        # Apply shared date to all items
+        # Apply shared date and currency to all items
         if shared_date:
             for item in all_items:
                 if not item.get("date"):
                     item["date"] = shared_date
+        if shared_currency:
+            for item in all_items:
+                if not item.get("currency"):
+                    item["currency"] = shared_currency
 
         # ── Step 3: Per-page progress reporting ──────────────────────
         # Group items by their source page (each item has a "page" field
@@ -952,15 +960,40 @@ async def process_stream(req: ProcessRequest):
                 llm_result, err = await normalize_text_with_llm(full_text)
                 if err:
                     errors.append(f"LLM fallback failed: {err}")
-                elif llm_result.get("items"):
-                    all_items = llm_result["items"]
-                    extraction_method = "llm_fallback"
-                    if not supplier and llm_result.get("supplier"):
+                elif llm_result:
+                    # v0.038.0 fix: when the LLM fires (either because the
+                    # local extractor returned 0 items or because OCR was
+                    # used), the LLM is authoritative for metadata — not
+                    # just a filler for empty fields. Previous behaviour
+                    # kept the local extractor's truncated/wrong supplier
+                    # (e.g. "Audio Visual Master" vs LLM's full
+                    # "Audio Visual Master Limited") and dropped the LLM's
+                    # currency entirely.
+                    if llm_result.get("items"):
+                        all_items = llm_result["items"]
+                        extraction_method = "llm_fallback"
+                    elif extraction_method == "local":
+                        extraction_method = "local+llm_fallback"
+                    if llm_result.get("supplier"):
                         supplier = llm_result["supplier"]
-                    if not shared_date and llm_result.get("date"):
+                    if llm_result.get("date"):
                         shared_date = llm_result["date"]
-                    if not document_type or document_type == "unknown":
-                        document_type = llm_result.get("document_type", "unknown")
+                    if llm_result.get("currency"):
+                        shared_currency = llm_result["currency"]
+                    if llm_result.get("document_type") and llm_result["document_type"] != "unknown":
+                        document_type = llm_result["document_type"]
+                    # Re-apply shared date/currency to all items now that
+                    # we may have just updated the values (handles the
+                    # mixed case where local extracted items but no
+                    # metadata, and LLM fills in both).
+                    if shared_date:
+                        for item in all_items:
+                            if not item.get("date"):
+                                item["date"] = shared_date
+                    if shared_currency:
+                        for item in all_items:
+                            if not item.get("currency"):
+                                item["currency"] = shared_currency
             except Exception as e:
                 errors.append(f"LLM fallback exception: {type(e).__name__}: {e}")
 
@@ -978,8 +1011,14 @@ async def process_stream(req: ProcessRequest):
         save_upload_state()
 
         # Build the merged data block
+        # v0.038.0 fix: include date and currency in the response. The UI
+        # reads extractedData.date and extractedData.currency to populate
+        # the global Date/Currency inputs in Step 3, and renders per-row
+        # date/currency columns in the items table.
         merged = {
             "supplier": supplier,
+            "date": shared_date,
+            "currency": shared_currency,
             "document_type": document_type,
             "items": all_items,
             "extraction_method": extraction_method,
