@@ -701,6 +701,14 @@ def _drop_phantom_columns(rows):
     1 as a phantom with all None data values (only the header cell has the
     fragment 'm'). Dropping the phantom re-aligns the column mapping.
 
+    A column is phantom if BOTH:
+    - its header is empty (None or all whitespace), AND
+    - at least 80% of rows are empty AND the column has ≤2 cells of content
+
+    The "header is empty" check protects real columns like "Remark" or
+    "Note" which often have only 1 cell of content (the header) but are
+    still valid columns.
+
     Returns a new list of rows with phantom columns removed.
     """
     if not rows:
@@ -708,19 +716,23 @@ def _drop_phantom_columns(rows):
     n_cols = max((len(r) for r in rows), default=0)
     if n_cols == 0:
         return rows
-    # We need a header row to know which row is the "header" — but we
-    # don't know that here. The safer heuristic: a column is phantom if
-    # AT LEAST 80% of rows are empty AND the column is small (1-3 cells
-    # of content) — this catches 'm', 'Ite', etc. without affecting real
-    # short columns like 'Qty'.
+    # We don't know which row is the header here, so use the heuristic
+    # that a column is phantom only if NO cell across all rows has any
+    # meaningful text (>2 chars). Catches 'm', 'Ite', 'I' fragments.
     phantom = set()
     for col in range(n_cols):
-        empty_count = sum(
+        nonempty_count = sum(
             1 for r in rows
-            if col >= len(r) or r[col] is None or not str(r[col]).strip()
+            if col < len(r) and r[col] is not None and str(r[col]).strip()
         )
-        nonempty_count = len(rows) - empty_count
-        if empty_count / max(len(rows), 1) >= 0.8 and nonempty_count <= 2:
+        empty_count = len(rows) - nonempty_count
+        max_cell_len = 0
+        for r in rows:
+            if col < len(r) and r[col] is not None:
+                max_cell_len = max(max_cell_len, len(str(r[col]).strip()))
+        # Phantom = mostly empty AND no cell is a real header word
+        if empty_count / max(len(rows), 1) >= 0.8 and nonempty_count <= 2 \
+                and max_cell_len <= 2:
             phantom.add(col)
     if not phantom:
         return rows
@@ -787,17 +799,21 @@ def _extract_item_from_row(row, col_to_field):
 
 
 def _expand_multiline_cells(items):
-    """If a single item has newlines in any field, split into multiple items
-    that share common fields (model/description) but each have their own
-    price/qty line.
+    """Handle newlines in cell values: either JOIN them (text wrapping) or
+    SPLIT them (multiple sub-items sharing the same row).
 
-    e.g. Commscope row has model "760237040\n1375055-2" with qty "1\n12" and
-    price "$592.50\nIncluded" — split into 2 items.
+    The decision is based on whether NUMERIC fields (qty, unit_price, total)
+    have multiple lines. If yes → SPLIT (each line is a sub-item). If no →
+    JOIN (the newlines are just text wrapping, e.g. a model number that
+    pdfplumber broke across two visual lines).
 
-    Hotel Lisboa's row has model wrapping naturally across 3 lines, but
-    part_no/price/total have 2 lines (one per sub-item). We use the MODAL
-    line count across all multi-line fields as the canonical number of
-    sub-items, and pad/truncate other fields to match.
+    Examples:
+      - SMQ-26084 row: model="DLA140-\\n20W3000K-17D" with price "1,350.00"
+        (1 line). The newlines are text wrapping → JOIN → model="DLA140-20W3000K-17D".
+      - Commscope row: model="760237040\\n1375055-2" with qty "1\\n12" and
+        price "$592.50\\nIncluded" → SPLIT into 2 sub-items.
+      - Hotel Lisboa: model wraps to 3 lines, part_no/price/total have 2
+        lines → SPLIT into 2 sub-items (numeric fields drive the count).
     """
     expanded = []
     for item in items:
@@ -810,18 +826,33 @@ def _expand_multiline_cells(items):
             expanded.append(item)
             continue
 
+        # Check whether any NUMERIC field is multi-line. That's the signal
+        # for "this row is actually N sub-items, not wrapped text".
+        numeric_fields = {"unit_price", "total", "quantity"}
+        numeric_multiline = {
+            f: lines for f, lines in multiline_fields.items()
+            if f in numeric_fields and len(lines) >= 2
+        }
+
+        if not numeric_multiline:
+            # No numeric field is multi-line → newlines are just text
+            # wrapping. JOIN them with a single space in each multi-line
+            # text field.
+            joined_item = dict(item)
+            for k, lines in multiline_fields.items():
+                joined_item[k] = " ".join(l.strip() for l in lines).strip()
+            expanded.append(joined_item)
+            continue
+
         # Determine the canonical number of sub-items: the most common
         # line count across all multi-line fields. If there's a tie, prefer
         # the line count of numeric fields (price, total, qty).
         from collections import Counter
         line_counts = Counter(len(v) for v in multiline_fields.values())
-        # Sort by count desc, then by preference for numeric fields
-        numeric_fields = {"unit_price", "total", "quantity"}
         preferred_count = None
         max_count = max(line_counts.values())
         tied = [c for c, n in line_counts.items() if n == max_count]
         for c in tied:
-            # If this line count is supported by any numeric field, prefer it
             for f, lines in multiline_fields.items():
                 if f in numeric_fields and len(lines) == c:
                     preferred_count = c
@@ -849,14 +880,12 @@ def _expand_multiline_cells(items):
                     # extra lines evenly. If preferred_count=2 and lines=3,
                     # give line 0 to sub-item 0 and lines 1,2 to sub-item 1.
                     if i == preferred_count - 1:
-                        # Last sub-item gets all remaining lines
                         new_item[k] = " ".join(
                             l.strip() for l in lines[i:]
                         ).strip()
                     else:
                         new_item[k] = lines[i].strip()
                 else:
-                    # This field has fewer lines. Pad with empty.
                     new_item[k] = lines[i].strip() if i < len(lines) else ""
             # If the split resulted in a row with no price AND no model, skip
             if not new_item.get("model") and not new_item.get("unit_price") \
