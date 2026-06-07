@@ -429,10 +429,15 @@ def _apply_model_source_override(col_to_field, header_rows, model_source):
 
     # Find a column whose header matches the target keyword.
     # Check every header row, in order; first match wins.
+    # Skip merged-header cells (where pdfplumber captured the whole row
+    # as one cell, e.g. "ITEM BRAND MODEL DESCRIPTIONS QTY...") — those
+    # are unreliable indicators of which column is which.
     target_col = None
     for hr in header_rows:
         for col_idx, cell in enumerate(hr):
             if cell is None:
+                continue
+            if _is_merged_header_cell(cell):
                 continue
             text = _normalize_header_cell(cell)
             if not text:
