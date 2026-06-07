@@ -896,6 +896,11 @@ async def process_stream(req: ProcessRequest):
         pp = parse_result.get("parsers", {}).get("pdfplumber", {})
         pages = pp.get("pages", [])
         full_text = "\n\n".join(p.get("text", "") for p in pages)
+        # v0.038.0 fix: also keep a per-page list so the LLM fallback can
+        # process each page separately. When text from multiple pages is
+        # concatenated into one prompt, the LLM latches onto the LAST
+        # page's table and ignores items from earlier pages.
+        pages_text = [p.get("text", "") for p in pages]
         total_pages = max(len(pages), 1)
 
         # ── Step 2: Local rules-based extraction ─────────────────────
@@ -956,11 +961,23 @@ async def process_stream(req: ProcessRequest):
                 msg = "Local extractor returned 0 items. Trying LLM fallback..."
             yield f"data: {json.dumps({'type': 'progress', 'page': 0, 'total': total_pages, 'percent': 96, 'message': msg})}\n\n"
             try:
-                from .normalize import normalize_text_with_llm
-                llm_result, err = await normalize_text_with_llm(full_text)
-                if err:
-                    errors.append(f"LLM fallback failed: {err}")
-                elif llm_result:
+                # v0.038.0 fix: process each page separately. Concatenating
+                # text from multiple pages into one prompt made the LLM
+                # latch onto the LAST page's table and ignore items from
+                # earlier pages. Per-page processing gives the LLM a clean
+                # context for each page and reliably returns items from
+                # every page. For typical 1-2 page quotations this is the
+                # same 1-2 LLM calls as before; for longer docs it's more
+                # calls but the UI already shows per-page progress.
+                from .normalize import normalize_pages_with_llm
+                llm_result = await normalize_pages_with_llm(pages_text)
+                # normalize_pages_with_llm returns a dict (never raises a
+                # hard error — partial failures are reported per-page in
+                # the result). Surface those to the user.
+                if llm_result.get("per_page_errors"):
+                    for pe in llm_result["per_page_errors"]:
+                        errors.append(f"LLM fallback: {pe}")
+                if llm_result:
                     # v0.038.0 fix: when the LLM fires (either because the
                     # local extractor returned 0 items or because OCR was
                     # used), the LLM is authoritative for metadata — not
