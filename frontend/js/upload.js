@@ -200,6 +200,20 @@ async function processAll() {
             signal: abortController.signal
         });
 
+        // Safety net (v0.038.0): if the backend returns a non-OK status
+        // (e.g. 400 with a JSON error body), surface the error instead of
+        // silently dropping the body. The SSE parser below only reads lines
+        // starting with 'data: ', so without this check a JSON error body
+        // would be dropped and the user would see a stuck spinner.
+        if (!resp.ok) {
+            let errMsg = `HTTP ${resp.status}`;
+            try {
+                const errBody = await resp.json();
+                errMsg = errBody.error || errBody.detail || errMsg;
+            } catch (e) { /* body wasn't JSON, keep status code */ }
+            throw new Error(errMsg);
+        }
+
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';

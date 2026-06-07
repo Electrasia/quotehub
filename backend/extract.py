@@ -996,6 +996,10 @@ def extract_items(parse_result, source_text="", filename="", model_source="auto"
         page_num = page_data.get("page", 0)
         for t_idx, table in enumerate(page_data.get("tables", [])):
             items, t_log = _process_table(table, page_num, warnings, model_source)
+            # Tag each item with its source page so the streaming endpoint
+            # can group items per page for progress reporting.
+            for it in items:
+                it["page"] = page_num
             all_items.extend(items)
             tables_log.append({
                 "page": page_num,

@@ -246,6 +246,14 @@ app.add_middleware(
 # ─── Models ───────────────────────────────────────────────
 class ProcessRequest(BaseModel):
     file_index: int
+    # v0.038.0: per-request overrides. If None, fall back to config.json values.
+    # This lets the /process-stream endpoint respect the user's global settings
+    # (llm_fallback_enabled, ocr_enabled, ocr_fallback_to_llm) without forcing
+    # the frontend to pass them on every call.
+    use_llm_fallback: bool | None = None
+    ocr_enabled: bool | None = None
+    use_ocr_llm_fallback: bool | None = None
+    model_source: str | None = None
 
 class ConfirmRequest(BaseModel):
     file_index: int
@@ -812,78 +820,97 @@ async def process_all(req: ProcessRequest):
 
 @app.post("/process-stream", dependencies=[Depends(require_role("admin", "master"))])
 async def process_stream(req: ProcessRequest):
-    """Process ALL pages with SSE streaming progress updates."""
+    """Process a file with SSE streaming progress updates.
+
+    v0.038.0 rewrite: aligned with /debug/extract. Pipeline is now:
+        1. parser.parse_file_with_ocr()  — pdfplumber + pymupdf + (OCR if scanned)
+        2. extract.extract_items()        — local rules-based extractor
+        3. (optional) normalize.normalize_text_with_llm() — LLM fallback if
+           use_llm_fallback is true AND local returned 0 items.
+
+    The endpoint no longer requires AI to be connected. AI is only consulted
+    when the local pipeline returns no items AND the user has explicitly
+    enabled LLM fallback in Settings (or in this request).
+    """
     import asyncio
     from fastapi.responses import StreamingResponse
 
-    global ai_connected
-    if not ai_connected:
-        return JSONResponse(status_code=400, content={"status": "error", "error": "AI not connected."})
-
-    if req.file_index >= len(uploaded_files):
+    if req.file_index < 0 or req.file_index >= len(uploaded_files):
         return JSONResponse(status_code=400, content={"status": "error", "error": "File not found"})
 
     file_entry = uploaded_files[req.file_index]
-    img_dir = IMAGES_DIR / Path(file_entry["filename"]).stem
-    file_stem = Path(file_entry["filename"]).stem
-    total_pages = file_entry["num_pages"]
+    filepath = file_entry.get("filepath", "")
+    if not filepath or not Path(filepath).exists():
+        return JSONResponse(status_code=400, content={"status": "error", "error": "File path missing or no longer on disk"})
+
+    # Resolve effective options: request overrides take precedence; otherwise
+    # fall back to global config (respects Settings → AI Server Connection).
+    cfg = load_config()
+    use_llm_fallback       = req.use_llm_fallback       if req.use_llm_fallback       is not None else cfg.get("llm_fallback_enabled", False)
+    ocr_enabled            = req.ocr_enabled            if req.ocr_enabled            is not None else cfg.get("ocr_enabled", True)
+    use_ocr_llm_fallback   = req.use_ocr_llm_fallback   if req.use_ocr_llm_fallback   is not None else cfg.get("ocr_fallback_to_llm", True)
+    model_source           = req.model_source           if req.model_source           is not None else "auto"
+
+    filename = file_entry.get("filename", "")
+    file_stem = Path(filename).stem
 
     async def generate():
+        from .parser import parse_file_with_ocr
+        from .extract import extract_items
+
         all_items = []
         supplier = ""
         document_type = ""
         shared_date = ""
         errors = []
+        extraction_method = "local"
+        ocr_info = {}
 
-        if total_pages == 0:
+        # ── Step 1: Parse (with OCR for scanned PDFs) ─────────────────
+        yield f"data: {json.dumps({'type': 'progress', 'page': 0, 'total': 0, 'percent': 0, 'message': 'Parsing document...'})}\n\n"
+
+        try:
+            parse_result = await parse_file_with_ocr(
+                filepath,
+                ocr_enabled=ocr_enabled,
+                use_llm_fallback=use_ocr_llm_fallback,
+            )
+        except Exception as e:
+            errors.append(f"Parse failed: {type(e).__name__}: {e}")
             uploaded_files[req.file_index]["status"] = "error"
             save_upload_state()
-            yield f"data: {json.dumps({'type': 'done', 'data': {'supplier': '', 'document_type': 'unknown', 'items': []}, 'pages_processed': 0, 'errors': ['No pages to process']})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'data': {'supplier': '', 'document_type': 'unknown', 'items': []}, 'pages_processed': 0, 'errors': errors})}\n\n"
             return
 
-        for page_idx in range(total_pages):
-            # Send progress: processing this page
-            progress = int(((page_idx) / total_pages) * 100)
-            yield f"data: {json.dumps({'type': 'progress', 'page': page_idx + 1, 'total': total_pages, 'percent': progress, 'message': f'Processing page {page_idx + 1} of {total_pages}...'})}\n\n"
+        if parse_result.get("error"):
+            errors.append(f"Parse error: {parse_result['error']}")
+            uploaded_files[req.file_index]["status"] = "error"
+            save_upload_state()
+            yield f"data: {json.dumps({'type': 'done', 'data': {'supplier': '', 'document_type': 'unknown', 'items': []}, 'pages_processed': 0, 'errors': errors})}\n\n"
+            return
 
-            img_path = img_dir / f"page_{page_idx + 1}.png"
-            if not img_path.exists():
-                errors.append(f"Page {page_idx + 1}: image not found")
-                continue
+        # Capture OCR info for transparency
+        ocr_info = parse_result.get("parsers", {}).get("ocr", {})
 
-            image_paths = [str(img_path)]
-            result, error = await call_ai(image_paths, page_idx, file_stem)
+        # Build full text for metadata extraction
+        pp = parse_result.get("parsers", {}).get("pdfplumber", {})
+        pages = pp.get("pages", [])
+        full_text = "\n\n".join(p.get("text", "") for p in pages)
+        total_pages = max(len(pages), 1)
 
-            if result is None:
-                errors.append(f"Page {page_idx + 1}: {error}")
-                yield f"data: {json.dumps({'type': 'page_error', 'page': page_idx + 1, 'error': error})}\n\n"
-                continue
+        # ── Step 2: Local rules-based extraction ─────────────────────
+        yield f"data: {json.dumps({'type': 'progress', 'page': 0, 'total': total_pages, 'percent': 5, 'message': 'Extracting items with local rules...'})}\n\n"
 
-            if not supplier and result.get("supplier"):
-                supplier = result["supplier"]
+        try:
+            result = extract_items(parse_result, full_text, filename, model_source=model_source)
+        except Exception as e:
+            errors.append(f"Local extraction failed: {type(e).__name__}: {e}")
+            result = {"items": [], "supplier": "", "document_type": "unknown", "date": "", "currency": ""}
 
-            if not document_type and result.get("document_type"):
-                document_type = result["document_type"]
-
-            if not shared_date:
-                for item in result.get("items", []):
-                    if item.get("date"):
-                        shared_date = item["date"]
-                        break
-
-            page_items = result.get("items", [])
-            # Add page number to each item
-            for item in page_items:
-                item["page"] = page_idx + 1
-            all_items.extend(page_items)
-
-            # Send progress: page done
-            page_done_percent = int(((page_idx + 1) / total_pages) * 100)
-            yield f"data: {json.dumps({'type': 'page_done', 'page': page_idx + 1, 'total': total_pages, 'percent': page_done_percent, 'items_found': len(page_items)})}\n\n"
-            print(f"Page {page_idx + 1}: extracted {len(page_items)} items")
-
-            # Small yield to allow client to process
-            await asyncio.sleep(0)
+        all_items = result.get("items", [])
+        supplier = result.get("supplier", "")
+        document_type = result.get("document_type", "unknown")
+        shared_date = result.get("date", "")
 
         # Apply shared date to all items
         if shared_date:
@@ -891,11 +918,45 @@ async def process_stream(req: ProcessRequest):
                 if not item.get("date"):
                     item["date"] = shared_date
 
+        # ── Step 3: Per-page progress reporting ──────────────────────
+        # Group items by their source page (each item has a "page" field
+        # set by extract_items; v0.038.0 added it).
+        items_by_page: dict[int, list] = {}
+        for item in all_items:
+            pg = item.get("page", 1) or 1
+            items_by_page.setdefault(pg, []).append(item)
+
+        for page_idx in range(1, total_pages + 1):
+            percent = int((page_idx / total_pages) * 90) + 5  # 5%..95%
+            page_count = len(items_by_page.get(page_idx, []))
+            yield f"data: {json.dumps({'type': 'page_done', 'page': page_idx, 'total': total_pages, 'percent': percent, 'items_found': page_count, 'message': f'Page {page_idx}: {page_count} item(s)'})}\n\n"
+            await asyncio.sleep(0)  # let client flush
+
+        # ── Step 4: LLM fallback (only if local returned 0 items) ────
+        if not all_items and use_llm_fallback:
+            yield f"data: {json.dumps({'type': 'progress', 'page': 0, 'total': total_pages, 'percent': 96, 'message': 'Local extractor returned 0 items. Trying LLM fallback...'})}\n\n"
+            try:
+                from .normalize import normalize_text_with_llm
+                llm_result, err = await normalize_text_with_llm(full_text)
+                if err:
+                    errors.append(f"LLM fallback failed: {err}")
+                elif llm_result.get("items"):
+                    all_items = llm_result["items"]
+                    extraction_method = "llm_fallback"
+                    if not supplier and llm_result.get("supplier"):
+                        supplier = llm_result["supplier"]
+                    if not shared_date and llm_result.get("date"):
+                        shared_date = llm_result["date"]
+                    if not document_type or document_type == "unknown":
+                        document_type = llm_result.get("document_type", "unknown")
+            except Exception as e:
+                errors.append(f"LLM fallback exception: {type(e).__name__}: {e}")
+
         # Coerce document_type to one of the valid values
         if document_type not in ("QUO", "PO", "PL", "unknown"):
             document_type = "unknown"
 
-        merged = {"supplier": supplier, "document_type": document_type, "items": all_items}
+        # Update file status
         if all_items:
             uploaded_files[req.file_index]["status"] = "processed"
         elif errors:
@@ -903,6 +964,17 @@ async def process_stream(req: ProcessRequest):
         else:
             uploaded_files[req.file_index]["status"] = "processed"
         save_upload_state()
+
+        # Build the merged data block
+        merged = {
+            "supplier": supplier,
+            "document_type": document_type,
+            "items": all_items,
+            "extraction_method": extraction_method,
+            "ocr_source": ocr_info.get("source", ""),
+            "ocr_time_ms": ocr_info.get("time_ms", 0),
+            "ocr_avg_confidence": ocr_info.get("avg_confidence"),
+        }
 
         # Send final result
         yield f"data: {json.dumps({'type': 'done', 'data': merged, 'pages_processed': total_pages, 'errors': errors})}\n\n"
