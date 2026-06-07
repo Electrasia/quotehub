@@ -931,8 +931,12 @@ def _process_table(table, page_num, warnings, model_source="auto"):
     # Map columns from headers
     col_to_field = _map_columns_from_headers(header_rows)
 
-    # Refine mapping with content scoring
-    col_to_field = _score_columns_by_content(rows, col_to_field, header_end)
+    # Refine mapping with content scoring. When header_end=1 and confidence=0,
+    # no real header was found — use all rows for scoring so columns with only
+    # 1-2 data rows can still be detected (e.g. continuation pages without a
+    # repeated header row).
+    score_header_end = 0 if (header_end <= 1 and confidence < 0.1) else header_end
+    col_to_field = _score_columns_by_content(rows, col_to_field, score_header_end)
 
     # Apply per-document model source override (if any)
     col_to_field = _apply_model_source_override(col_to_field, header_rows, model_source)
