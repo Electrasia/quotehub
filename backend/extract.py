@@ -1200,14 +1200,13 @@ def _detect_currency_from_items(items):
 
 
 def _extract_supplier_from_text(text):
-    """Scan first 1500 chars of page text for a company name.
+    """Scan page text for a company name.
 
     Strategy:
       1. Look for explicit labels: "From:", "Vendor:", "Supplier:", "SOLD TO:"
-      2. Look for company suffixes: "Ltd", "Limited", "Inc", "LLC", "Corp", "GmbH"
-         (only at the end of a line, with at least one preceding word)
-      3. Look for ALL-CAPS short names in the first 1500 chars (e.g. "QSC", "BOSCH")
-         and pick the longest non-generic one
+      2. Look for "Company:" label (often in terms/signature section)
+      3. Look for company suffixes: "Ltd", "Limited", "Inc", "LLC", "Corp", "GmbH"
+      4. Look for ALL-CAPS short names in the first 1500 chars (e.g. "QSC", "BOSCH")
     """
     if not text:
         return ""
@@ -1232,7 +1231,16 @@ def _extract_supplier_from_text(text):
         # For now, return the person's name; the user can clean up later.
         return name
 
-    # 2. Find a name ending with a company suffix. Permissive about parens,
+    # 2. Look for "Company: XXX" pattern (often in terms/signature section)
+    company_pat = re.compile(
+        r"Company\s*[:：]\s*([^\n|]+?)(?:\n|$)",
+        re.IGNORECASE,
+    )
+    m = company_pat.search(text)
+    if m:
+        return m.group(1).strip().rstrip(".,")
+
+    # 3. Find a name ending with a company suffix. Permissive about parens,
     #    &, and other punctuation between words. Case-insensitive because
     #    company names are often ALL CAPS in headers. Exclude newlines so
     #    we don't capture across table cell boundaries.
@@ -1242,14 +1250,14 @@ def _extract_supplier_from_text(text):
         r"|Co\.?,?\s+Ltd|GmbH|S\.A\.|S\.r\.l\.)",
         re.MULTILINE,
     )
-    matches = list(suffix_re.finditer(text[:1500]))
+    matches = list(suffix_re.finditer(text))
     if matches:
         # Prefer matches that appear early in the text (likely the company
         # header, not a paragraph)
         best = min(matches, key=lambda m: m.start())
         return best.group("name").strip()
 
-    # 3. ALL-CAPS names in the first 1500 chars. Common headers/words to skip.
+    # 4. ALL-CAPS names in the first 1500 chars. Common headers/words to skip.
     # Note: brand names like "QSC", "BOSCH", "TANNOY" are NOT in this list —
     # they might be the supplier.
     skip_words = {
