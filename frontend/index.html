@@ -148,12 +148,24 @@
                     </div>
                     <div id="processingFileList"></div>
                 </div>
-                <div style="background:#fff;border-radius:12px;padding:40px;text-align:center;margin-top:24px">
-                    <div class="loading" style="justify-content:center;margin-bottom:16px">
-                        <div class="spinner"></div>
-                        <span style="font-size:16px">Processing documents...</span>
+
+                <!-- Inline progress area (replaces the old #processingModal overlay) -->
+                <div id="inlineProgress" class="hidden" style="background:#fff;border-radius:12px;padding:20px 24px;margin-top:24px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+                    <div id="overallProgressRow" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                        <span id="overallProgressLabel" style="font-size:13px;color:#666;font-weight:500">Overall progress</span>
+                        <span id="overallProgressPct" style="font-size:13px;color:#666;font-weight:600">0%</span>
                     </div>
-                    <p style="color:#666;font-size:14px">Please wait while the AI processes your files.</p>
+                    <div class="progress-bar" style="height:6px;margin:0 0 18px 0">
+                        <div class="progress-fill" id="overallProgressFill" style="width:0%;background:#95a5a6"></div>
+                    </div>
+
+                    <div id="perFileLabel" style="font-size:14px;color:#333;margin-bottom:8px;min-height:20px">Preparing...</div>
+                    <div style="display:flex;align-items:center;gap:16px">
+                        <div class="progress-bar" style="flex:1;height:10px;margin:0">
+                            <div class="progress-fill" id="perFileProgressFill" style="width:0%"></div>
+                        </div>
+                        <button class="btn btn-danger" id="perFileCancelBtn" onclick="cancelProcessing()">Cancel</button>
+                    </div>
                 </div>
             </div>
 
@@ -785,20 +797,19 @@
         </div>
     </div>
 
-    <!-- Processing Modal -->
-    <div class="modal-overlay" id="processingModal">
-        <div class="modal">
-            <h3>Processing Document</h3>
-            <div class="loading" style="justify-content:center; margin:20px 0">
-                <div class="spinner"></div>
-                <span id="processingText">Processing page 1...</span>
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width:0%"></div>
-            </div>
-            <p id="processingDetail">Please wait. Do not close this window.</p>
-            <div class="actions">
-                <button class="btn btn-danger" onclick="cancelProcessing()">Cancel</button>
+    <!-- Processing Modal (REMOVED in v0.038.0 UI cleanup; inline progress is now in step 3) -->
+
+    <!-- Confirm Navigation Modal (v0.038.0): shown when user tries to leave Process
+         page while files are still being processed or queued. -->
+    <div class="modal-overlay" id="confirmNavModal">
+        <div class="modal" style="max-width:480px">
+            <h3 id="confirmNavTitle">⚠ Files are still processing</h3>
+            <p id="confirmNavMessage" style="color:#444;font-size:14px;line-height:1.5;margin:16px 0">
+                Files are still being processed.
+            </p>
+            <div class="actions" style="justify-content:flex-end;display:flex;gap:8px;margin-top:24px">
+                <button class="btn btn-secondary" onclick="cancelNavConfirm()">Cancel</button>
+                <button class="btn btn-danger" id="confirmNavStopBtn" onclick="confirmNavStop()">Stop &amp; Leave</button>
             </div>
         </div>
     </div>

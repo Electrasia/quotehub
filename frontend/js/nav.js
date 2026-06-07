@@ -45,12 +45,71 @@ function showProcessView() {
     document.getElementById('navHelp').classList.remove('active');
 }
 
+// ─── Nav guard (v0.038.0): intercept leaving Process page ────
+// Returns true if the user is currently on the Process view AND there is
+// work in progress (active SSE stream, or pending files in the queue) that
+// would be lost by navigating away.
+function isOnProcessView() {
+    const processView = document.getElementById('processView');
+    return processView && !processView.classList.contains('hidden');
+}
+
+function hasProcessWorkInProgress() {
+    if (processing) return true;                       // active stream
+    if (isOnProcessView() && uploadedFiles.some(f => f.status === 'pending')) return true; // queue not drained
+    return false;
+}
+
+function showConfirmNavDialog() {
+    const titleEl   = document.getElementById('confirmNavTitle');
+    const messageEl = document.getElementById('confirmNavMessage');
+    const stopBtn   = document.getElementById('confirmNavStopBtn');
+    if (processing) {
+        const n = uploadedFiles.filter(f => f.status === 'processing').length;
+        titleEl.textContent = '⚠ Files are still processing';
+        messageEl.innerHTML = `<strong>${n}</strong> file${n > 1 ? 's are' : ' is'} still being processed.<br>Stop processing and leave this page?`;
+        stopBtn.style.display = '';
+    } else {
+        const n = uploadedFiles.filter(f => f.status === 'pending').length;
+        titleEl.textContent = '⚠ Files are waiting to be processed';
+        messageEl.innerHTML = `<strong>${n}</strong> file${n > 1 ? 's are' : ' is'} waiting in the queue.<br>Leave this page anyway?`;
+        stopBtn.style.display = 'none';   // nothing to stop, just leave
+    }
+    document.getElementById('confirmNavModal').classList.add('active');
+}
+
+function cancelNavConfirm() {
+    document.getElementById('confirmNavModal').classList.remove('active');
+    pendingNavAction = null;
+}
+
+function confirmNavStop() {
+    // Stop active stream if any
+    if (processing && typeof cancelProcessing === 'function') {
+        cancelProcessing();
+    }
+    document.getElementById('confirmNavModal').classList.remove('active');
+    const action = pendingNavAction;
+    pendingNavAction = null;
+    if (action) action();
+}
+
 function showUpload() {
     showProcessView();
     goToStep(1);
 }
 
+// Function declarations (not const) so they attach to window and remain
+// callable from inline onclick handlers in index.html.
 function showSearch() {
+    if (isOnProcessView() && hasProcessWorkInProgress()) {
+        pendingNavAction = _doShowSearch;
+        showConfirmNavDialog();
+        return;
+    }
+    _doShowSearch();
+}
+function _doShowSearch() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.remove('hidden');
     document.getElementById('settingsView').classList.add('hidden');
@@ -64,7 +123,15 @@ function showSearch() {
     searchQuotations();
 }
 
-async function showSettings() {
+function showSettings() {
+    if (isOnProcessView() && hasProcessWorkInProgress()) {
+        pendingNavAction = _doShowSettings;
+        showConfirmNavDialog();
+        return;
+    }
+    _doShowSettings();
+}
+async function _doShowSettings() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.add('hidden');
     document.getElementById('settingsView').classList.remove('hidden');
@@ -100,6 +167,14 @@ async function showSettings() {
 }
 
 function showHelp() {
+    if (isOnProcessView() && hasProcessWorkInProgress()) {
+        pendingNavAction = _doShowHelp;
+        showConfirmNavDialog();
+        return;
+    }
+    _doShowHelp();
+}
+function _doShowHelp() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.add('hidden');
     document.getElementById('settingsView').classList.add('hidden');
@@ -114,6 +189,14 @@ function showHelp() {
 // non-master users by the nav button. Toggles #debugView and
 // triggers debug.js to load the file list.
 function showDebug() {
+    if (isOnProcessView() && hasProcessWorkInProgress()) {
+        pendingNavAction = _doShowDebug;
+        showConfirmNavDialog();
+        return;
+    }
+    _doShowDebug();
+}
+function _doShowDebug() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.add('hidden');
     document.getElementById('settingsView').classList.add('hidden');

@@ -179,12 +179,13 @@ async function processAll() {
     renderFileList();
     goToStep(3);
 
-    document.getElementById('processingModal').classList.add('active');
+    // Show inline progress area (replaces the old #processingModal overlay)
+    document.getElementById('inlineProgress').classList.remove('hidden');
     processing = true;
     abortController = new AbortController();
-    document.getElementById('processingText').textContent = `Starting ${file.filename}...`;
-    document.getElementById('processingDetail').textContent = '';
-    document.getElementById('progressFill').style.width = '0%';
+    currentFilePercent = 0;
+    updateInlineProgress(file.filename, 'Starting...', 0);
+    updateOverallProgress();
 
     try {
         const resp = await fetch('/process-stream', {
@@ -212,23 +213,30 @@ async function processAll() {
                 try {
                     const msg = JSON.parse(jsonStr);
                     if (msg.type === 'progress') {
-                        document.getElementById('processingText').textContent = msg.message;
-                        document.getElementById('progressFill').style.width = msg.percent + '%';
+                        currentFilePercent = msg.percent;
+                        updateInlineProgress(file.filename, msg.message, msg.percent);
+                        updateOverallProgress();
                         uploadedFiles[fileIdx].progress = `Page ${msg.page}/${msg.total}`;
                         renderFileList();
                     } else if (msg.type === 'page_done') {
-                        document.getElementById('processingDetail').textContent = `Found ${msg.items_found} item(s) on page ${msg.page}`;
-                        document.getElementById('progressFill').style.width = msg.percent + '%';
+                        currentFilePercent = msg.percent;
+                        updateInlineProgress(file.filename, `Found ${msg.items_found} item(s) on page ${msg.page}`, msg.percent);
+                        updateOverallProgress();
                         uploadedFiles[fileIdx].progress = `Page ${msg.page}/${msg.total} ✓`;
                         renderFileList();
                     } else if (msg.type === 'page_error') {
-                        document.getElementById('processingDetail').textContent = `Page ${msg.page}: ${msg.error}`;
+                        updateInlineProgress(file.filename, `Page ${msg.page}: ${msg.error}`, currentFilePercent);
                     } else if (msg.type === 'done') {
-                        document.getElementById('progressFill').style.width = '100%';
+                        currentFilePercent = 100;
+                        updateInlineProgress(file.filename, 'Done', 100);
+                        updateOverallProgress();
                         extractedData = msg.data;
                         uploadedFiles[fileIdx].status = 'done';
                         uploadedFiles[fileIdx].progress = '';
                         renderFileList();
+
+                        // Hide inline progress (review takes over)
+                        document.getElementById('inlineProgress').classList.add('hidden');
 
                         const pagesResp = await fetch(`/next-file?file_index=${backendIdx}`);
                         const pagesData = await pagesResp.json();
@@ -246,14 +254,45 @@ async function processAll() {
             uploadedFiles[fileIdx].status = 'error';
             uploadedFiles[fileIdx].progress = '';
             renderFileList();
+            document.getElementById('inlineProgress').classList.add('hidden');
         }
     } finally {
         processing = false;
-        // Only close modal if not already closed by cancelProcessing
-        if (document.getElementById('processingModal').classList.contains('active')) {
-            document.getElementById('processingModal').classList.remove('active');
-        }
+        abortController = null;
     }
+}
+
+// ─── Inline progress helpers (v0.038.0 UI cleanup) ───────────
+// Update the per-file progress row: filename + status text + bar width.
+function updateInlineProgress(filename, statusText, percent) {
+    const label = document.getElementById('perFileLabel');
+    const fill  = document.getElementById('perFileProgressFill');
+    if (label) label.textContent = `${filename} — ${statusText}`;
+    if (fill)  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+}
+
+// Compute weighted overall progress:
+//   - N = total files in queue
+//   - each completed file contributes 1/N
+//   - currently processing file contributes (currentFilePercent/100) * (1/N)
+//   - pending files contribute 0
+function updateOverallProgress() {
+    const N = uploadedFiles.length;
+    if (N === 0) {
+        document.getElementById('overallProgressLabel').textContent = 'Overall progress';
+        document.getElementById('overallProgressPct').textContent = '0%';
+        document.getElementById('overallProgressFill').style.width = '0%';
+        return;
+    }
+    const completed = uploadedFiles.filter(f => f.status === 'done' || f.status === 'saved').length;
+    const currentFraction = (currentFilePercent / 100) / N;
+    const overall = Math.min(100, Math.round((completed / N + currentFraction) * 100));
+    const processingIdx = uploadedFiles.findIndex(f => f.status === 'processing');
+    const currentNumber = processingIdx >= 0 ? processingIdx + 1 : Math.min(completed + 1, N);
+    document.getElementById('overallProgressLabel').textContent =
+        `Processing ${currentNumber} of ${N} files · Overall ${overall}%`;
+    document.getElementById('overallProgressPct').textContent = `${overall}%`;
+    document.getElementById('overallProgressFill').style.width = `${overall}%`;
 }
 
 function cancelProcessing() {
@@ -262,6 +301,7 @@ function cancelProcessing() {
         abortController = null;
     }
     processing = false;
+    currentFilePercent = 0;
     // Reset current file status to pending
     if (currentFileIndex >= 0) {
         const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
@@ -271,7 +311,10 @@ function cancelProcessing() {
             renderFileList();
         }
     }
-    document.getElementById('processingModal').classList.remove('active');
+    // Hide inline progress area (v0.038.0: replaces old modal)
+    const inlineProgress = document.getElementById('inlineProgress');
+    if (inlineProgress) inlineProgress.classList.add('hidden');
+    updateOverallProgress();
     // Return to file list (step 3 has no cancel/progress, so don't leave user stuck there)
     const hasPending = uploadedFiles.some(f => f.status === 'pending');
     goToStep(hasPending ? 2 : 1);
