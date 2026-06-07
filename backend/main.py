@@ -932,9 +932,21 @@ async def process_stream(req: ProcessRequest):
             yield f"data: {json.dumps({'type': 'page_done', 'page': page_idx, 'total': total_pages, 'percent': percent, 'items_found': page_count, 'message': f'Page {page_idx}: {page_count} item(s)'})}\n\n"
             await asyncio.sleep(0)  # let client flush
 
-        # ── Step 4: LLM fallback (only if local returned 0 items) ────
-        if not all_items and use_llm_fallback:
-            yield f"data: {json.dumps({'type': 'progress', 'page': 0, 'total': total_pages, 'percent': 96, 'message': 'Local extractor returned 0 items. Trying LLM fallback...'})}\n\n"
+        # ── Step 4: LLM fallback ────────────────────────────────────
+        # v0.038.0 fix: fire LLM when local returned 0 items OR when OCR
+        # was triggered. The second condition ensures multi-page documents
+        # with mixed text/scanned pages (or all-scanned pages that the
+        # local extractor can't parse) get the LLM to re-process the
+        # document and catch items the local rules missed. Pure text PDFs
+        # are unaffected (OCR not triggered → LLM not called).
+        ocr_was_triggered = ocr_info.get("source") in ("tesseract", "llm")
+        if use_llm_fallback and (not all_items or ocr_was_triggered):
+            if all_items:
+                msg = (f"OCR was used on this document. Re-processing all "
+                       f"pages with LLM to ensure complete extraction...")
+            else:
+                msg = "Local extractor returned 0 items. Trying LLM fallback..."
+            yield f"data: {json.dumps({'type': 'progress', 'page': 0, 'total': total_pages, 'percent': 96, 'message': msg})}\n\n"
             try:
                 from .normalize import normalize_text_with_llm
                 llm_result, err = await normalize_text_with_llm(full_text)
@@ -1561,8 +1573,11 @@ async def debug_parse(file_index: int):
     if not filepath or not Path(filepath).exists():
         raise HTTPException(status_code=404, detail="File path missing or file no longer on disk")
     # Local import so the parser module is optional at startup.
-    from .parser import parse_file, format_for_llm
-    result = parse_file(filepath)
+    # v0.038.0 fix: use the async version so OCR actually runs. The sync
+    # `parse_file()` would hit the "event loop already running" guard and
+    # silently skip OCR (leaving scanned PDFs with no text).
+    from .parser import parse_file_with_ocr, format_for_llm
+    result = await parse_file_with_ocr(filepath)
     # Add context the UI needs to display the result.
     result["file_index"] = file_index
     result["upload_filename"] = entry.get("filename", "")
