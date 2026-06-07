@@ -487,18 +487,15 @@ async def upload(file: UploadFile = File(...)):
                 page_images.append(f"/images/{Path(file.filename).stem}/page_{i+1}.png")
         except Exception as e:
             print(f"PDF conversion error: {e}")
-        if filepath.exists():
-            filepath.unlink()
-        return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
-
-    # Reject PDFs that yielded 0 pages (corrupt files that did not raise)
-    if len(page_images) == 0:
-        try:
-            if filepath.exists():
-                filepath.unlink()
-        except OSError:
-            pass
-        return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
+        # Reject PDFs that yielded 0 pages (corrupt files that did not raise).
+        # Only for .pdf — .xlsx always has pages == 0 by design (no rendering).
+        if len(page_images) == 0:
+            try:
+                if filepath.exists():
+                    filepath.unlink()
+            except OSError:
+                pass
+            return JSONResponse(status_code=400, content={"error": "PDF conversion failed"})
 
     entry = {
         "filename": file.filename,
