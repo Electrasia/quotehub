@@ -118,7 +118,7 @@
             <div id="stepPanel1" class="step-panel">
                 <div class="upload-area" id="uploadArea">
                     <div class="icon">📄</div>
-                    <h2>Upload Quotation PDFs</h2>
+                    <h2>Upload Excel and PDF Files Here</h2>
                     <p>Drag and drop files here, or click to browse</p>
                     <input type="file" id="fileInput" accept=".pdf,.xlsx" multiple style="display:none">
                     <button class="btn btn-primary" style="margin-top:16px" onclick="document.getElementById('fileInput').click()">Choose Files</button>
@@ -142,6 +142,10 @@
             <div id="stepPanel3" class="step-panel hidden">
                 <div class="file-list" id="processingFileListSection">
                     <h3>Files</h3>
+                    <div class="beta-warning" style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 16px;margin:8px 0 16px 0;color:#856404;font-size:14px;display:flex;align-items:center;gap:8px">
+                        <span style="font-size:18px">⚠️</span>
+                        <span>Thsi app is Beta and all documents need to be validated before inserting them in Database</span>
+                    </div>
                     <div id="processingFileList"></div>
                 </div>
                 <div style="background:#fff;border-radius:12px;padding:40px;text-align:center;margin-top:24px">

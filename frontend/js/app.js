@@ -85,14 +85,12 @@ async function initApp() {
     if (appInitialized) return;
     try { await loadPopupDuration(); } catch (e) { /* offline / not auth */ }
     try { await loadVersion();       } catch (e) { /* offline / not auth */ }
-    // Default landing: Upload tab (admin/master) or Search tab (user).
-    if (currentUser && currentUser.role === 'user') {
-        showSearch();
-    } else if (window.__openDebugOnBoot && isMaster && isMaster()) {
+    // Default landing: Search tab for everyone. Master can use ?debug=1 to deep-link to Debug.
+    if (window.__openDebugOnBoot && isMaster && isMaster()) {
         // Phase 2 of v0.037.0: ?debug=1 deep link, master only.
         showDebug();
     } else {
-        showUpload();
+        showSearch();
     }
     appInitialized = true;
 }
