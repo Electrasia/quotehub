@@ -1690,6 +1690,8 @@ async def debug_extract(req: DebugExtractRequest):
     pp = parse_result.get("parsers", {}).get("pdfplumber", {})
     pages = pp.get("pages", [])
     full_text = "\n\n".join(p.get("text", "") for p in pages)
+    # v0.038.0 fix: keep per-page text for LLM fallback
+    pages_text = [p.get("text", "") for p in pages]
 
     # Include OCR info in response for transparency
     ocr_info = parse_result.get("parsers", {}).get("ocr", {})
@@ -1711,22 +1713,24 @@ async def debug_extract(req: DebugExtractRequest):
 
     # 2) Fall back to LLM if requested AND local returned 0 items
     if req.use_llm_fallback and not result.get("items"):
-        from .normalize import normalize_text_with_llm
-        llm_result, err = await normalize_text_with_llm(full_text)
-        if err:
-            result["extraction_warnings"].append(f"LLM fallback failed: {err}")
-        elif llm_result.get("items"):
+        # v0.038.0 fix: use per-page LLM to avoid missing items on pages 2+
+        pages_text = [p.get("text", "") for p in pages]
+        from .normalize import normalize_pages_with_llm
+        llm_result = await normalize_pages_with_llm(pages_text)
+        if llm_result.get("per_page_errors"):
+            for pe in llm_result["per_page_errors"]:
+                result["extraction_warnings"].append(f"LLM fallback: {pe}")
+        if llm_result.get("items"):
             result["items"] = llm_result["items"]
             result["extraction_method"] = "llm_fallback"
-            # Use LLM's metadata if local didn't find them
-            if not result.get("supplier") and llm_result.get("supplier"):
+            # LLM is authoritative for metadata when it fires
+            if llm_result.get("supplier"):
                 result["supplier"] = llm_result["supplier"]
-            if not result.get("currency") and llm_result.get("currency"):
+            if llm_result.get("currency"):
                 result["currency"] = llm_result["currency"]
-            if not result.get("date") and llm_result.get("date"):
+            if llm_result.get("date"):
                 result["date"] = llm_result["date"]
-            if (not result.get("document_type") or result["document_type"] == "unknown") \
-                    and llm_result.get("document_type") not in (None, "", "unknown"):
+            if llm_result.get("document_type") and llm_result["document_type"] != "unknown":
                 result["document_type"] = llm_result["document_type"]
             result["extraction_warnings"].append(
                 f"Used LLM fallback (local returned 0 items; LLM found {len(llm_result['items'])} items)"
