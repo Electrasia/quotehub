@@ -45,7 +45,7 @@ async function handleFiles(files) {
         const name = (file.name || '').toLowerCase();
         if (!name.endsWith('.pdf') && !name.endsWith('.xlsx')) continue;
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('files', file);
         const resp = await fetch('/upload', { method: 'POST', body: formData });
         const data = await resp.json();
         if (!resp.ok) {
