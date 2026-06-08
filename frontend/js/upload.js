@@ -52,16 +52,21 @@ async function handleFiles(files) {
             showBriefPopup(`Upload failed: ${data.error || resp.statusText}`);
             continue;
         }
-        data.backendIndex = data.file_index;
+        // Extract the actual file entry from the backend response envelope
+        const fileEntry = data.files ? data.files[0] : data;
+        // Normalize status: backend sends "uploaded", frontend expects "pending"
+        fileEntry.status = fileEntry.status === 'uploaded' ? 'pending' : fileEntry.status;
+        // Normalize page count: backend sends num_pages, frontend expects pages
+        fileEntry.pages = fileEntry.num_pages || fileEntry.pages || 0;
         // Check for duplicates
         try {
             const dupResp = await fetch(`/check-duplicate?filename=${encodeURIComponent(file.name)}`);
             const dup = await dupResp.json();
             if (dup.exists || dup.in_database) {
-                data.duplicate = true;
+                fileEntry.duplicate = true;
             }
         } catch (e) { /* ignore check errors */ }
-        uploadedFiles.push(data);
+        uploadedFiles.push(fileEntry);
         renderFileList();
     }
     updateStepClickability();
