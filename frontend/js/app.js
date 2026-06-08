@@ -1,7 +1,7 @@
 // ─── Global State ────────────────────────────────────────────
 let isConnected = false;
 let uploadedFiles = [];
-let currentFileIndex = -1;
+let currentFileIndex = null;
 let reviewPages = [];
 let reviewCurrentPage = 0;
 let extractedData = null;

@@ -224,7 +224,7 @@ async function doLogout() {
     document.getElementById('settingsView').classList.add('hidden');
     document.getElementById('fileListSection').classList.add('hidden');
     uploadedFiles = [];
-    currentFileIndex = -1;
+    currentFileIndex = null;
     isConnected = false;
     updateConnectionUI();
     goToStep(1);

@@ -29,6 +29,7 @@ let reviewAutoFit = true;    // true when a new file is loaded (fit-width on fir
 function showReview(filename) {
     document.getElementById('reviewFilename').textContent = filename;
     document.getElementById('supplierName').value = extractedData.supplier || '';
+    document.getElementById('reviewDate').value = extractedData.date || '';
     document.getElementById('documentType').value = extractedData.document_type || 'unknown';
     updateDocumentTypeWarning();
     const tbody = document.getElementById('itemsTable');
@@ -202,6 +203,16 @@ function updateItemCount() {
 }
 
 /**
+ * Renumber row numbers after add/remove/reorder.
+ */
+function renumberRows() {
+    document.querySelectorAll('#itemsTable tr').forEach((tr, i) => {
+        const numCell = tr.querySelector('.row-number');
+        if (numCell) numCell.textContent = i + 1;
+    });
+}
+
+/**
  * Add a new row to the items table.
  *
  * @param {Object} [item={}] — Item data to populate the row (brand, model, etc.)
@@ -209,8 +220,13 @@ function updateItemCount() {
 function addRow(item = {}) {
     const tbody = document.getElementById('itemsTable');
     const tr = document.createElement('tr');
-    const supplierVal = item.supplier || document.getElementById('supplierName').value || '';
+    const rowNumber = tbody.querySelectorAll('tr').length + 1;
+    // Use item-level currency, fallback to document-level
+    const currency = item.currency || extractedData?.currency || '';
+    // Use item-level date, fallback to document-level
+    const date = item.date || extractedData?.date || '';
     tr.innerHTML = `
+        <td class="row-number">${rowNumber}</td>
         <td>
             <div style="display:flex;align-items:center;gap:4px">
                 <input type="text" value="${escapeHtml(item.brand || '')}" placeholder="Brand" style="flex:1;min-width:0"
@@ -221,16 +237,18 @@ function addRow(item = {}) {
         </td>
         <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"
                    oninput="onModelInput(this)"></td>
-        <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${escapeHtml(item.description || '')}</textarea></td>
-        <td><input type="text" class="price-input" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
-        <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD"></td>
-        <td><input type="text" value="${escapeHtml(supplierVal)}" placeholder="Supplier"></td>
-        <td><input type="text" value="${escapeHtml(item.currency || '')}" placeholder="Currency"></td>
-        <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount(); updateBulkCount(0, 'bulkCount')">✕</button></td>
+        <td><input type="text" value="${escapeHtml(item.description || '')}" placeholder="Description"></td>
+        <td><input type="text" value="${escapeHtml(date)}" placeholder="YYYY-MM-DD" style="width:100px"></td>
+        <td><input type="text" value="${escapeHtml(currency)}" placeholder="Currency" style="width:70px"></td>
+        <td><input type="text" class="price-input text-right" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
+        <td><input type="text" class="text-right" value="${escapeHtml(item.quantity || '')}" placeholder="0"></td>
+        <td><input type="text" class="price-input text-right" value="${escapeHtml(item.total || '')}" placeholder="0.00"></td>
+        <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount(); renumberRows(); updateBulkCount(1, 'bulkCount')">✕</button></td>
     `;
     tbody.appendChild(tr);
     updateItemCount();
-    updateBulkCount(0, 'bulkCount');
+    renumberRows();
+    updateBulkCount(1, 'bulkCount');
 }
 
 // ─── Brand Suggestion (per-row) ────────────────────────────
@@ -415,19 +433,22 @@ function getEditedData() {
     const rows = document.querySelectorAll('#itemsTable tr');
     const items = [];
     rows.forEach(row => {
-        const inputs = row.querySelectorAll('input, textarea');
+        const inputs = row.querySelectorAll('input');
+        // Column order: #(rowNum), Brand, Model, Description, Date, Currency, UnitPrice, TotalQty, TotalPrice
         items.push({
-            brand: inputs[0].value,
-            model: inputs[1].value,
-            description: inputs[2].value,
-            unit_price: inputs[3].value,
+            brand: inputs[1].value,
+            model: inputs[2].value,
+            description: inputs[3].value,
             date: inputs[4].value,
-            supplier: inputs[5].value,
-            currency: inputs[6].value
+            currency: inputs[5].value,
+            unit_price: inputs[6].value,
+            quantity: inputs[7].value,
+            total: inputs[8].value
         });
     });
     return {
         supplier: document.getElementById('supplierName').value,
+        date: document.getElementById('reviewDate').value,
         document_type: document.getElementById('documentType').value,
         items: items
     };
@@ -441,12 +462,12 @@ async function confirmSave() {
     const resp = await fetch('/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_index: currentFileIndex, data: data })
+        body: JSON.stringify({ file_id: currentFileIndex, data: data })
     });
     const result = await resp.json();
     if (result.status === 'saved') {
         // Update frontend status
-        const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
+        const fileIdx = uploadedFiles.findIndex(f => f.file_id === currentFileIndex);
         if (fileIdx !== -1) {
             uploadedFiles[fileIdx].status = 'saved';
             renderFileList();

@@ -79,6 +79,10 @@ def load_upload_state():
             for entry in saved:
                 filepath = Path(entry.get("filepath", ""))
                 if filepath.exists():
+                    # Ensure file_id exists (migrate old entries without it)
+                    if "file_id" not in entry:
+                        import uuid
+                        entry["file_id"] = uuid.uuid4().hex[:12]
                     img_dir = IMAGES_DIR / filepath.stem
                     page_files = sorted(img_dir.glob("page_*.png")) if img_dir.is_dir() else []
                     entry["pages"] = [f"/images/{filepath.stem}/{p.name}" for p in page_files]
@@ -96,6 +100,7 @@ def save_upload_state():
         to_save = []
         for entry in uploaded_files:
             to_save.append({
+                "file_id": entry.get("file_id"),
                 "filename": entry["filename"],
                 "filepath": entry["filepath"],
                 "status": entry["status"],
@@ -178,6 +183,7 @@ app.include_router(debug_router)
 # ─── Static Files ─────────────────────────────────────────
 
 app.mount("/static", StaticFiles(directory=Path(__file__).parent.parent / "frontend"), name="static")
+app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 
 @app.get("/")

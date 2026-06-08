@@ -230,5 +230,17 @@ th.sort-desc::after { content: ' ▼'; color: #3498db; }
 }
 .settings-field input:focus { outline: none; border-color: #3498db; }
 
+/* Review table - Excel-like clean cells */
+.review-data table { background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; }
+.review-data th { background: #f0f2f5; font-size: 12px; padding: 8px 10px; white-space: nowrap; border-bottom: 2px solid #d0d0d0; font-weight: 600; color: #444; }
+.review-data td { font-size: 13px; padding: 2px 4px; border-bottom: 1px solid #eee; }
+.review-data td.row-number { text-align: center; color: #999; font-size: 12px; width: 40px; background: #fafbfc; }
+.review-data td input { border: 1px solid transparent; padding: 5px 6px; border-radius: 2px; font-size: 13px; width: 100%; background: transparent; }
+.review-data td input:hover { background: #f5f9fc; }
+.review-data td input:focus { outline: none; border-color: #3498db; background: #fff; box-shadow: 0 0 0 1px #3498db; }
+.review-data tbody tr:hover { background: #f5f9fc; }
+.review-data tbody tr:nth-child(even) { background: #fafbfc; }
+.review-data tbody tr:nth-child(even):hover { background: #f0f5fa; }
+
 /* Hidden */
 .hidden { display: none !important; }

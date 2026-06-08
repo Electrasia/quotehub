@@ -58,6 +58,8 @@ async function handleFiles(files) {
         fileEntry.status = fileEntry.status === 'uploaded' ? 'pending' : fileEntry.status;
         // Normalize page count: backend sends num_pages, frontend expects pages
         fileEntry.pages = fileEntry.num_pages || fileEntry.pages || 0;
+        // Store stable file_id (replaces fragile backendIndex)
+        // fileEntry.file_id is already set by the backend
         // Check for duplicates
         try {
             const dupResp = await fetch(`/check-duplicate?filename=${encodeURIComponent(file.name)}`);
@@ -162,9 +164,15 @@ function moveFile(index, direction) {
 async function removeFile(index) {
     const file = uploadedFiles[index];
     if (!file) return;
-    // Remove from backend if it has a backend index
-    if (file.backendIndex !== undefined) {
-        try { await fetch('/clear', { method: 'POST' }); } catch (e) { /* ignore */ }
+    // Remove from backend by stable file_id (not /clear which wipes everything)
+    if (file.file_id) {
+        try {
+            await fetch('/remove-file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_id: file.file_id })
+            });
+        } catch (e) { /* ignore */ }
     }
     uploadedFiles.splice(index, 1);
     renderFileList();

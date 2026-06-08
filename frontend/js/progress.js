@@ -29,8 +29,8 @@ async function processAll() {
     if (fileIdx === -1) { showBriefPopup('No pending files to process.'); return; }
 
     const file = uploadedFiles[fileIdx];
-    const backendIdx = file.backendIndex;
-    currentFileIndex = backendIdx;
+    const fileId = file.file_id;
+    currentFileIndex = fileId;
 
     // Mark as processing
     uploadedFiles[fileIdx].status = 'processing';
@@ -50,7 +50,7 @@ async function processAll() {
         const resp = await fetch('/process-stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_index: backendIdx }),
+            body: JSON.stringify({ file_id: fileId }),
             signal: abortController.signal
         });
 
@@ -111,7 +111,7 @@ async function processAll() {
                         // Hide inline progress (review takes over)
                         document.getElementById('inlineProgress').classList.add('hidden');
 
-                        const pagesResp = await fetch(`/next-file?file_index=${backendIdx}`);
+                        const pagesResp = await fetch(`/next-file?file_id=${encodeURIComponent(fileId)}`);
                         const pagesData = await pagesResp.json();
                         reviewPages = pagesData.pages;
                         reviewCurrentPage = 0;
@@ -192,8 +192,8 @@ function cancelProcessing() {
     processing = false;
     currentFilePercent = 0;
     // Reset current file status to pending
-    if (currentFileIndex >= 0) {
-        const fileIdx = uploadedFiles.findIndex(f => f.backendIndex === currentFileIndex);
+    if (currentFileIndex) {
+        const fileIdx = uploadedFiles.findIndex(f => f.file_id === currentFileIndex);
         if (fileIdx !== -1) {
             uploadedFiles[fileIdx].status = 'pending';
             uploadedFiles[fileIdx].progress = '';

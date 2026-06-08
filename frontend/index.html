@@ -202,6 +202,10 @@
                                     <input type="text" id="supplierName" value="">
                                 </div>
                                 <div class="meta-item">
+                                    <label>Date</label>
+                                    <input type="text" id="reviewDate" placeholder="YYYY-MM-DD">
+                                </div>
+                                <div class="meta-item">
                                     <label>Document Type <span id="docTypeWarning" style="color:#e67e22;font-size:12px;display:none">⚠ Please select</span></label>
                                     <select id="documentType" onchange="updateDocumentTypeWarning()">
                                         <option value="unknown">Unknown (not classified)</option>
@@ -218,10 +222,10 @@
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
                                 <span style="font-size:13px;color:#666;font-weight:500">Brand:</span>
                                 <input type="text" id="bulkBrandInput" placeholder="Bulk value..."
-                                       oninput="updateBulkCount(0, 'bulkCount')"
+                                       oninput="updateBulkCount(1, 'bulkCount')"
                                        style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
                                 <button class="btn btn-sm btn-primary"
-                                        onclick="bulkApplyColumn(0, 'bulkBrandInput', 'bulkCount')"
+                                        onclick="bulkApplyColumn(1, 'bulkBrandInput', 'bulkCount')"
                                         title="Apply value to empty Brand cells only">Apply</button>
                                 <span style="font-size:13px;color:#666">(<span id="bulkCount" title="Empty Brand cells in table">0</span> empty)</span>
                             </div>
@@ -230,14 +234,16 @@
                                 <table>
                                     <thead>
                                         <tr>
+                                            <th style="width:40px">#</th>
                                             <th>Brand</th>
                                             <th>Model</th>
                                             <th>Description</th>
-                                            <th class="price-cell">Unit Price</th>
-                                            <th class="date-cell">Date</th>
-                                            <th>Supplier</th>
+                                            <th>Date</th>
                                             <th>Currency</th>
-                                            <th style="width:60px"></th>
+                                            <th class="price-cell">Unit Price</th>
+                                            <th class="price-cell">Total Qty</th>
+                                            <th class="price-cell">Total Price</th>
+                                            <th style="width:40px"></th>
                                         </tr>
                                     </thead>
                                     <tbody id="itemsTable"></tbody>
