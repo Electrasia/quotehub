@@ -589,10 +589,26 @@ def _parse_price(s):
 # -----------------------------------------------------------------------------
 
 def _is_empty_row(row):
+    """Check if a table row is completely empty.
+    
+    Args:
+        row: A list of cell values from the table.
+        
+    Returns:
+        True if all cells are None or empty strings, False otherwise.
+    """
     return all(c is None or not str(c).strip() for c in row)
 
 
 def _is_total_row(row):
+    """Check if a table row is a total/subtotal row.
+    
+    Args:
+        row: A list of cell values from the table.
+        
+    Returns:
+        True if the row contains total-related keywords, False otherwise.
+    """
     for c in row:
         if c is None:
             continue
@@ -1089,6 +1105,14 @@ MONTHS = {
 
 
 def _try_dd_mm_yyyy(m):
+    """Parse a date in DD/MM/YYYY or MM/DD/YYYY format.
+    
+    Args:
+        m: A regex match object with groups (day, month, year).
+        
+    Returns:
+        Date in YYYY-MM-DD format.
+    """
     a, b, y = m.group(1), m.group(2), m.group(3)
     a, b = int(a), int(b)
     if a > 12:  # must be DD/MM
@@ -1100,6 +1124,14 @@ def _try_dd_mm_yyyy(m):
 
 
 def _try_dd_mm_yy(m):
+    """Parse a date in DD/MM/YY or MM/DD/YY format.
+    
+    Args:
+        m: A regex match object with groups (day, month, year).
+        
+    Returns:
+        Date in YYYY-MM-DD format.
+    """
     a, b, y = m.group(1), m.group(2), m.group(3)
     a, b = int(a), int(b)
     y = int(y)
@@ -1112,6 +1144,14 @@ def _try_dd_mm_yy(m):
 
 
 def _try_d_mon_yyyy(m):
+    """Parse a date in DD-Mon-YYYY format (e.g., 15-Jan-2026).
+    
+    Args:
+        m: A regex match object with groups (day, month abbreviation, year).
+        
+    Returns:
+        Date in YYYY-MM-DD format, or None if month is invalid.
+    """
     d, mon_s, y = m.group(1), m.group(2).lower(), m.group(3)
     mon = MONTHS.get(mon_s)
     if not mon:
@@ -1120,6 +1160,14 @@ def _try_d_mon_yyyy(m):
 
 
 def _try_mon_d_yyyy(m):
+    """Parse a date in Mon-DD-YYYY format (e.g., Jan-15-2026).
+    
+    Args:
+        m: A regex match object with groups (month abbreviation, day, year).
+        
+    Returns:
+        Date in YYYY-MM-DD format, or None if month is invalid.
+    """
     mon_s, d, y = m.group(1).lower(), m.group(2), m.group(3)
     mon = MONTHS.get(mon_s)
     if not mon:
@@ -1353,6 +1401,14 @@ def _extract_supplier_from_metadata_table(pp_pages):
 
 
 def _extract_date_from_metadata_table(pp_pages):
+    """Extract quotation date from metadata table in first page.
+    
+    Args:
+        pp_pages: List of pdfplumber page results.
+        
+    Returns:
+        Date string in YYYY-MM-DD format, or empty string if not found.
+    """
     if not pp_pages:
         return ""
     for t in pp_pages[0].get("tables", []):
@@ -1373,6 +1429,14 @@ def _extract_date_from_metadata_table(pp_pages):
 
 
 def _extract_currency_from_table(pp_pages):
+    """Extract currency symbol from metadata table in first page.
+    
+    Args:
+        pp_pages: List of pdfplumber page results.
+        
+    Returns:
+        Currency code (e.g., USD, EUR, HKD), or empty string if not found.
+    """
     if not pp_pages:
         return ""
     for t in pp_pages[0].get("tables", []):

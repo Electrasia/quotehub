@@ -1,4 +1,16 @@
-# ─── Auth: passwords, session helpers, role dependencies ───
+"""
+backend/auth.py — Authentication and user management for QuoteHub.
+
+This module handles:
+    - Password hashing and verification (bcrypt)
+    - User CRUD operations (create, read, update, delete)
+    - Session management and current user tracking
+    - Role-based access control
+    - Initial master account bootstrap
+
+All database functions use the get_db() context manager from db.py
+to ensure connections are properly managed.
+"""
 import os
 import json
 import time
@@ -32,9 +44,26 @@ _DEFAULT_IDLE_TIMEOUT_MINUTES = 60
 
 # ─── Password hashing (bcrypt, cost factor 12) ────────────
 def hash_password(plain: str) -> str:
+    """Hash a plaintext password using bcrypt.
+    
+    Args:
+        plain: The plaintext password to hash.
+        
+    Returns:
+        The bcrypt hash string.
+    """
     return _bcrypt.using(rounds=12).hash(plain)
 
 def verify_password(plain: str, hashed: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash.
+    
+    Args:
+        plain: The plaintext password to verify.
+        hashed: The bcrypt hash to verify against.
+        
+    Returns:
+        True if the password matches, False otherwise.
+    """
     try:
         return _bcrypt.verify(plain, hashed)
     except (ValueError, TypeError):
@@ -141,6 +170,22 @@ def has_any_user() -> bool:
 
 # ─── Session / current user ───────────────────────────────
 def get_current_user(request: Request) -> Optional[dict]:
+    """Get the current user from the session.
+    
+    This function checks the session for a user ID, validates the user
+    exists and is active, and enforces idle timeout.
+    
+    Args:
+        request: The FastAPI request object containing session data.
+        
+    Returns:
+        The user dictionary if authenticated, None otherwise.
+        
+    Note:
+        - Enforces idle timeout (configurable via idle_timeout_minutes)
+        - Returns None if user is inactive or deleted
+        - Refreshes activity timestamp on each valid request
+    """
     user_id = request.session.get(SESSION_USER_ID)
     if not user_id:
         return None
@@ -220,6 +265,14 @@ class UserOut(BaseModel):
 
 # ─── Bootstrap: first-run master account ─────────────────
 def _write_init_password_file(password: str) -> None:
+    """Write the initial password to a file for the master account.
+    
+    Args:
+        password: The initial password to save.
+        
+    Note:
+        The file is created with restricted permissions (0o600) for security.
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     INIT_PASSWORD_FILE.write_text(password)
     try:
@@ -228,6 +281,12 @@ def _write_init_password_file(password: str) -> None:
         pass  # On some FS (e.g. FAT) chmod is a no-op
 
 def _print_init_banner(username: str, password: str) -> None:
+    """Print the initial master credentials banner to console.
+    
+    Args:
+        username: The master username.
+        password: The master password.
+    """
     print("")
     print("=" * 60)
     print("  INITIAL MASTER CREDENTIALS")
@@ -261,6 +320,11 @@ def bootstrap_master() -> None:
     _print_init_banner("master", password)
 
 def read_init_password() -> Optional[str]:
+    """Read the initial password from the password file.
+    
+    Returns:
+        The initial password if the file exists, None otherwise.
+    """
     if INIT_PASSWORD_FILE.exists():
         return INIT_PASSWORD_FILE.read_text().strip()
     return None

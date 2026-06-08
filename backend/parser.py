@@ -45,6 +45,15 @@ MIN_RICH_ROWS_FOR_CLEAN_STRATEGY = 2
 
 
 def _truncate(s: str, n: int) -> str:
+    """Truncate a string to n characters, adding ellipsis if truncated.
+    
+    Args:
+        s: The string to truncate.
+        n: Maximum number of characters.
+        
+    Returns:
+        The truncated string with ellipsis indicator if needed.
+    """
     if len(s) <= n:
         return s
     return s[:n] + f"... [truncated, total {len(s)} chars]"
@@ -594,6 +603,17 @@ def format_for_llm(parse_result: dict) -> str:
     import re as _re
 
     def _clean(s):
+        """Clean a cell value for pipe-delimited output.
+        
+        Replaces pipes with ' / ' to preserve CSV format, replaces newlines
+        with arrows, and collapses whitespace.
+        
+        Args:
+            s: The cell value to clean.
+            
+        Returns:
+            The cleaned string.
+        """
         if s is None:
             return ""
         s = str(s).replace("|", " / ").replace("\r", " ").replace("\n", " ⏎ ")
