@@ -90,16 +90,15 @@ class DebugExtractRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
     filepath: str
     model_source: str = Field("auto", description="auto | model | part_no")
-    use_llm_fallback: bool = Field(False, description="Use LLM if local returns 0 items")
+    extraction_mode: str = Field("local_first", description="llm_first | local_first | llm_only | local_only")
     ocr_enabled: bool = Field(True, description="Run OCR on scanned PDFs")
 
 
 @router.post("/extract", dependencies=[Depends(require_role("master"))])
 async def debug_extract(req: DebugExtractRequest):
-    """Extract items from a file."""
+    """Extract items from a file using the specified extraction mode."""
     from ..parser import parse_file_with_ocr
-    from ..extract import extract_items
-    from ..normalize import normalize_pages_with_llm
+    from ..extraction import extract_items_async
     
     filepath = Path(req.filepath)
     if not filepath.exists():
@@ -108,34 +107,21 @@ async def debug_extract(req: DebugExtractRequest):
     # Parse file
     parse_result = await parse_file_with_ocr(str(filepath))
     
-    # Extract items locally
-    result = extract_items(parse_result)
-    all_items = result.get("items", [])
-    extraction_method = "local"
-    
-    # LLM fallback if enabled and local returned 0 items
-    if req.use_llm_fallback and not all_items:
-        pages = parse_result.get("parsers", {}).get("pdfplumber", {}).get("pages", [])
-        pages_text = [p.get("text", "") for p in pages]
-        
-        llm_result = await normalize_pages_with_llm(pages_text)
-        if llm_result and llm_result.get("items"):
-            all_items = llm_result["items"]
-            extraction_method = "llm_fallback"
-            if llm_result.get("supplier"):
-                result["supplier"] = llm_result["supplier"]
-            if llm_result.get("date"):
-                result["date"] = llm_result["date"]
-            if llm_result.get("currency"):
-                result["currency"] = llm_result["currency"]
+    # Extract items using the router
+    result = await extract_items_async(
+        parse_result,
+        mode=req.extraction_mode,
+        ocr_enabled=req.ocr_enabled,
+    )
     
     return {
         "filename": filepath.name,
-        "extraction_method": extraction_method,
-        "items": all_items,
-        "supplier": result.get("supplier", ""),
-        "date": result.get("date", ""),
-        "currency": result.get("currency", ""),
-        "document_type": result.get("document_type", "unknown"),
-        "warnings": result.get("extraction_warnings", []),
+        "extraction_method": result.extraction_method,
+        "items": result.items,
+        "supplier": result.supplier,
+        "date": result.date,
+        "currency": result.currency,
+        "document_type": result.document_type,
+        "warnings": result.warnings,
+        "llm_warnings": result.llm_warnings,
     }

@@ -115,18 +115,33 @@ async def process_stream(req: ProcessRequest):
     if not filepath or not Path(filepath).exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     
-    # Process file (simplified - full implementation in original main.py)
+    # Process file using the extraction router
     from ..parser import parse_file_with_ocr
-    from ..extract import extract_items
+    from ..extraction import extract_items_async
     
     parse_result = await parse_file_with_ocr(filepath)
-    result = extract_items(parse_result)
+    
+    # Get extraction mode from config
+    from ..utils import load_config
+    cfg = load_config()
+    extraction_mode = cfg.get("extraction_mode", "local_first")
+    
+    result = await extract_items_async(
+        parse_result,
+        mode=extraction_mode,
+        ocr_enabled=req.ocr_enabled,
+    )
     
     return {
         "filename": entry["filename"],
-        "items": result.get("items", []),
-        "supplier": result.get("supplier", ""),
-        "document_type": result.get("document_type", "unknown"),
+        "items": result.items,
+        "supplier": result.supplier,
+        "date": result.date,
+        "currency": result.currency,
+        "document_type": result.document_type,
+        "extraction_method": result.extraction_method,
+        "warnings": result.warnings,
+        "llm_warnings": result.llm_warnings,
     }
 
 

@@ -32,6 +32,7 @@ _CONFIG_DEFAULTS = {
     "llm_fallback_enabled": True,
     "ocr_enabled": True,
     "ocr_fallback_to_llm": True,
+    "extraction_mode": "local_first",  # llm_first | local_first | llm_only | local_only
 }
 
 

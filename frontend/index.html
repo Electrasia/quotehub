@@ -345,6 +345,19 @@
                     </label>
                 </div>
 
+                <div class="settings-field" style="margin-top:16px">
+                    <label>Extraction Mode</label>
+                    <select id="settingsExtractionMode" class="ai-master-only">
+                        <option value="local_first">Local first (fast, no AI cost)</option>
+                        <option value="llm_first">LLM first (best quality, uses AI)</option>
+                        <option value="llm_only">LLM only (no fallback)</option>
+                        <option value="local_only">Local only (no AI)</option>
+                    </select>
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        Controls which extraction method is tried first. LLM produces better results but costs AI credits.
+                    </p>
+                </div>
+
                 <div class="actions">
                     <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
                 </div>
