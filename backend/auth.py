@@ -16,31 +16,19 @@ with warnings.catch_warnings():
 from fastapi import HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-# Import database utilities
+# Import database and config utilities
 from .db import get_db, DB_PATH
+from .utils import load_config
 
 # ─── Paths ────────────────────────────────────────────────
 DATA_DIR = Path(__file__).parent.parent / "data"
 INIT_PASSWORD_FILE = DATA_DIR / "init_password.txt"
-CONFIG_PATH = DATA_DIR.parent / "config.json"   # single source of truth (main.py imports this)
 
 # ─── Session constants ────────────────────────────────────
 SESSION_USER_ID = "user_id"
 
 # ─── App config access (for idle-timeout enforcement) ─────
-# Reads the SAME config.json file as backend/main.py.
-# Path is the single source of truth (CONFIG_PATH above).
 _DEFAULT_IDLE_TIMEOUT_MINUTES = 60
-
-def _read_app_config() -> dict:
-    """Read app config from disk. Returns empty dict on error.
-    Used by get_current_user to enforce idle timeout.
-    Tolerant of partial/missing keys; no schema validation."""
-    try:
-        with open(CONFIG_PATH) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
 
 # ─── Password hashing (bcrypt, cost factor 12) ────────────
 def hash_password(plain: str) -> str:
@@ -157,7 +145,7 @@ def get_current_user(request: Request) -> Optional[dict]:
     if not user_id:
         return None
     # Idle timeout enforcement (configurable; <= 0 = disabled)
-    cfg = _read_app_config()
+    cfg = load_config()
     try:
         timeout_minutes = int(cfg.get("idle_timeout_minutes", _DEFAULT_IDLE_TIMEOUT_MINUTES))
     except (TypeError, ValueError):

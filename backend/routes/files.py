@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from ..auth import require_role
 from ..db import get_db
-from ..utils import load_config
 
 router = APIRouter(tags=["files"])
 

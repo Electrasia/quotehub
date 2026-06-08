@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth
-from .auth import DATA_DIR, SESSION_USER_ID
+from .auth import DATA_DIR
 from .utils import load_config, get_config_data
 from .db import init_db
 

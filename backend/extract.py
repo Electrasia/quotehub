@@ -1190,19 +1190,6 @@ def _detect_currency(text):
     return None
 
 
-def _detect_currency_from_items(items):
-    """Look at the first few items for currency markers in unit_price/total."""
-    for item in items[:5]:
-        for field in ("unit_price", "total", "remark"):
-            v = item.get(field, "")
-            if not v:
-                continue
-            # Check for currency in the original raw cell (we strip in _parse_price)
-            # The text in the item has been normalized, so this won't help much
-            # but we check for context
-    return None
-
-
 def _extract_supplier_from_text(text):
     """Scan page text for a company name.
 

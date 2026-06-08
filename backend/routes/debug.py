@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..auth import require_role
-from ..utils import load_config
 
 router = APIRouter(prefix="/debug", tags=["debug"])
 
