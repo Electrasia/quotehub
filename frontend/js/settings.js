@@ -244,13 +244,6 @@ function updateIdleTimeoutFromConfig(cfg) {
 startIdleDetection();
 
 // ─── System Cleanup (master only) ─────────────────────────
-function formatBytes(bytes) {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-    const k = 1024;
-    const units = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1);
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + units[i];
-}
 
 function previewCleanup() {
     if (!isMaster()) { showBriefPopup('Only Master can run cleanup'); return; }
@@ -514,9 +507,4 @@ function fallbackCopy(text) {
     try { document.execCommand('copy'); showBriefPopup('JSON copied'); }
     catch (e) { showBriefPopup('Copy failed'); }
     document.body.removeChild(ta);
-}
-
-function escapeHtml(s) {
-    if (s == null) return '';
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }

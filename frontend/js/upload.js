@@ -2,20 +2,6 @@
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 
-// ─── Review PDF zoom state ──────────────────────────────────
-let reviewZoom = 1.0;        // 1.0 = 100% = natural pixel size
-let reviewAutoFit = true;    // true when a new file is loaded (fit-width on first image load)
-
-function escapeHtml(s) {
-    if (s == null) return '';
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
 uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
 uploadArea.addEventListener('drop', (e) => {

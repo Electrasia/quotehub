@@ -16,52 +16,6 @@ let popupDurationSec = 3;
 
 // ─── Shared Utilities ────────────────────────────────────────
 
-function showBriefPopup(message) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay active';
-    overlay.innerHTML = `
-        <div class="modal" style="max-width:350px">
-            <p style="font-size:15px;margin:0">${message}</p>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    setTimeout(() => {
-        overlay.classList.remove('active');
-        setTimeout(() => overlay.remove(), 300);
-    }, popupDurationSec * 1000);
-}
-
-function showConfirmPopup(message, onConfirm) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay active';
-    overlay.innerHTML = `
-        <div class="modal" style="max-width:400px">
-            <p style="font-size:15px;margin:0 0 16px 0">${message}</p>
-            <div class="actions" style="justify-content:center">
-                <button class="btn btn-danger btn-sm" id="confirmYes">Yes, Delete</button>
-                <button class="btn btn-secondary btn-sm" id="confirmNo">Cancel</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('#confirmYes').onclick = () => {
-        overlay.remove();
-        onConfirm();
-    };
-    overlay.querySelector('#confirmNo').onclick = () => {
-        overlay.remove();
-    };
-}
-
-function closeModal(id) {
-    document.getElementById(id).classList.remove('active');
-}
-
-function openModal(id) {
-    const el = document.getElementById(id);
-    if (el) el.classList.add('active');
-}
-
 async function loadPopupDuration() {
     try {
         const resp = await fetch('/config');

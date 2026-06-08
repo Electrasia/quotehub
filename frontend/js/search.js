@@ -5,16 +5,6 @@ let sortDir = 'asc'; // asc or desc
 let lastSearchItems = [];
 let searchDebounceTimer = null;
 
-function escapeHtml(s) {
-    if (s == null) return '';
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 function debounceSearch() {
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => searchQuotations(), 300);
