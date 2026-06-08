@@ -192,6 +192,16 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 | `max_retries` | Max retry attempts | `2` |
 | `external_url` | QuoteHub URL for image access | `""` (auto localhost) |
 | `popup_duration` | Success popup duration (seconds) | `3` |
+| `extraction_mode` | How to extract data from PDFs | `local_first` |
+
+### Extraction Modes
+
+| Mode | Description |
+|------|-------------|
+| `local_first` | **Default** — fast rules-based extraction, falls back to LLM if 0 items found |
+| `llm_first` | LLM extraction with local fallback (best quality, slower) |
+| `llm_only` | LLM extraction only (no local fallback) |
+| `local_only` | Rules-based extraction only (no LLM) |
 
 **Note:** `ai_endpoint` and `model` are intentionally empty in the committed `config.json` and `config.example.json`. Configure them in Settings → Server Connection (recommended) or edit your local `config.json` directly.
 
@@ -200,23 +210,42 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 ```
 quotehub/
 ├── backend/
-│   ├── main.py              # FastAPI application
-│   ├── auth.py              # Authentication primitives
+│   ├── main.py              # FastAPI application, middleware, router registration
+│   ├── utils.py             # Shared utilities (load_config, save_config, repair_json_quotes)
+│   ├── db.py                # Database connection manager (get_db context manager)
+│   ├── auth.py              # Authentication (password hashing, user CRUD, sessions)
+│   ├── parser.py            # PDF/XLSX parsing with OCR support
+│   ├── ocr.py               # OCR via pytesseract + vision LLM
+│   ├── extraction/           # Pluggable extraction package
+│   │   ├── __init__.py      # Unified interface (extract_items_async)
+│   │   ├── router.py        # Mode selection (local_first/llm_first/llm_only/local_only)
+│   │   ├── local.py         # Rules-based extractor
+│   │   └── llm.py           # LLM extractor
+│   ├── routes/               # Route modules (split from main.py)
+│   │   ├── __init__.py      # Route registry
+│   │   ├── auth.py          # Login/logout, user management
+│   │   ├── files.py         # Upload, processing, confirm, delete, export/import
+│   │   ├── ai.py            # AI server connection testing
+│   │   ├── admin.py         # Config, cleanup, search, brand suggestions
+│   │   └── debug.py         # Debug workspace, parser comparison, extraction testing
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
 │   ├── index.html           # HTML structure
 │   ├── style.css            # All styles
 │   └── js/
-│       ├── app.js           # Global state, shared utilities, boot
+│       ├── utils.js         # Shared utilities (escapeHtml, formatBytes, popups, modals)
+│       ├── app.js           # Global state and init
 │       ├── auth.js          # Login, logout, password, roles
 │       ├── nav.js           # Navigation (Process / Search / Settings)
-│       ├── upload.js        # File upload, processing, review
+│       ├── upload.js        # File upload & queue management
+│       ├── progress.js      # SSE streaming & progress bars
+│       ├── review.js        # PDF viewer & items table
 │       ├── search.js        # Search, edit, delete, PDF viewer
 │       ├── settings.js      # Settings, AI connection, backup/restore, logs
-│       └── users.js         # User management (master only)
-├── data/                    # Runtime data — NOT in the repo (gitignored). Created at
-│   # build time and persists in the `quodb_data` Docker volume at runtime
-│   ├── quotations.db        # SQLite database
+│       ├── users.js         # User management (master only)
+│       └── debug.js         # Debug workspace
+├── data/                    # Runtime data (gitignored, persists in Docker volume)
+│   ├── quotations.db        # SQLite database with FTS5
 │   ├── archive/             # Archived PDFs
 │   └── temp/                # Temporary uploads
 ├── rules.md/                # UI system rules (layout, UX principles)
@@ -290,6 +319,7 @@ docker-compose up -d
 - **Backend:** Python, FastAPI, SQLite (FTS5), httpx
 - **Frontend:** Vanilla HTML/CSS/JavaScript (no frameworks)
 - **AI:** Any OpenAI-compatible VLM API (LM Studio, vLLM, etc.)
+- **Extraction:** Pluggable package (local rules-based + LLM with fallback)
 - **Container:** Docker with Python 3.11-slim
 
 ## License
