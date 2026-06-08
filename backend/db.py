@@ -92,6 +92,8 @@ def init_db():
         - quotations: Stores extracted quotation data
         - quotations_fts: Full-text search index for fast searching
         - triggers: Keep FTS index in sync with quotations table
+
+    Schema version: 2 (adds currency and extraction_method columns)
     """
     with get_db() as db:
         # Create quotations table
@@ -101,11 +103,17 @@ def init_db():
                 filename TEXT NOT NULL,
                 supplier TEXT,
                 quotation_date TEXT,
+                currency TEXT,
                 items TEXT NOT NULL,
                 document_type TEXT DEFAULT 'unknown',
+                extraction_method TEXT DEFAULT 'local',
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
+
+        # Migration: Add currency and extraction_method columns if missing
+        # (for existing databases created before v0.040.0)
+        _migrate_db(db)
 
         # Create FTS5 virtual table for fast full-text search
         db.execute("""
@@ -113,6 +121,7 @@ def init_db():
                 filename,
                 supplier,
                 items,
+                currency,
                 content='quotations',
                 content_rowid='id'
             )
@@ -123,21 +132,40 @@ def init_db():
         # data is inserted, updated, or deleted from the quotations table.
         db.execute("""
             CREATE TRIGGER IF NOT EXISTS quotations_ai AFTER INSERT ON quotations BEGIN
-                INSERT INTO quotations_fts(rowid, filename, supplier, items)
-                VALUES (new.id, new.filename, new.supplier, new.items);
+                INSERT INTO quotations_fts(rowid, filename, supplier, items, currency)
+                VALUES (new.id, new.filename, new.supplier, new.items, new.currency);
             END
         """)
         db.execute("""
             CREATE TRIGGER IF NOT EXISTS quotations_ad AFTER DELETE ON quotations BEGIN
-                INSERT INTO quotations_fts(quotations_fts, rowid, filename, supplier, items)
-                VALUES ('delete', old.id, old.filename, old.supplier, old.items);
+                INSERT INTO quotations_fts(quotations_fts, rowid, filename, supplier, items, currency)
+                VALUES ('delete', old.id, old.filename, old.supplier, old.items, old.currency);
             END
         """)
         db.execute("""
             CREATE TRIGGER IF NOT EXISTS quotations_au AFTER UPDATE ON quotations BEGIN
-                INSERT INTO quotations_fts(quotations_fts, rowid, filename, supplier, items)
-                VALUES ('delete', old.id, old.filename, old.supplier, old.items);
-                INSERT INTO quotations_fts(rowid, filename, supplier, items)
-                VALUES (new.id, new.filename, new.supplier, new.items);
+                INSERT INTO quotations_fts(quotations_fts, rowid, filename, supplier, items, currency)
+                VALUES ('delete', old.id, old.filename, old.supplier, old.items, old.currency);
+                INSERT INTO quotations_fts(rowid, filename, supplier, items, currency)
+                VALUES (new.id, new.filename, new.supplier, new.items, new.currency);
             END
         """)
+
+
+def _migrate_db(db):
+    """Migrate existing databases to the latest schema.
+    
+    This function adds missing columns to existing tables.
+    It's safe to call multiple times (uses ALTER TABLE IF NOT EXISTS pattern).
+    """
+    # Check if currency column exists
+    cursor = db.execute("PRAGMA table_info(quotations)")
+    columns = [row[1] for row in cursor.fetchall()]
+    
+    if "currency" not in columns:
+        db.execute("ALTER TABLE quotations ADD COLUMN currency TEXT")
+        print("Migration: Added 'currency' column to quotations table")
+    
+    if "extraction_method" not in columns:
+        db.execute("ALTER TABLE quotations ADD COLUMN extraction_method TEXT DEFAULT 'local'")
+        print("Migration: Added 'extraction_method' column to quotations table")

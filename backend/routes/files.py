@@ -159,14 +159,16 @@ async def confirm(req: ConfirmRequest):
     items = data.get("items", [])
     supplier = data.get("supplier", "")
     quotation_date = items[0].get("date", "") if items else ""
+    currency = data.get("currency", "")
     document_type = data.get("document_type", "unknown")
+    extraction_method = data.get("extraction_method", "local")
     
     # Insert into database
     with get_db() as db:
         db.execute(
-            "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO quotations (filename, supplier, quotation_date, currency, items, document_type, extraction_method) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (uploaded_files[req.file_index]["filename"], supplier, quotation_date,
-             json.dumps(items), document_type)
+             currency, json.dumps(items), document_type, extraction_method)
         )
         last_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
     
@@ -233,12 +235,13 @@ async def update(req: UpdateRequest):
     items = data.get("items", [])
     supplier = data.get("supplier", "")
     quotation_date = items[0].get("date", "") if items else ""
+    currency = data.get("currency", "")
     document_type = data.get("document_type", "unknown")
     
     with get_db() as db:
         cur = db.execute(
-            "UPDATE quotations SET supplier=?, quotation_date=?, items=?, document_type=? WHERE id=?",
-            (supplier, quotation_date, json.dumps(items), document_type, req.id)
+            "UPDATE quotations SET supplier=?, quotation_date=?, currency=?, items=?, document_type=? WHERE id=?",
+            (supplier, quotation_date, currency, json.dumps(items), document_type, req.id)
         )
     
     if cur.rowcount == 0:
