@@ -40,7 +40,7 @@ async def get_config():
 async def update_config(config: dict):
     """Update configuration."""
     save_config(config)
-    return {"status": "updated"}
+    return {"status": "saved"}
 
 
 @router.get("/version")
@@ -333,4 +333,4 @@ async def serve_archive(filename: str):
 async def get_logs():
     """Get application logs."""
     from ..main import log_buffer
-    return {"logs": log_buffer[-500:]}  # Last 500 lines
+    return {"logs": list(log_buffer)[-500:]}  # Last 500 lines

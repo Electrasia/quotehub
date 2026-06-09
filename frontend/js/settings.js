@@ -185,8 +185,20 @@ async function downloadLogs() {
     const level = document.getElementById('logLevel').value;
     try {
         const resp = await fetch(`/logs?level=${level}`);
-        const data = await resp.json();
-        const blob = new Blob([data.logs || 'No logs available'], { type: 'text/plain' });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => 'Server error');
+            showBriefPopup('Failed to get logs: ' + text);
+            return;
+        }
+        const contentType = resp.headers.get('content-type') || '';
+        let logs;
+        if (contentType.includes('application/json')) {
+            const data = await resp.json();
+            logs = data.logs || 'No logs available';
+        } else {
+            logs = await resp.text();
+        }
+        const blob = new Blob([logs], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

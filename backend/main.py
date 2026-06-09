@@ -54,6 +54,33 @@ CONFIG = load_config()
 ai_connected = False
 uploaded_files = []
 
+# ─── Log Buffer ───────────────────────────────────────────
+
+import logging
+import collections
+from io import StringIO
+
+log_buffer = collections.deque(maxlen=500)
+
+
+class BufferHandler(logging.Handler):
+    """Logging handler that writes to the log_buffer deque."""
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            log_buffer.append(msg)
+        except Exception:
+            pass
+
+
+# Configure root logger to also write to log_buffer
+_buffer_handler = BufferHandler()
+_buffer_handler.setFormatter(logging.Formatter(
+    '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+))
+logging.getLogger().addHandler(_buffer_handler)
+
 # ─── Directories ──────────────────────────────────────────
 
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "temp"
