@@ -63,8 +63,6 @@ async function saveSettings() {
     const timeoutRaw       = parseInt(document.getElementById('settingsTimeout').value);
     const retriesRaw       = parseInt(document.getElementById('settingsRetries').value);
     const popupDurationRaw = parseInt(document.getElementById('settingsPopupDuration').value);
-    const sessionDaysRaw   = parseInt(document.getElementById('settingsSessionMaxAgeDays').value);
-    const idleTimeoutRaw   = parseInt(document.getElementById('settingsIdleTimeout').value);
     const llmFallbackEnabled = document.getElementById('settingsLlmFallbackEnabled').checked;
     const ocrEnabled = document.getElementById('settingsOcrEnabled').checked;
     const ocrLlmFallback = document.getElementById('settingsOcrLlmFallback').checked;
@@ -74,8 +72,6 @@ async function saveSettings() {
     const timeout           = Number.isFinite(timeoutRaw)         ? timeoutRaw         : 120;
     const retries           = Number.isFinite(retriesRaw)         ? retriesRaw         : 3;
     const popupDuration     = Number.isFinite(popupDurationRaw)   ? popupDurationRaw   : 3;
-    const sessionMaxAgeDays = Number.isFinite(sessionDaysRaw)     ? sessionDaysRaw     : 14;
-    const idleTimeout       = Number.isFinite(idleTimeoutRaw)     ? idleTimeoutRaw     : 60;
 
     if (!endpoint) { showBriefPopup('AI endpoint URL is required'); return; }
     if (!model) { showBriefPopup('Model name is required'); return; }
@@ -91,8 +87,6 @@ async function saveSettings() {
                 timeout: timeout,
                 max_retries: retries,
                 popup_duration: popupDuration,
-                session_max_age: sessionMaxAgeDays * 86400,
-                idle_timeout_minutes: idleTimeout,
                 llm_fallback_enabled: llmFallbackEnabled,
                 ocr_enabled: ocrEnabled,
                 ocr_fallback_to_llm: ocrLlmFallback,
@@ -102,9 +96,7 @@ async function saveSettings() {
         const result = await resp.json();
         if (result.status === 'saved') {
             popupDurationSec = popupDuration;
-            // Hot-apply idle-timeout to front-end detector (no restart needed)
-            updateIdleTimeoutFromConfig(result.config);
-            showBriefPopup('Settings saved! Restart the app for Session Duration changes.');
+            showBriefPopup('Settings saved!');
         }
     } catch (e) {
         showBriefPopup('Failed to save settings: ' + e.message);
@@ -210,7 +202,7 @@ async function downloadLogs() {
 }
 
 // ─── Idle detection (UX improvement; backend is source of truth) ─
-let idleTimeoutMs = 60 * 60 * 1000;  // default 60 min; updated from config
+let idleTimeoutMs = 15 * 60 * 1000;  // default 15 min; updated from config
 let idleTimer = null;
 
 function resetIdleTimer() {

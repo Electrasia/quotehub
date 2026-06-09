@@ -239,6 +239,7 @@ def require_role(*allowed_roles: str):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    remember_me: bool = False
 
 class ChangePasswordRequest(BaseModel):
     old_password: str

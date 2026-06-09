@@ -97,7 +97,6 @@ function applyAdminSettingsLock() {
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
         'settingsLlmFallbackEnabled',
         'settingsOcrEnabled', 'settingsOcrLlmFallback',
-        'settingsSessionMaxAgeDays', 'settingsIdleTimeout',
     ];
     inputs.forEach(id => {
         const el = document.getElementById(id);
@@ -115,17 +114,12 @@ function applyAdminSettingsLock() {
         if (isAdmin) saveBtn.title = 'Only Master can change AI settings';
         else saveBtn.removeAttribute('title');
     }
-    const sessionSaveBtn = document.getElementById('saveSessionSettingsBtn');
-    if (sessionSaveBtn) {
-        sessionSaveBtn.disabled = isAdmin;
-        if (isAdmin) sessionSaveBtn.title = 'Only Master can change Session settings';
-        else sessionSaveBtn.removeAttribute('title');
-    }
 }
 
 async function doLogin() {
     const u = document.getElementById('loginUsername').value.trim();
     const p = document.getElementById('loginPassword').value;
+    const rememberMe = document.getElementById('rememberMe').checked;
     if (!u || !p) return;
     const btn = document.getElementById('loginSubmitBtn');
     btn.disabled = true;
@@ -136,7 +130,7 @@ async function doLogin() {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: u, password: p }),
+            body: JSON.stringify({ username: u, password: p, remember_me: rememberMe }),
         });
         if (r.ok) {
             const data = await r.json();

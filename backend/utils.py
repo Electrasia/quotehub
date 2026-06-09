@@ -28,7 +28,7 @@ _CONFIG_DEFAULTS = {
     "external_url": "",
     "popup_duration": 3,
     "session_max_age": 60,
-    "idle_timeout_minutes": 30,
+    "idle_timeout_minutes": 15,
     "llm_fallback_enabled": True,
     "ocr_enabled": True,
     "ocr_fallback_to_llm": True,
