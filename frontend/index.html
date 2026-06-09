@@ -174,11 +174,10 @@
                 <div class="review-layout">
                     <!-- PDF viewer on the left -->
                     <div class="review-pdf" id="reviewPdf">
-                        <div class="zoom-toolbar" style="margin-top:12px;display:flex;justify-content:center;gap:8px;align-items:center;flex-wrap:wrap">
+                        <div class="zoom-toolbar" style="display:flex;justify-content:center;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:12px">
                             <button class="btn btn-sm btn-secondary" onclick="reviewZoomOut()" title="Zoom out">−</button>
                             <span id="reviewZoomInfo" style="min-width:50px;text-align:center;font-size:13px">100%</span>
                             <button class="btn btn-sm btn-secondary" onclick="reviewZoomIn()" title="Zoom in">+</button>
-                            <button class="btn btn-sm btn-secondary" onclick="reviewZoomReset()" title="Reset to 100% (natural size)">100%</button>
                             <button class="btn btn-sm btn-secondary" onclick="reviewFitWidth()" title="Fit image to container width">Fit</button>
                             <button class="btn btn-sm btn-secondary" onclick="reviewOpenNewWindow()" title="Open PDF in new browser window">↗ New Window</button>
                         </div>
@@ -218,18 +217,6 @@
 
                             <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
 
-                            <!-- Bulk apply: Brand -->
-                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
-                                <span style="font-size:13px;color:#666;font-weight:500">Brand:</span>
-                                <input type="text" id="bulkBrandInput" placeholder="Bulk value..."
-                                       oninput="updateBulkCount(1, 'bulkCount')"
-                                       style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
-                                <button class="btn btn-sm btn-primary"
-                                        onclick="bulkApplyColumn(1, 'bulkBrandInput', 'bulkCount')"
-                                        title="Apply value to empty Brand cells only">Apply</button>
-                                <span style="font-size:13px;color:#666">(<span id="bulkCount" title="Empty Brand cells in table">0</span> empty)</span>
-                            </div>
-
                             <div style="overflow-x:auto">
                                 <table>
                                     <thead>
@@ -238,7 +225,6 @@
                                             <th>Brand</th>
                                             <th>Model</th>
                                             <th>Description</th>
-                                            <th>Date</th>
                                             <th>Currency</th>
                                             <th class="price-cell">Unit Price</th>
                                             <th class="price-cell">Total Qty</th>

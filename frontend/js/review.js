@@ -36,7 +36,6 @@ function showReview(filename) {
     tbody.innerHTML = '';
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
-    updateBulkCount(0, 'bulkCount');
     reviewAutoFit = true;
     updateReviewPdf();
     goToStep(4);
@@ -213,6 +212,34 @@ function renumberRows() {
 }
 
 /**
+ * Format a value as a price with thousands separator and 2 decimal places.
+ * Example: 1346265 → "1,346,265.00", 45.5 → "45.50"
+ *
+ * @param {*} val — Raw value from item data
+ * @returns {string} Formatted price string or empty
+ */
+function formatPrice(val) {
+    if (val === undefined || val === null || val === '') return '';
+    const num = parseFloat(String(val).replace(/,/g, ''));
+    if (isNaN(num)) return '';
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * Format a quantity value with thousands separator (no decimals).
+ * Example: 1346265 → "1,346,265", 45 → "45"
+ *
+ * @param {*} val — Raw value from item data
+ * @returns {string} Formatted quantity string or empty
+ */
+function formatQuantity(val) {
+    if (val === undefined || val === null || val === '') return '';
+    const num = parseFloat(String(val).replace(/,/g, ''));
+    if (isNaN(num)) return '';
+    return num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+/**
  * Add a new row to the items table.
  *
  * @param {Object} [item={}] — Item data to populate the row (brand, model, etc.)
@@ -223,8 +250,6 @@ function addRow(item = {}) {
     const rowNumber = tbody.querySelectorAll('tr').length + 1;
     // Use item-level currency, fallback to document-level
     const currency = item.currency || extractedData?.currency || '';
-    // Use item-level date, fallback to document-level
-    const date = item.date || extractedData?.date || '';
     tr.innerHTML = `
         <td class="row-number">${rowNumber}</td>
         <td>
@@ -238,17 +263,19 @@ function addRow(item = {}) {
         <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"
                    oninput="onModelInput(this)"></td>
         <td><input type="text" value="${escapeHtml(item.description || '')}" placeholder="Description"></td>
-        <td><input type="text" value="${escapeHtml(date)}" placeholder="YYYY-MM-DD" style="width:100px"></td>
-        <td><input type="text" value="${escapeHtml(currency)}" placeholder="Currency" style="width:70px"></td>
-        <td><input type="text" class="price-input text-right" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
-        <td><input type="text" class="text-right" value="${escapeHtml(item.quantity || '')}" placeholder="0"></td>
-        <td><input type="text" class="price-input text-right" value="${escapeHtml(item.total || '')}" placeholder="0.00"></td>
-        <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount(); renumberRows(); updateBulkCount(1, 'bulkCount')">✕</button></td>
+        <td><input type="text" value="${escapeHtml(currency)}" placeholder="Currency" style="width:50px;max-width:50px"></td>
+        <td><input type="text" class="price-input text-right" value="${escapeHtml(formatPrice(item.unit_price || item.price))}" placeholder="0.00"
+                   onblur="this.value=formatPrice(this.value)"></td>
+        <td><input type="text" class="text-right" value="${escapeHtml(formatQuantity(item.quantity))}" placeholder="0"
+                   style="width:60px;max-width:60px"
+                   onblur="this.value=formatQuantity(this.value)"></td>
+        <td><input type="text" class="price-input text-right" value="${escapeHtml(formatPrice(item.total))}" placeholder="0.00"
+                   onblur="this.value=formatPrice(this.value)"></td>
+        <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove(); updateItemCount(); renumberRows()">✕</button></td>
     `;
     tbody.appendChild(tr);
     updateItemCount();
     renumberRows();
-    updateBulkCount(1, 'bulkCount');
 }
 
 // ─── Brand Suggestion (per-row) ────────────────────────────
@@ -384,17 +411,16 @@ function findAndReplace() {
     let count = 0;
     const rows = document.querySelectorAll('#itemsTable tr');
     rows.forEach(row => {
-        row.querySelectorAll('input, textarea').forEach(el => {
+        row.querySelectorAll('input').forEach(el => {
+            // Search in value
             let val = el.value;
             let searchVal = find;
             let replaceVal = replace;
             if (!caseSensitive) {
                 const idx = val.toLowerCase().indexOf(searchVal.toLowerCase());
                 if (idx !== -1) {
-                    // Rebuild with correct case from original
                     el.value = val.substring(0, idx) + replaceVal + val.substring(idx + searchVal.length);
                     count++;
-                    // Continue replacing remaining occurrences
                     let remaining = el.value;
                     let offset = idx + replaceVal.length;
                     while (offset < remaining.length) {
@@ -417,6 +443,15 @@ function findAndReplace() {
                     count++;
                 }
             }
+            // Search in placeholder — if match, set value to replace text
+            const ph = el.placeholder || '';
+            const phMatch = caseSensitive
+                ? ph.includes(find)
+                : ph.toLowerCase().includes(find.toLowerCase());
+            if (phMatch && !el.value.trim()) {
+                el.value = replace;
+                count++;
+            }
         });
     });
     showBriefPopup(count > 0 ? `Replaced ${count} occurrence(s).` : 'No matches found.');
@@ -434,16 +469,15 @@ function getEditedData() {
     const items = [];
     rows.forEach(row => {
         const inputs = row.querySelectorAll('input');
-        // Column order: #(rowNum), Brand, Model, Description, Date, Currency, UnitPrice, TotalQty, TotalPrice
+        // Column order: #(rowNum), Brand, Model, Description, Currency, UnitPrice, TotalQty, TotalPrice
         items.push({
             brand: inputs[1].value,
             model: inputs[2].value,
             description: inputs[3].value,
-            date: inputs[4].value,
-            currency: inputs[5].value,
-            unit_price: inputs[6].value,
-            quantity: inputs[7].value,
-            total: inputs[8].value
+            currency: inputs[4].value,
+            unit_price: inputs[5].value,
+            quantity: inputs[6].value,
+            total: inputs[7].value
         });
     });
     return {
