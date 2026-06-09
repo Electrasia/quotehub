@@ -277,11 +277,27 @@
 
         <!-- ═══════════════ SETTINGS VIEW ═══════════════ -->
         <div id="settingsView" class="hidden">
-            <!-- AI Connection Section -->
-            <div class="settings-card ai-connection-section ai-admin-master">
-                <h3>🔌 AI Settings</h3>
+            <!-- General Settings -->
+            <div class="settings-card ai-admin-master">
+                <h3>⚙️ General</h3>
+                <div class="settings-field">
+                    <label>Popup duration (seconds)</label>
+                    <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10">
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        How long success/error popups stay visible across the app.
+                    </p>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                </div>
+            </div>
 
-                <h4>Server Configuration</h4>
+            <!-- LLM Setup -->
+            <div class="settings-card ai-admin-master">
+                <h3>🔌 LLM Setup</h3>
+                <p style="font-size:12px;color:#666;margin:0 0 12px 0">
+                    Connection settings for the AI language model used for extraction and OCR.
+                </p>
                 <div class="settings-field">
                     <label>AI Endpoint URL</label>
                     <input type="text" id="settingsEndpoint" class="ai-master-only" placeholder="http://192.168.0.196:1234/v1/chat/completions">
@@ -302,25 +318,28 @@
                     <label>Max Retries</label>
                     <input type="number" id="settingsRetries" class="ai-master-only" value="3" min="1" max="10">
                 </div>
+                <div class="actions">
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn2" onclick="saveSettings()">Save Settings</button>
+                </div>
+            </div>
+
+            <!-- Extraction Preferences -->
+            <div class="settings-card ai-admin-master">
+                <h3>📦 Extraction Preferences</h3>
                 <div class="settings-field">
-                    <label>Success popup duration (seconds)</label>
-                    <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10">
+                    <label>Extraction Mode</label>
+                    <select id="settingsExtractionMode" class="ai-master-only">
+                        <option value="local_first">Local first (fast, no AI cost)</option>
+                        <option value="llm_first">LLM first (best quality, uses AI)</option>
+                        <option value="llm_only">LLM only (no fallback)</option>
+                        <option value="local_only">Local only (no AI)</option>
+                    </select>
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        Controls which extraction method is tried first. LLM produces better results but costs AI credits.
+                    </p>
                 </div>
 
-                <h4 style="margin-top:18px">Extraction Fallback (v0.037.0+)</h4>
-                <p style="font-size:12px;color:#666;margin:0 0 8px 0">
-                    When the local rules-based extractor returns 0 items, the LLM can be
-                    called as a fallback. The LLM is also usable per-file in the Debug
-                    Workspace regardless of this setting.
-                </p>
-                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
-                    <input type="checkbox" id="settingsLlmFallbackEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px">
-                    <label for="settingsLlmFallbackEnabled" style="cursor:pointer;margin:0">
-                        Use LLM fallback when local returns 0 items
-                    </label>
-                </div>
-
-                <h3 style="margin:18px 0 4px 0;font-size:14px">OCR (scanned PDFs)</h3>
+                <h4 style="margin-top:18px">OCR (scanned PDFs)</h4>
                 <p style="font-size:12px;color:#666;margin:0 0 8px 0">
                     Scanned/image-only PDFs have no text for the local extractor to read.
                     Enable OCR to run pytesseract on each page. If tesseract's quality
@@ -339,22 +358,8 @@
                         Use vision LLM as fallback when OCR quality is low
                     </label>
                 </div>
-
-                <div class="settings-field" style="margin-top:16px">
-                    <label>Extraction Mode</label>
-                    <select id="settingsExtractionMode" class="ai-master-only">
-                        <option value="local_first">Local first (fast, no AI cost)</option>
-                        <option value="llm_first">LLM first (best quality, uses AI)</option>
-                        <option value="llm_only">LLM only (no fallback)</option>
-                        <option value="local_only">Local only (no AI)</option>
-                    </select>
-                    <p style="font-size:12px;color:#888;margin-top:4px">
-                        Controls which extraction method is tried first. LLM produces better results but costs AI credits.
-                    </p>
-                </div>
-
                 <div class="actions">
-                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn3" onclick="saveSettings()">Save Settings</button>
                 </div>
             </div>
 

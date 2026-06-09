@@ -155,14 +155,12 @@ class ExtractionResult:
 async def extract_items_async(
     parse_result: dict,
     mode: str = "llm_first",
-    ocr_enabled: bool = True,
 ) -> ExtractionResult:
     """Extract items from a parse result using the specified mode.
     
     Args:
         parse_result: Output from parse_file_with_ocr()
         mode: Extraction mode (llm_first/local_first/llm_only/local_only)
-        ocr_enabled: Whether OCR was enabled during parsing
         
     Returns:
         ExtractionResult with extracted items and metadata

@@ -95,7 +95,6 @@ function applyAdminSettingsLock() {
     const inputs = [
         'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
-        'settingsLlmFallbackEnabled',
         'settingsOcrEnabled', 'settingsOcrLlmFallback',
     ];
     inputs.forEach(id => {
@@ -108,12 +107,15 @@ function applyAdminSettingsLock() {
             el.removeAttribute('title');
         }
     });
-    const saveBtn = document.getElementById('saveSettingsBtn');
-    if (saveBtn) {
-        saveBtn.disabled = isAdmin;
-        if (isAdmin) saveBtn.title = 'Only Master can change AI settings';
-        else saveBtn.removeAttribute('title');
-    }
+    // Handle all save buttons
+    ['saveSettingsBtn', 'saveSettingsBtn2', 'saveSettingsBtn3'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.disabled = isAdmin;
+            if (isAdmin) btn.title = 'Only Master can change AI settings';
+            else btn.removeAttribute('title');
+        }
+    });
 }
 
 async function doLogin() {

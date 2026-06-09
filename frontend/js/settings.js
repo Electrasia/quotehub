@@ -63,7 +63,6 @@ async function saveSettings() {
     const timeoutRaw       = parseInt(document.getElementById('settingsTimeout').value);
     const retriesRaw       = parseInt(document.getElementById('settingsRetries').value);
     const popupDurationRaw = parseInt(document.getElementById('settingsPopupDuration').value);
-    const llmFallbackEnabled = document.getElementById('settingsLlmFallbackEnabled').checked;
     const ocrEnabled = document.getElementById('settingsOcrEnabled').checked;
     const ocrLlmFallback = document.getElementById('settingsOcrLlmFallback').checked;
     const extractionMode = document.getElementById('settingsExtractionMode').value;
@@ -87,7 +86,6 @@ async function saveSettings() {
                 timeout: timeout,
                 max_retries: retries,
                 popup_duration: popupDuration,
-                llm_fallback_enabled: llmFallbackEnabled,
                 ocr_enabled: ocrEnabled,
                 ocr_fallback_to_llm: ocrLlmFallback,
                 extraction_mode: extractionMode,

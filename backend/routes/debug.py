@@ -111,7 +111,6 @@ async def debug_extract(req: DebugExtractRequest):
     result = await extract_items_async(
         parse_result,
         mode=req.extraction_mode,
-        ocr_enabled=req.ocr_enabled,
     )
     
     return {

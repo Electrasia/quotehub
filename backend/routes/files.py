@@ -184,8 +184,6 @@ class ProcessRequest(BaseModel):
     file_index: int | None = None
     model_source: str = "auto"
     use_llm_fallback: bool = False
-    ocr_enabled: bool = True
-    use_ocr_llm_fallback: bool = True
 
 
 class ConfirmRequest(BaseModel):
@@ -373,7 +371,6 @@ async def process_stream(req: ProcessRequest):
             result = await extract_items_async(
                 parse_result,
                 mode=extraction_mode,
-                ocr_enabled=req.ocr_enabled,
             )
         except Exception as e:
             yield send({"type": "error", "message": f"Extraction failed: {e}"})

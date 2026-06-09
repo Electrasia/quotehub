@@ -46,14 +46,13 @@ async def login(req: LoginRequest, request: Request, response: Response):
     record_login(user["id"])
     
     # If "Remember Me" is checked, keep session for 14 days (default max_age).
-    # If not checked, set cookie to expire on browser close (max_age=0).
+    # If not checked, set a session cookie (no max_age = expires on browser close).
     if not req.remember_me:
         # Override the session cookie to be a session cookie (expires on browser close)
         session_cookie_name = request.session.cookie.key
         response.set_cookie(
             key=session_cookie_name,
             value=request.session.cookie.value,
-            max_age=0,
             httponly=True,
             samesite="lax",
         )
