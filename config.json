@@ -1,8 +1,0 @@
-{
-  "ai_endpoint": "http://202.86.142.98:5000/v1/chat/completions",
-  "model": "qwen/qwen3-vl-4b",
-  "timeout": 90,
-  "max_retries": 2,
-  "external_url": "",
-  "popup_duration": 3
-}
