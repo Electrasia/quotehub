@@ -58,6 +58,7 @@ uploaded_files = []
 
 import logging
 import collections
+import sys
 from io import StringIO
 
 log_buffer = collections.deque(maxlen=500)
@@ -79,7 +80,30 @@ _buffer_handler.setFormatter(logging.Formatter(
     '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 ))
-logging.getLogger().addHandler(_buffer_handler)
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+_root_logger.addHandler(_buffer_handler)
+
+
+class PrintToLogger:
+    """Intercept print() and route through logging."""
+    def __init__(self, logger, level=logging.INFO):
+        self.logger = logger
+        self.level = level
+        self._stdout = sys.stdout
+
+    def write(self, message):
+        message = message.strip()
+        if message:
+            self.logger.log(self.level, message)
+        self._stdout.write(message + '\n')
+
+    def flush(self):
+        self._stdout.flush()
+
+
+# Redirect print() to logging so existing print() calls are captured
+sys.stdout = PrintToLogger(_root_logger, logging.INFO)
 
 # ─── Directories ──────────────────────────────────────────
 
