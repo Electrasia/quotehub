@@ -27,7 +27,7 @@ _CONFIG_DEFAULTS = {
     "max_retries": 2,
     "external_url": "",
     "popup_duration": 3,
-    "session_max_age": 60,
+    "session_max_age": 14 * 24 * 60 * 60,  # 14 days; custom middleware handles "Remember Me" cookie
     "idle_timeout_minutes": 15,
     "ocr_enabled": True,
     "ocr_fallback_to_llm": True,
@@ -55,16 +55,18 @@ def load_config():
 def save_config(cfg):
     """Write configuration to config.json.
 
+    Merges incoming config with existing config and defaults to preserve
+    keys that weren't sent by the frontend.
+
     Args:
         cfg (dict): Configuration dictionary to save.
-
-    Example:
-        >>> cfg = load_config()
-        >>> cfg["ai_endpoint"] = "http://new-server:1234/v1/..."
-        >>> save_config(cfg)
     """
+    # Load existing config to preserve any keys not in the incoming dict
+    existing = load_config()
+    # Merge: incoming values override existing, existing preserves missing keys
+    merged = {**existing, **cfg}
     with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=2)
+        json.dump(merged, f, indent=2)
 
 
 def get_config_data():

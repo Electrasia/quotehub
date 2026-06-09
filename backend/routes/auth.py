@@ -9,7 +9,7 @@ This module handles:
     - Initial password setup
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth import (
     require_role, LoginRequest, ChangePasswordRequest,
@@ -34,7 +34,7 @@ init_password_router = APIRouter(prefix="/init-password", tags=["init-password"]
 # ─── Authentication ────────────────────────────────────────
 
 @router.post("/login")
-async def login(req: LoginRequest, request: Request, response: Response):
+async def login(req: LoginRequest, request: Request):
     """Authenticate user and create session."""
     user = get_user_by_username(req.username)
     if not user or not verify_password(req.password, user["password_hash"]):
@@ -42,20 +42,13 @@ async def login(req: LoginRequest, request: Request, response: Response):
     if not user.get("active"):
         raise HTTPException(status_code=403, detail="Account is disabled")
     
-    request.session[SESSION_USER_ID] = user["id"]
-    record_login(user["id"])
+    # Clear any existing session data (prevents session fixation)
+    request.session.clear()
     
-    # If "Remember Me" is checked, keep session for 14 days (default max_age).
-    # If not checked, set a session cookie (no max_age = expires on browser close).
-    if not req.remember_me:
-        # Override the session cookie to be a session cookie (expires on browser close)
-        session_cookie_name = request.session.cookie.key
-        response.set_cookie(
-            key=session_cookie_name,
-            value=request.session.cookie.value,
-            httponly=True,
-            samesite="lax",
-        )
+    # Set session data
+    request.session[SESSION_USER_ID] = user["id"]
+    request.session["remember_me"] = req.remember_me
+    record_login(user["id"])
     
     return {
         "id": user["id"],

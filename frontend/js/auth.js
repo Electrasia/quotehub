@@ -223,6 +223,8 @@ async function doLogout() {
     currentFileIndex = null;
     isConnected = false;
     updateConnectionUI();
+    // Reset Remember Me checkbox
+    document.getElementById('rememberMe').checked = false;
     goToStep(1);
     showLogin();
 }

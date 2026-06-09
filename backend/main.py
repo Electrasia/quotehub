@@ -162,8 +162,10 @@ app.add_middleware(
     session_cookie="quotahub_session",
     same_site="lax",
     https_only=False,
-    max_age=get_config_data().get("session_max_age", 14 * 24 * 60 * 60),
+    max_age=14 * 24 * 60 * 60,  # 14 days for signature validation
 )
+from .middleware import SessionCookieMiddleware
+app.add_middleware(SessionCookieMiddleware)
 
 # ─── Register Routes ──────────────────────────────────────
 
