@@ -433,10 +433,10 @@ async def confirm(req: ConfirmRequest):
     data = req.data
     items = data.get("items", [])
     supplier = data.get("supplier", "")
-    quotation_date = items[0].get("date", "") if items else ""
-    currency = data.get("currency", "")
+    quotation_date = data.get("date", "")
+    currency = items[0].get("currency", "") if items else ""
     document_type = data.get("document_type", "unknown")
-    extraction_method = data.get("extraction_method", "local")
+    extraction_method = data.get("extraction_method", "llm_first")
     
     # Insert into database
     with get_db() as db:

@@ -469,15 +469,15 @@ function getEditedData() {
     const items = [];
     rows.forEach(row => {
         const inputs = row.querySelectorAll('input');
-        // Column order: #(rowNum), Brand, Model, Description, Currency, UnitPrice, TotalQty, TotalPrice
+        // Column order: Brand[0], Model[1], Description[2], Currency[3], UnitPrice[4], TotalQty[5], TotalPrice[6]
         items.push({
-            brand: inputs[1].value,
-            model: inputs[2].value,
-            description: inputs[3].value,
-            currency: inputs[4].value,
-            unit_price: inputs[5].value,
-            quantity: inputs[6].value,
-            total: inputs[7].value
+            brand: inputs[0].value,
+            model: inputs[1].value,
+            description: inputs[2].value,
+            currency: inputs[3].value,
+            unit_price: inputs[4].value,
+            quantity: inputs[5].value,
+            total: inputs[6].value
         });
     });
     return {
@@ -492,27 +492,32 @@ function getEditedData() {
  * Save the edited data to the backend.
  */
 async function confirmSave() {
-    const data = getEditedData();
-    const resp = await fetch('/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: currentFileIndex, data: data })
-    });
-    const result = await resp.json();
-    if (result.status === 'saved') {
-        // Update frontend status
-        const fileIdx = uploadedFiles.findIndex(f => f.file_id === currentFileIndex);
-        if (fileIdx !== -1) {
-            uploadedFiles[fileIdx].status = 'saved';
-            renderFileList();
+    try {
+        const data = getEditedData();
+        data.extraction_method = 'llm_first';
+        const resp = await fetch('/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: currentFileIndex, data: data })
+        });
+        const result = await resp.json();
+        if (result.status === 'saved') {
+            // Update frontend status
+            const fileIdx = uploadedFiles.findIndex(f => f.file_id === currentFileIndex);
+            if (fileIdx !== -1) {
+                uploadedFiles[fileIdx].status = 'saved';
+                renderFileList();
+            }
+            showBriefPopup('Saved successfully!');
+            setTimeout(async () => {
+                await backToUpload();
+                autoProcessNext();
+            }, popupDurationSec * 1000);
+        } else {
+            showBriefPopup('Save failed: ' + (result.error || 'Unknown error'));
         }
-        showBriefPopup('Saved successfully!');
-        setTimeout(async () => {
-            await backToUpload();
-            autoProcessNext();
-        }, popupDurationSec * 1000);
-    } else {
-        showBriefPopup('Save failed: ' + result.error);
+    } catch (e) {
+        showBriefPopup('Save failed: ' + e.message);
     }
 }
 

@@ -105,7 +105,7 @@ function renderSearchResults() {
             { html: escapeHtml(item.description || ''), style: 'word-wrap:break-word;max-width:300px' },
             { text: item.currency, className: 'nowrap-cell' },
             { text: item.unit_price || item.price, className: 'text-right nowrap-cell' },
-            { text: item.date, className: 'text-right nowrap-cell' },
+            { text: item._date || item.date, className: 'text-right nowrap-cell' },
             { html: escapeHtml(item.supplier || item._supplier || ''), style: 'word-wrap:break-word;max-width:150px' },
         ];
         return `<tr data-filename="${fn}" style="cursor:pointer" title="Double-click to view PDF">` +
@@ -184,7 +184,11 @@ async function editSelected() {
     updateEditDocumentTypeWarning();
     const tbody = document.getElementById('editItemsTable');
     tbody.innerHTML = '';
-    (quotation.items || []).forEach(item => editAddRow(item));
+    const qDate = quotation.quotation_date || '';
+    (quotation.items || []).forEach(item => {
+        if (!item.date && qDate) item.date = qDate;
+        editAddRow(item);
+    });
     document.getElementById('editModal').classList.add('active');
 }
 
@@ -240,11 +244,11 @@ function editAddRow(item = {}) {
     tr.innerHTML = `
         <td><input type="text" value="${escapeHtml(item.brand || '')}" placeholder="Brand"></td>
         <td><input type="text" value="${escapeHtml(item.model || '')}" placeholder="Model"></td>
-        <td><textarea placeholder="Description" rows="2" style="width:100%;resize:vertical">${escapeHtml(item.description || '')}</textarea></td>
-        <td><input type="text" class="price-input" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
-        <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD"></td>
+        <td><input type="text" value="${escapeHtml(item.description || '')}" placeholder="Description"></td>
+        <td><input type="text" class="price-input text-right" value="${escapeHtml(item.unit_price || item.price || '')}" placeholder="0.00"></td>
+        <td><input type="text" class="text-right" value="${escapeHtml(item.date || '')}" placeholder="YYYY-MM-DD" style="width:90px"></td>
         <td><input type="text" value="${escapeHtml(supplierVal)}" placeholder="Supplier"></td>
-        <td><input type="text" value="${escapeHtml(item.currency || '')}" placeholder="Currency"></td>
+        <td><input type="text" value="${escapeHtml(item.currency || '')}" placeholder="Currency" style="width:50px;max-width:50px"></td>
         <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">✕</button></td>
     `;
     tbody.appendChild(tr);
