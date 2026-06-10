@@ -192,14 +192,14 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 | `max_retries` | Max retry attempts | `2` |
 | `external_url` | QuoteHub URL for image access | `""` (auto localhost) |
 | `popup_duration` | Success popup duration (seconds) | `3` |
-| `extraction_mode` | How to extract data from PDFs | `local_first` |
+| `extraction_mode` | How to extract data from PDFs | `llm_first` |
 
 ### Extraction Modes
 
 | Mode | Description |
 |------|-------------|
-| `local_first` | **Default** — fast rules-based extraction, falls back to LLM if 0 items found |
-| `llm_first` | LLM extraction with local fallback (best quality, slower) |
+| `llm_first` | **Default** — LLM extraction with local fallback (best quality, slower) |
+| `local_first` | Fast rules-based extraction, falls back to LLM if 0 items found |
 | `llm_only` | LLM extraction only (no local fallback) |
 | `local_only` | Rules-based extraction only (no LLM) |
 
