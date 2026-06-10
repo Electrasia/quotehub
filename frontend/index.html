@@ -487,28 +487,6 @@
                 </div>
             </div>
 
-            <!-- Developer Tools / Debug Parse (master only) — v0.037.0 Phase 1 -->
-            <div class="settings-card debug-parse-section ai-master-only">
-                <h3>🔧 Developer Tools</h3>
-                <p style="font-size:13px;color:#666;margin-bottom:12px">
-                    Read-only inspection of an uploaded PDF using local parsers
-                    (pdfplumber + PyMuPDF). Does <strong>not</strong> call the AI,
-                    does <strong>not</strong> save anything. Used to validate parser
-                    quality before the new pipeline is wired in.
-                </p>
-                <div class="settings-field" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <label style="margin:0">File index:</label>
-                    <input type="number" id="debugParseIndex" value="0" min="0" style="width:80px">
-                    <button class="btn btn-primary" id="debugParseBtn" onclick="runDebugParse()">Parse PDF (debug)</button>
-                    <button class="btn btn-secondary" onclick="showDebug()">Open Debug Workspace →</button>
-                    <span id="debugParseStatus" style="font-size:12px;color:#666"></span>
-                </div>
-                <p style="font-size:12px;color:#888;margin-top:8px;margin-bottom:0">
-                    Tip: the <strong>Debug Workspace</strong> shows all uploaded files with
-                    side-by-side parser output and a format-for-LLM preview.
-                </p>
-            </div>
-
             <!-- Users Management Section (master only) -->
             <div class="settings-card users-management-section">
                 <h3>👥 Users Management</h3>
@@ -634,103 +612,6 @@
                     <li>Fabio Monteiro — <a href="mailto:fabio@electrasia.com">fabio@electrasia.com</a></li>
                     <li>Antonio Ferrao — <a href="mailto:ajferrao@electrasia.com">ajferrao@electrasia.com</a></li>
                 </ul>
-            </div>
-        </div>
-
-        <!-- ═══════════════ DEBUG WORKSPACE (Phase 2 of v0.037.0, master only) ═══════════════ -->
-        <div id="debugView" class="hidden">
-            <h2 style="margin-bottom:8px">🔧 Debug Workspace <span style="font-size:12px;color:#888;font-weight:400">(master only · v0.037.0)</span></h2>
-            <p style="font-size:13px;color:#666;margin-bottom:16px">Inspect how local PDF parsers see a file before wiring them into the main processing flow. Read-only — does not call the LLM and does not save anything.</p>
-
-            <div style="display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start">
-                <!-- File picker (left) -->
-                <div class="settings-card" style="padding:12px;max-height:80vh;overflow-y:auto">
-                    <h3 style="margin-top:0">📁 Uploaded Files</h3>
-                    <div id="debugFileList" style="font-size:13px">
-                        <p style="color:#999;margin:8px 0">Loading…</p>
-                    </div>
-                    <button class="btn btn-sm btn-secondary" onclick="loadDebugFiles()" style="margin-top:8px;width:100%">Refresh</button>
-                </div>
-
-                <!-- Comparison (right) -->
-                <div style="display:flex;flex-direction:column;gap:12px">
-                    <!-- File metadata bar -->
-                    <div id="debugFileMeta" class="settings-card" style="padding:12px">
-                        <p style="color:#999;margin:0">Select a file from the list to inspect.</p>
-                    </div>
-
-                    <!-- Page selector (only shown when a file is selected) -->
-                    <div id="debugPageNav" class="settings-card hidden" style="padding:10px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                        <button class="btn btn-sm btn-secondary" onclick="debugPrevPage()">◀ Prev</button>
-                        <span id="debugPageLabel" style="font-size:13px;font-weight:600">Page 1 of 1</span>
-                        <button class="btn btn-sm btn-secondary" onclick="debugNextPage()">Next ▶</button>
-                        <span style="flex:1"></span>
-                        <button class="btn btn-sm btn-primary" onclick="openDebugParseModal()">Open Debug Modal</button>
-                    </div>
-
-                    <!-- 3-column comparison -->
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-                        <!-- Column 1: pdfplumber text -->
-                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
-                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
-                                📄 pdfplumber text
-                                <span id="debugPpChars" style="float:right;color:#888;font-weight:400">—</span>
-                            </div>
-                            <pre id="debugPpText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
-                        </div>
-                        <!-- Column 2: pymupdf text -->
-                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
-                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
-                                📄 pymupdf text
-                                <span id="debugPmChars" style="float:right;color:#888;font-weight:400">—</span>
-                            </div>
-                            <pre id="debugPmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
-                        </div>
-                        <!-- Column 3: format-for-LLM (CSV) -->
-                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
-                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
-                                🤖 format for LLM
-                                <span style="float:right;color:#888;font-weight:400">preview</span>
-                            </div>
-                            <pre id="debugLlmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
-                        </div>
-                    </div>
-
-                    <!-- Extraction section -->
-                    <div class="settings-card" style="padding:14px;margin-top:4px">
-                        <h3 style="margin:0 0 10px 0">🧪 Extraction Test</h3>
-                        <p style="font-size:12px;color:#666;margin:0 0 12px 0">
-                            Run the rules-based extractor on this file. The choice of model column is per-document and only affects this file.
-                        </p>
-                        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                            <label style="font-size:13px;font-weight:600">Model source:</label>
-                            <select id="debugModelSource" style="padding:6px 10px;font-size:13px;border:1px solid #ccc;border-radius:4px">
-                                <option value="auto">Auto (heuristic)</option>
-                                <option value="model">Model column</option>
-                                <option value="part_no">Part No column</option>
-                            </select>
-                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
-                                <input type="checkbox" id="debugLlmFallback" style="cursor:pointer">
-                                Use LLM fallback if local returns 0 items
-                            </label>
-                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
-                                <input type="checkbox" id="debugOcrEnabled" style="cursor:pointer" checked>
-                                OCR for scanned PDFs
-                            </label>
-                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
-                                <input type="checkbox" id="debugOcrLlmFallback" style="cursor:pointer" checked>
-                                Vision LLM if OCR is low quality
-                            </label>
-                            <button class="btn btn-primary btn-sm" id="debugRunExtractBtn" onclick="runDebugExtract()" style="margin-left:auto">
-                                Run extraction
-                            </button>
-                        </div>
-                        <div id="debugExtractStatus" style="font-size:12px;color:#666;margin-bottom:8px"></div>
-                        <div id="debugExtractMetadata" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;font-size:12px"></div>
-                        <div id="debugExtractWarnings" style="font-size:12px;color:#a85b00;margin-bottom:8px"></div>
-                        <div id="debugExtractItems"></div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -931,28 +812,6 @@
         </div>
     </div>
 
-    <!-- Debug Parse Result Modal (master only) — v0.037.0 Phase 1 -->
-    <div class="modal-overlay" id="debugParseModal">
-        <div class="modal" style="max-width:1000px;text-align:left;max-height:90vh;display:flex;flex-direction:column">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <h3 style="margin:0">🔍 Debug Parse Result</h3>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('debugParseModal')">Close</button>
-            </div>
-            <div id="debugParseSummary" style="margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:13px"></div>
-            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-                <button class="btn btn-sm btn-secondary" id="debugTabPlumber" onclick="switchDebugTab('plumber')">pdfplumber text</button>
-                <button class="btn btn-sm btn-secondary" id="debugTabPlumberTables" onclick="switchDebugTab('plumberTables')">pdfplumber tables</button>
-                <button class="btn btn-sm btn-secondary" id="debugTabMupdf" onclick="switchDebugTab('mupdf')">pymupdf text</button>
-                <button class="btn btn-sm btn-secondary" id="debugTabRaw" onclick="switchDebugTab('raw')">raw JSON</button>
-            </div>
-            <div id="debugParseContent" style="flex:1;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;font-family:monospace;font-size:12px;white-space:pre-wrap;line-height:1.5"></div>
-            <div id="debugParseActions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-                <button class="btn btn-secondary btn-sm" onclick="copyDebugJson()">Copy JSON</button>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('debugParseModal')">Close</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Scripts (defer = run in order after DOM is parsed) -->
     <script src="/static/js/utils.js" defer></script>
     <script src="/static/js/app.js" defer></script>
@@ -964,6 +823,5 @@
     <script src="/static/js/search.js" defer></script>
     <script src="/static/js/settings.js" defer></script>
     <script src="/static/js/users.js" defer></script>
-    <script src="/static/js/debug.js" defer></script>
 </body>
 </html>

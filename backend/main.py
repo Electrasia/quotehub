@@ -9,7 +9,6 @@ Modules:
     routes/files.py: File upload, processing, and management
     routes/ai.py: AI server connection
     routes/admin.py: Configuration and system administration
-    routes/debug.py: Debug and inspection endpoints
 """
 
 import os
@@ -285,7 +284,7 @@ app.add_middleware(SessionCookieMiddleware)
 
 from .routes import (
     auth_router, users_router, init_password_router,
-    files_router, ai_router, admin_router, debug_router,
+    files_router, ai_router, admin_router,
 )
 
 app.include_router(auth_router)
@@ -294,7 +293,6 @@ app.include_router(init_password_router)
 app.include_router(files_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
-app.include_router(debug_router)
 
 # ─── Static Files ─────────────────────────────────────────
 

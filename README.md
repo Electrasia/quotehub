@@ -226,8 +226,7 @@ quotehub/
 │   │   ├── auth.py          # Login/logout, user management
 │   │   ├── files.py         # Upload, processing, confirm, delete, export/import
 │   │   ├── ai.py            # AI server connection testing
-│   │   ├── admin.py         # Config, cleanup, search, brand suggestions
-│   │   └── debug.py         # Debug workspace, parser comparison, extraction testing
+│   │   └── admin.py         # Config, cleanup, search, brand suggestions
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
 │   ├── index.html           # HTML structure
@@ -242,8 +241,7 @@ quotehub/
 │       ├── review.js        # PDF viewer & items table
 │       ├── search.js        # Search, edit, delete, PDF viewer
 │       ├── settings.js      # Settings, AI connection, backup/restore, logs
-│       ├── users.js         # User management (master only)
-│       └── debug.js         # Debug workspace
+│       └── users.js         # User management (master only)
 ├── data/                    # Runtime data (gitignored, persists in Docker volume)
 │   ├── quotations.db        # SQLite database with FTS5
 │   ├── archive/             # Archived PDFs

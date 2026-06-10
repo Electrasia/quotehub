@@ -42,13 +42,7 @@ async function initApp() {
     try { await loadPopupDuration(); } catch (e) { /* offline / not auth */ }
     try { await loadVersion();       } catch (e) { /* offline / not auth */ }
     try { await loadExtractionModeBadge(); } catch (e) { /* ignore */ }
-    // Default landing: Search tab for everyone. Master can use ?debug=1 to deep-link to Debug.
-    if (window.__openDebugOnBoot && isMaster && isMaster()) {
-        // Phase 2 of v0.037.0: ?debug=1 deep link, master only.
-        showDebug();
-    } else {
-        showSearch();
-    }
+    showSearch();
     appInitialized = true;
 }
 

@@ -216,27 +216,3 @@ function _doShowHelp() {
     document.getElementById('navSettings').classList.remove('active');
     document.getElementById('navHelp').classList.add('active');
 }
-
-// Phase 2 of v0.037.0: Debug Workspace. Master-only, hidden from
-// non-master users by the nav button. Toggles #debugView and
-// triggers debug.js to load the file list.
-function showDebug() {
-    if (isOnProcessView() && hasProcessWorkInProgress()) {
-        pendingNavAction = _doShowDebug;
-        showConfirmNavDialog();
-        return;
-    }
-    _doShowDebug();
-}
-function _doShowDebug() {
-    document.getElementById('processView').classList.add('hidden');
-    document.getElementById('searchView').classList.add('hidden');
-    document.getElementById('settingsView').classList.add('hidden');
-    document.getElementById('helpView').classList.add('hidden');
-    document.getElementById('debugView').classList.remove('hidden');
-    document.getElementById('navProcess').classList.remove('active');
-    document.getElementById('navSearch').classList.remove('active');
-    document.getElementById('navSettings').classList.remove('active');
-    document.getElementById('navHelp').classList.remove('active');
-    if (typeof loadDebugFiles === 'function') loadDebugFiles();
-}
