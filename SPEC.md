@@ -6,14 +6,14 @@ QuoteHub — AI-powered quotation document processing system.
 
 ## Goal
 
-Upload PDF quotations, extract structured data using AI, search across all processed documents, and manage quotations with role-based access.
+Upload PDF and XLSX quotations, extract structured data using AI, search across all processed documents, and manage quotations with role-based access.
 
 ---
 
 ## Core Features
 
 ### 1. Upload & Process
-- Upload PDF quotation files via drag-drop or file picker
+- Upload PDF and XLSX quotation files via drag-drop or file picker
 - Queue multiple files for batch processing
 - Extract data using LLM (primary) or local rules (fallback)
 - Multi-page PDF support with streaming progress feedback
@@ -64,7 +64,7 @@ Upload PDF quotations, extract structured data using AI, search across all proce
 - **AI:** External LLM only (LM Studio / OpenAI-compatible API)
 - **Deployment:** Docker only, data in named volume
 - **Auth:** Custom 3-role system (no external providers)
-- **Storage:** SQLite for data, filesystem for PDFs and images
+- **Storage:** SQLite for data, filesystem for PDFs, XLSX files, and images
 
 ---
 
