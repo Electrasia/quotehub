@@ -16,9 +16,6 @@ data/init_password.txt
 # Copy config.example.json → config.json and edit locally.
 config.json
 
-# Old planning docs (replaced by README.md)
-rules.md/
-
 # Python
 __pycache__/
 *.py[cod]
