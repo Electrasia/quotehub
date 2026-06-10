@@ -10,7 +10,7 @@ Extraction Modes:
   - local_only: Only use local rules (no fallback)
 
 The router provides a unified async interface that can be called from
-any endpoint (process-stream, debug/extract, etc.).
+any endpoint (process-stream, etc.).
 """
 
 import logging

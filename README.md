@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.039.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.048.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -86,9 +86,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.031.0`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.048.0`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.031.0 (a1b2c3d)`
+- The app header displays both: `v0.048.0 (2ca0bb0)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -109,8 +109,8 @@ QuoteHub has a 3-role authentication system (introduced in `0.030.0`). All acces
 A short summary:
 
 - **user** — read-only access. Can search and view PDFs. Cannot upload, edit, or change settings.
-- **admin** — day-to-day operations. Can upload, process, edit, delete, backup/restore, and view all settings. Cannot change the AI server endpoint / model / timeout — those are master-only.
-- **master** — full access, including AI Settings and user management.
+- **admin** — day-to-day operations. Can upload, process, edit, delete, export backup, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify Extraction Mode, import backups, access System Cleanup, or manage users. Those are master-only.
+- **master** — full access, including all settings, import, cleanup, and user management.
 
 ### First-Run Master Password
 

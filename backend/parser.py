@@ -1,23 +1,18 @@
 """
 Local PDF parser module for QuoteHub.
 
-Phase 1 (v0.037.0): provides read-only text + table extraction via
-pdfplumber and PyMuPDF. Used by the /debug/parse endpoint to let
-the operator inspect what local parsers can see BEFORE wiring them
-into the main processing flow.
-
-Phase 3+ will add format_for_llm() to convert the output into a
-prompt-friendly CSV-like string for the LLM normalization step.
+Provides read-only text + table extraction via pdfplumber and PyMuPDF.
+Used by the processing pipeline to extract text from uploaded PDFs.
 
 Both parsers are wrapped to never raise — a failing parser returns
-{"available": False, "error": "..."} so the endpoint can still
+{"available": False, "error": "..."} so the system can still
 return results from the other parser.
 """
 import time
 from pathlib import Path
 from typing import Any
 
-# Per-page text cap to keep debug responses small.
+# Per-page text cap to keep responses manageable.
 # Real quotations are <5KB of text per page; 8KB is safe and shows
 # the full document in almost all cases.
 MAX_TEXT_CHARS_PER_PAGE = 8000
@@ -207,7 +202,7 @@ def parse_with_pymupdf(pdf_path: str) -> dict[str, Any]:
 
 
 def parse_pdf(pdf_path: str, ocr_enabled: bool = True, use_llm_fallback: bool = True) -> dict[str, Any]:
-    """Run all available parsers and return a combined debug response.
+    """Run all available parsers and return a combined response.
 
     If both pdfplumber and PyMuPDF return little or no text from a page
     (typical for scanned/image-only PDFs) and `ocr_enabled` is True,
