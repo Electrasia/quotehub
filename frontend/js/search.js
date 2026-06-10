@@ -90,8 +90,8 @@ function renderSearchResults() {
             <th class="${sortClass('description')}" onclick="sortBy('description')">Description</th>
             <th class="${sortClass('currency')}" onclick="sortBy('currency')">Currency</th>
             <th class="${sortClass('unit_price')}" style="text-align:right" onclick="sortBy('unit_price')">Unit Price</th>
-            <th class="${sortClass('date')}" style="text-align:right" onclick="sortBy('date')">Date</th>
-            <th class="${sortClass('supplier')}" onclick="sortBy('supplier')">Supplier</th>
+            <th class="${sortClass('_date')}" style="text-align:right" onclick="sortBy('_date')">Date</th>
+            <th class="${sortClass('_supplier')}" onclick="sortBy('_supplier')">Supplier</th>
             <th class="${sortClass('_document_type')}" onclick="sortBy('_document_type')" style="text-align:center">Type</th>
         </tr>`;
 
