@@ -94,6 +94,7 @@ async function saveSettings() {
         const result = await resp.json();
         if (result.status === 'saved') {
             popupDurationSec = popupDuration;
+            updateExtractionModeBadge(extractionMode);
             showBriefPopup('Settings saved!');
         }
     } catch (e) {

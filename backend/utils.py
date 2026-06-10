@@ -31,7 +31,7 @@ _CONFIG_DEFAULTS = {
     "idle_timeout_minutes": 15,
     "ocr_enabled": True,
     "ocr_fallback_to_llm": True,
-    "extraction_mode": "local_first",  # llm_first | local_first | llm_only | local_only
+    "extraction_mode": "llm_first",  # llm_first | local_first | llm_only | local_only
 }
 
 

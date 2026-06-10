@@ -218,6 +218,37 @@ th.sort-desc::after { content: ' ▼'; color: #3498db; }
 .step-connector.completed { background: #27ae60; }
 .step-panel { }
 
+/* Extraction Mode Badge */
+.extraction-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    margin: -8px auto 16px;
+    text-align: center;
+    background: #e8f4fd;
+    color: #2980b9;
+    border: 1px solid #bee5f7;
+}
+.extraction-mode-badge.mode-local_first {
+    background: #e8f8e8;
+    color: #27ae60;
+    border: #c3e6c3;
+}
+.extraction-mode-badge.mode-llm_only {
+    background: #fef3e2;
+    color: #e67e22;
+    border: #fde5c2;
+}
+.extraction-mode-badge.mode-local_only {
+    background: #f0f0f0;
+    color: #666;
+    border: #ddd;
+}
+
 /* Settings */
 .settings-card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
 .settings-card h3 { margin-bottom: 16px; font-size: 18px; }
