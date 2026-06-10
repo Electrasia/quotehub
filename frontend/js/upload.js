@@ -10,6 +10,21 @@
  *   utils.js — escapeHtml, showBriefPopup
  */
 
+/**
+ * Add an error message to the visible error banner in the upload area.
+ *
+ * @param {string} message — The error message to display
+ */
+function addUploadError(message) {
+    const banner = document.getElementById('uploadErrors');
+    if (!banner) return;
+    const line = document.createElement('div');
+    line.style.cssText = 'color:#c0392b;font-size:13px;padding:4px 0;border-bottom:1px solid #fce4e4';
+    line.textContent = message;
+    banner.appendChild(line);
+    banner.classList.remove('hidden');
+}
+
 // ─── File Upload ─────────────────────────────────────────────
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
@@ -37,19 +52,48 @@ fileInput.addEventListener('change', (e) => {
  * @param {FileList} files — The files to upload
  */
 async function handleFiles(files) {
+    // Clear previous upload errors
+    const errorBanner = document.getElementById('uploadErrors');
+    if (errorBanner) errorBanner.innerHTML = '';
+
     for (const file of files) {
+        console.log(`[upload] Processing: ${file.name}, size: ${file.size} bytes`);
         // v0.038.0: check by extension, not MIME type. .xlsx files have
         // MIME type 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         // (or 'application/octet-stream' on some systems), so the old
         // `file.type === 'application/pdf'` check silently dropped them.
         const name = (file.name || '').toLowerCase();
-        if (!name.endsWith('.pdf') && !name.endsWith('.xlsx')) continue;
+        if (!name.endsWith('.pdf') && !name.endsWith('.xlsx')) {
+            console.log(`[upload] SKIPPED (wrong extension): ${file.name}`);
+            addUploadError(`${file.name} — Unsupported file type`);
+            continue;
+        }
+        // Reject empty files client-side
+        if (file.size === 0) {
+            console.log(`[upload] SKIPPED (empty): ${file.name}`);
+            addUploadError(`${file.name} — Empty file`);
+            continue;
+        }
         const formData = new FormData();
         formData.append('files', file);
+        console.log(`[upload] Uploading: ${file.name}`);
         const resp = await fetch('/upload', { method: 'POST', body: formData });
         const data = await resp.json();
+        console.log(`[upload] Response:`, JSON.stringify({ uploaded: data.uploaded, errors: data.errors, filesCount: data.files?.length }));
         if (!resp.ok) {
-            showBriefPopup(`Upload failed: ${data.error || resp.statusText}`);
+            console.log(`[upload] FAILED (HTTP ${resp.status}): ${file.name}`);
+            addUploadError(`${file.name} — Upload failed: ${data.error || resp.statusText}`);
+            continue;
+        }
+        // Show backend validation errors (empty files, wrong type)
+        if (data.errors && data.errors.length > 0) {
+            for (const err of data.errors) {
+                console.log(`[upload] REJECTED by backend: ${err.filename} — ${err.error}`);
+                addUploadError(`${err.filename} — ${err.error}`);
+            }
+        }
+        if (!data.files || data.files.length === 0) {
+            console.log(`[upload] No valid files in response, skipping.`);
             continue;
         }
         // Extract the actual file entry from the backend response envelope
@@ -69,6 +113,7 @@ async function handleFiles(files) {
             }
         } catch (e) { /* ignore check errors */ }
         uploadedFiles.push(fileEntry);
+        console.log(`[upload] Added to queue: ${file.name} (${fileEntry.pages} pages)`);
         renderFileList();
     }
     updateStepClickability();

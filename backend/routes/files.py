@@ -216,8 +216,18 @@ async def upload(files: list[UploadFile] = File(...)):
     from ..main import uploaded_files, UPLOAD_DIR
     
     results = []
+    errors = []
     for file in files:
         if not file.filename:
+            continue
+        
+        # Validate file extension
+        ext = Path(file.filename).suffix.lower()
+        if ext not in (".pdf", ".xlsx"):
+            logger.warning("Upload rejected: unsupported file type", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': f"Unsupported type: {ext}"
+            })
+            errors.append({"filename": file.filename, "error": f"Unsupported file type: {ext}"})
             continue
         
         # Save file to temp directory
@@ -225,6 +235,15 @@ async def upload(files: list[UploadFile] = File(...)):
         with open(filepath, "wb") as f:
             content = await file.read()
             f.write(content)
+        
+        # Reject empty files
+        if len(content) == 0:
+            filepath.unlink(missing_ok=True)
+            logger.warning("Upload rejected: empty file", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': 'Empty file (0 bytes)'
+            })
+            errors.append({"filename": file.filename, "error": "Empty file"})
+            continue
         
         # Add to uploaded files list
         num_pages = _count_pages(filepath)
@@ -253,7 +272,7 @@ async def upload(files: list[UploadFile] = File(...)):
             'pages': num_pages
         })
     
-    return {"uploaded": len(results), "files": results}
+    return {"uploaded": len(results), "files": results, "errors": errors}
 
 
 @router.post("/clear", dependencies=[Depends(require_role("admin", "master"))])
@@ -345,7 +364,6 @@ async def process_stream(req: ProcessRequest):
         """Yield SSE messages as processing progresses."""
         from ..parser import parse_file_with_ocr
         from ..extraction import extract_items_async
-        from ..utils import load_config
         
         import time
         start_time = time.time()
@@ -397,8 +415,9 @@ async def process_stream(req: ProcessRequest):
         yield send({"type": "progress", "percent": 80, "page": num_pages, "total": num_pages, "message": "Extracting items..."})
         
         try:
-            cfg = load_config()
-            extraction_mode = cfg.get("extraction_mode", "local_first")
+            from ..utils import get_config_data
+            cfg = get_config_data()
+            extraction_mode = cfg.get("extraction_mode", "llm_first")
             
             result = await extract_items_async(
                 parse_result,
