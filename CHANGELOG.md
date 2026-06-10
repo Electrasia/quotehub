@@ -1,5 +1,12 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.050.0 (2026-06-11)
+- Config validation: timeout, retries, extraction_mode, endpoint URL, booleans
+- Empty file upload rejection (backend + frontend validation)
+- Config default consistency: extraction_mode uses get_config_data()
+- Automated test suite: 41 tests (config, upload, extraction)
+- config.example.json: extraction_mode key added, stale key removed
+
 ## v0.049.0 (2026-06-10)
 - Admin role restrictions: hidden General, Extraction, Cleanup; Import disabled
 - Documentation updates: README, Help view, stale debug references cleaned

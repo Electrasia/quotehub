@@ -36,9 +36,57 @@ async def get_config():
     return load_config()
 
 
+VALID_EXTRACTION_MODES = {"llm_first", "local_first", "llm_only", "local_only"}
+
+
+def _validate_config(config: dict) -> list[str]:
+    """Validate config values. Returns list of error messages (empty = valid)."""
+    errors = []
+
+    # timeout: 10-300 seconds
+    timeout = config.get("timeout")
+    if timeout is not None:
+        if not isinstance(timeout, (int, float)) or timeout < 10 or timeout > 300:
+            errors.append("timeout must be between 10 and 300 seconds")
+
+    # max_retries: 1-10
+    retries = config.get("max_retries")
+    if retries is not None:
+        if not isinstance(retries, (int, float)) or retries < 1 or retries > 10:
+            errors.append("max_retries must be between 1 and 10")
+
+    # popup_duration: 1-10 seconds
+    popup = config.get("popup_duration")
+    if popup is not None:
+        if not isinstance(popup, (int, float)) or popup < 1 or popup > 10:
+            errors.append("popup_duration must be between 1 and 10 seconds")
+
+    # extraction_mode: must be one of the valid values
+    mode = config.get("extraction_mode")
+    if mode is not None and mode not in VALID_EXTRACTION_MODES:
+        errors.append(f"extraction_mode must be one of: {', '.join(sorted(VALID_EXTRACTION_MODES))}")
+
+    # ai_endpoint: must be empty or a valid URL
+    endpoint = config.get("ai_endpoint")
+    if endpoint is not None and endpoint != "":
+        if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
+            errors.append("ai_endpoint must be a URL starting with http:// or https://")
+
+    # ocr_enabled, ocr_fallback_to_llm: must be boolean
+    for key in ("ocr_enabled", "ocr_fallback_to_llm"):
+        val = config.get(key)
+        if val is not None and not isinstance(val, bool):
+            errors.append(f"{key} must be true or false")
+
+    return errors
+
+
 @router.post("/config", dependencies=[Depends(require_role("master"))])
 async def update_config(config: dict):
     """Update configuration."""
+    errors = _validate_config(config)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
     save_config(config)
     return {"status": "saved"}
 

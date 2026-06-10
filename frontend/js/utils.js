@@ -63,6 +63,7 @@ function formatBytes(bytes) {
  * @param {string} message - The message to display
  */
 function showBriefPopup(message) {
+    console.log(`[popup] ${message}`);
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active';
     overlay.innerHTML = `

@@ -2,11 +2,19 @@
 
 ## Current Version
 
-**v0.049.0** (main branch)
+**v0.050.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.050.0 — Hardening + Automated Tests
+- Config validation: timeout (10-300), retries (1-10), extraction_mode enum, endpoint URL format, booleans
+- Empty file upload rejection: backend validates extension + 0-byte, frontend checks size
+- Config default consistency: files.py uses get_config_data() (was hardcoded)
+- config.example.json: extraction_mode key added, stale llm_fallback_enabled removed
+- Automated test suite: 41 tests across 3 files (config validation, upload validation, extraction)
+- Error banner for upload failures (replaces ephemeral popups)
 
 ### v0.049.0 — Admin Role Restrictions + Documentation
 - Admin role: hidden General, Extraction, Cleanup; Import disabled
@@ -19,21 +27,21 @@
 - Cleanup fix: ImportError for DB_PATH resolved
 - Developer Tools feature removed (843 lines deleted)
 
-### v0.047.0 — Cleanup Enhancements
-- Cleanup bug fix: uses quotation_date instead of created_at
-- Document type filter (ALL/PO/QUO/PL) added
-- Step 0 stats section added to System Cleanup
-
 ---
 
 ## Files Changed Recently
 
-- `backend/routes/admin.py` — Cleanup endpoints, stats endpoint
-- `backend/routes/files.py` — Delete endpoint improvements
-- `frontend/index.html` — Admin restrictions, cleanup UI
-- `frontend/js/search.js` — Sort fix for Date/Supplier
-- `frontend/js/settings.js` — Cleanup functions, dev tools removed
-- `frontend/style.css` — ai-master-hidden class added
+- `backend/routes/files.py` — Upload validation, extraction_mode default fix
+- `backend/routes/admin.py` — Config validation (_validate_config), HTTP 422 on invalid
+- `backend/utils.py` — Canonical _CONFIG_DEFAULTS
+- `frontend/js/upload.js` — Client-side validation, error banner
+- `frontend/js/settings.js` — Config save error display
+- `frontend/index.html` — #uploadErrors div
+- `config.example.json` — extraction_mode key
+- `tests/conftest.py` — Shared fixtures
+- `tests/test_config_validation.py` — 15 tests
+- `tests/test_upload_validation.py` — 5 tests
+- `tests/test_extract.py` — 20 tests
 
 ---
 
@@ -48,13 +56,14 @@
 | Authentication & Roles | ✅ Complete |
 | Export/Import | ✅ Complete |
 | System Cleanup | ✅ Complete |
+| Config Validation | ✅ Complete |
+| Automated Tests | ✅ 41 tests passing |
 
 ---
 
 ## Known Issues
 
 - `data/images/` directory may have orphaned files (permission issues with Docker-owned files)
-- No automated tests in place
 
 ---
 
@@ -62,4 +71,5 @@
 
 1. Review this HANDOFF.md for context
 2. Check git log for any commits since this session
-3. Ask user what they want to work on next
+3. Run `pytest tests/ -v` to verify all tests pass
+4. Ask user what they want to work on next

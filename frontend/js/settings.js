@@ -92,6 +92,11 @@ async function saveSettings() {
             })
         });
         const result = await resp.json();
+        if (!resp.ok) {
+            const errMsgs = result.detail?.errors || [result.detail || 'Unknown error'];
+            showBriefPopup('Validation error: ' + errMsgs.join('; '));
+            return;
+        }
         if (result.status === 'saved') {
             popupDurationSec = popupDuration;
             updateExtractionModeBadge(extractionMode);
