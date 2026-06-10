@@ -330,7 +330,24 @@ async def serve_archive(filename: str):
 # ─── Logs ─────────────────────────────────────────────────
 
 @router.get("/logs", dependencies=[Depends(require_role("admin", "master"))])
-async def get_logs():
-    """Get application logs."""
+async def get_logs(level: str = "all", category: str = "all"):
+    """Get application logs with optional filtering.
+    
+    Args:
+        level: Filter by log level - 'all' or 'errors'
+        category: Filter by category - 'all', 'auth', 'process', 'ai', 'admin'
+    """
     from ..main import log_buffer
-    return {"logs": list(log_buffer)[-500:]}  # Last 500 lines
+    
+    logs = list(log_buffer)[-500:]  # Last 500 lines
+    
+    # Filter by level
+    if level == "errors":
+        logs = [line for line in logs if "[ERROR]" in line]
+    
+    # Filter by category
+    if category != "all":
+        category_tag = f"[{category.upper()}]"
+        logs = [line for line in logs if category_tag in line]
+    
+    return {"logs": logs}

@@ -10,6 +10,7 @@ This module handles:
 """
 
 import json
+import logging
 import os
 import shutil
 import zipfile
@@ -21,6 +22,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Helpers ──────────────────────────────────────────────
@@ -242,6 +245,13 @@ async def upload(files: list[UploadFile] = File(...)):
             "file_index": len(uploaded_files) - 1,
             "num_pages": num_pages,
         })
+        
+        logger.info("File uploaded", extra={
+            'category': 'PROCESS',
+            'file': file.filename,
+            'file_id': file_id,
+            'pages': num_pages
+        })
     
     return {"uploaded": len(results), "files": results}
 
@@ -251,6 +261,9 @@ async def clear_files():
     """Clear all uploaded files."""
     from ..main import uploaded_files
     uploaded_files.clear()
+    logger.info("All files cleared", extra={
+        'category': 'PROCESS'
+    })
     return {"status": "cleared"}
 
 
@@ -270,6 +283,10 @@ async def remove_file(req: RemoveFileRequest):
         except OSError:
             pass
     uploaded_files.pop(idx)
+    logger.info("File removed", extra={
+        'category': 'PROCESS',
+        'file_id': req.file_id
+    })
     return {"status": "removed", "file_id": req.file_id}
 
 
@@ -330,6 +347,9 @@ async def process_stream(req: ProcessRequest):
         from ..extraction import extract_items_async
         from ..utils import load_config
         
+        import time
+        start_time = time.time()
+        
         def send(msg):
             return f"data: {json.dumps(msg)}\n\n"
         
@@ -339,10 +359,22 @@ async def process_stream(req: ProcessRequest):
         try:
             parse_result = await parse_file_with_ocr(filepath)
         except Exception as e:
+            logger.error("Parse failed", extra={
+                'category': 'PROCESS',
+                'file': entry["filename"],
+                'file_id': entry.get("file_id"),
+                'error': str(e)
+            })
             yield send({"type": "error", "message": f"Parse failed: {e}"})
             return
         
         if parse_result.get("error"):
+            logger.error("Parse failed", extra={
+                'category': 'PROCESS',
+                'file': entry["filename"],
+                'file_id': entry.get("file_id"),
+                'error': parse_result["error"]
+            })
             yield send({"type": "error", "message": parse_result["error"]})
             return
         
@@ -373,8 +405,28 @@ async def process_stream(req: ProcessRequest):
                 mode=extraction_mode,
             )
         except Exception as e:
+            logger.error("Extraction failed", extra={
+                'category': 'PROCESS',
+                'file': entry["filename"],
+                'file_id': entry.get("file_id"),
+                'error': str(e)
+            })
             yield send({"type": "error", "message": f"Extraction failed: {e}"})
             return
+        
+        # Calculate processing time
+        processing_time = round(time.time() - start_time, 2)
+        
+        # Log successful processing
+        logger.info("Processing complete", extra={
+            'category': 'PROCESS',
+            'file': entry["filename"],
+            'file_id': entry.get("file_id"),
+            'method': result.extraction_method,
+            'items': len(result.items),
+            'time': f"{processing_time}s",
+            'warnings': len(result.warnings) + len(result.llm_warnings)
+        })
         
         # Send page_done for each page with item counts
         items_per_page = {}
@@ -457,6 +509,17 @@ async def confirm(req: ConfirmRequest):
         shutil.rmtree(str(img_dir))
     
     entry["status"] = "saved"
+    
+    logger.info("Quotation saved", extra={
+        'category': 'PROCESS',
+        'file': entry["filename"],
+        'file_id': req.file_id,
+        'db_id': last_id,
+        'supplier': supplier,
+        'document_type': document_type,
+        'items': len(items)
+    })
+    
     return {"status": "saved", "id": last_id}
 
 
@@ -469,6 +532,11 @@ async def skip(req: ProcessRequest):
         raise HTTPException(status_code=404, detail="File not found")
     idx, entry = resolved
     entry["status"] = "skipped"
+    logger.info("File skipped", extra={
+        'category': 'PROCESS',
+        'file': entry["filename"],
+        'file_id': req.file_id
+    })
     return {"status": "skipped"}
 
 
@@ -501,6 +569,12 @@ async def delete(req: DeleteRequest):
         except OSError:
             pass
     
+    logger.info("Quotations deleted", extra={
+        'category': 'PROCESS',
+        'ids': str(req.ids),
+        'count': len(req.ids)
+    })
+    
     return {"status": "deleted", "count": len(req.ids)}
 
 
@@ -522,6 +596,13 @@ async def update(req: UpdateRequest):
     
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Quotation not found")
+    
+    logger.info("Quotation updated", extra={
+        'category': 'PROCESS',
+        'quotation_id': req.id,
+        'supplier': supplier
+    })
+    
     return {"status": "updated"}
 
 
@@ -557,6 +638,12 @@ async def export_db():
         
         zip_size = os.path.getsize(zip_path)
         filename = f"quodb_backup_{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}.zip"
+        
+        logger.info("Database exported", extra={
+            'category': 'ADMIN',
+            'row_count': len(data),
+            'zip_size': f"{zip_size / 1024:.1f}KB"
+        })
         
         def stream_file():
             with open(zip_path, "rb") as f:
@@ -636,5 +723,12 @@ async def import_upload(file: UploadFile = File(...)):
                  json.dumps(items), document_type)
             )
             imported += 1
+    
+    logger.info("Database imported", extra={
+        'category': 'ADMIN',
+        'file': file.filename,
+        'imported': imported,
+        'pdfs_restored': pdf_restored
+    })
     
     return {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}

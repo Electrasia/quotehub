@@ -6,11 +6,14 @@ This module handles:
     - Checking AI server status
 """
 
+import logging
 import httpx
 from fastapi import APIRouter, Depends
 
 from ..auth import require_role
 from ..utils import load_config
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -23,6 +26,11 @@ async def connect_ai():
     model = cfg.get("model", "")
     
     if not endpoint:
+        logger.warning("AI connection failed - not configured", extra={
+            'category': 'AI',
+            'endpoint': 'not set',
+            'error': 'AI endpoint not configured'
+        })
         return {"status": "failed", "error": "AI endpoint not configured"}
     
     try:
@@ -30,12 +38,32 @@ async def connect_ai():
             # Try to list models or send a simple request
             response = await client.get(f"{endpoint}/v1/models")
             if response.status_code == 200:
+                logger.info("AI connection successful", extra={
+                    'category': 'AI',
+                    'endpoint': endpoint,
+                    'model': model
+                })
                 return {"status": "connected", "endpoint": endpoint, "model": model}
             else:
+                logger.warning("AI connection failed", extra={
+                    'category': 'AI',
+                    'endpoint': endpoint,
+                    'error': f"HTTP {response.status_code}"
+                })
                 return {"status": "failed", "error": f"HTTP {response.status_code}"}
     except httpx.ConnectError:
+        logger.error("AI connection failed - cannot connect", extra={
+            'category': 'AI',
+            'endpoint': endpoint,
+            'error': 'Cannot connect to AI server'
+        })
         return {"status": "failed", "error": "Cannot connect to AI server"}
     except Exception as e:
+        logger.error("AI connection failed", extra={
+            'category': 'AI',
+            'endpoint': endpoint,
+            'error': str(e)
+        })
         return {"status": "failed", "error": str(e)}
 
 

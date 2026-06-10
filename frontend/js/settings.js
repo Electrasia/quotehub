@@ -183,9 +183,20 @@ function saveLogs() {
 }
 
 async function downloadLogs() {
-    const level = document.getElementById('logLevel').value;
+    const filter = document.getElementById('logLevel').value;
+    
+    // Map filter to level and category parameters
+    let level = 'all';
+    let category = 'all';
+    
+    if (filter === 'errors') {
+        level = 'errors';
+    } else if (filter !== 'all') {
+        category = filter;
+    }
+    
     try {
-        const resp = await fetch(`/logs?level=${level}`);
+        const resp = await fetch(`/logs?level=${level}&category=${category}`);
         if (!resp.ok) {
             const text = await resp.text().catch(() => 'Server error');
             showBriefPopup('Failed to get logs: ' + text);

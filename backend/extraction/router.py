@@ -13,12 +13,15 @@ The router provides a unified async interface that can be called from
 any endpoint (process-stream, debug/extract, etc.).
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from .local import extract_items as local_extract
 from .llm import normalize_pages_with_llm
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Date & Currency Fallback Detection ──────────────────────
@@ -268,5 +271,14 @@ async def extract_items_async(
     
     # Post-processing: detect date/currency from text if still empty
     _fallback_date_currency(pages_text, result)
+    
+    # Log extraction result
+    logger.info("Extraction routed", extra={
+        'category': 'AI',
+        'mode': mode,
+        'method': result.extraction_method,
+        'items': len(result.items),
+        'fallback': len(result.llm_warnings) > 0
+    })
     
     return result

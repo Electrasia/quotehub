@@ -64,6 +64,59 @@ from io import StringIO
 log_buffer = collections.deque(maxlen=500)
 
 
+class StructuredFormatter(logging.Formatter):
+    """Multi-line structured log formatter with category support.
+    
+    Output format:
+        [TIMESTAMP] [LEVEL] [CATEGORY] Message
+          key: value
+          key: value
+    """
+    
+    # Keys to display as structured fields (in order)
+    STRUCTURED_KEYS = [
+        'user', 'role', 'remember_me', 'file', 'file_id', 'filename',
+        'method', 'extraction_method', 'items', 'time', 'timing',
+        'warnings', 'error', 'endpoint', 'model', 'connected',
+        'db_id', 'supplier', 'document_type', 'ids', 'count',
+        'quotation_id', 'months', 'entries_deleted', 'files_deleted',
+        'bytes_freed', 'row_count', 'zip_size', 'imported', 'pdfs_restored',
+        'mode', 'fallback', 'keys_changed'
+    ]
+    
+    def format(self, record):
+        # Get category from record or default to SYSTEM
+        category = getattr(record, 'category', 'SYSTEM')
+        levelname = record.levelname
+        
+        # First line: [TIMESTAMP] [LEVEL] [CATEGORY] Message
+        timestamp = self.formatTime(record, '%Y-%m-%d %H:%M:%S')
+        first_line = f"[{timestamp}] [{levelname}] [{category}] {record.getMessage()}"
+        
+        # Build structured fields from extra attributes
+        fields = []
+        for key in self.STRUCTURED_KEYS:
+            value = getattr(record, key, None)
+            if value is not None:
+                fields.append(f"  {key}: {value}")
+        
+        # Also capture any other extra keys not in our predefined list
+        for key, value in record.__dict__.items():
+            if key not in self.STRUCTURED_KEYS and key not in (
+                'name', 'msg', 'args', 'levelname', 'levelno', 'pathname',
+                'filename', 'module', 'exc_info', 'exc_text', 'stack_info',
+                'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
+                'thread', 'threadName', 'processName', 'process', 'message',
+                'taskName', 'category'
+            ):
+                if value is not None and not key.startswith('_'):
+                    fields.append(f"  {key}: {value}")
+        
+        if fields:
+            return first_line + '\n' + '\n'.join(fields)
+        return first_line
+
+
 class BufferHandler(logging.Handler):
     """Logging handler that writes to the log_buffer deque."""
     def emit(self, record):
@@ -76,10 +129,7 @@ class BufferHandler(logging.Handler):
 
 # Configure root logger to also write to log_buffer
 _buffer_handler = BufferHandler()
-_buffer_handler.setFormatter(logging.Formatter(
-    '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-))
+_buffer_handler.setFormatter(StructuredFormatter())
 _root_logger = logging.getLogger()
 _root_logger.setLevel(logging.INFO)
 _root_logger.addHandler(_buffer_handler)
