@@ -133,7 +133,8 @@ async def cleanup_execute(req: CleanupExecuteRequest):
     import sqlite3
     cutoff_date = _cleanup_cutoff(req.months)
     
-    from ..main import ARCHIVE_DIR, IMAGES_DIR, DB_PATH
+    from ..main import ARCHIVE_DIR, IMAGES_DIR
+    from ..db import DB_PATH
     
     # Get old quotations
     with get_db(readonly=True) as db:
