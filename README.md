@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.048.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.049.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -88,7 +88,7 @@ This will:
 
 - `VERSION` file in the repo root defines the current release (e.g. `0.048.0`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.048.0 (2ca0bb0)`
+- The app header displays both: `v0.049.0 (91fd474)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
