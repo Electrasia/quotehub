@@ -234,6 +234,8 @@ async function clearFiles() {
     await fetch('/clear', { method: 'POST' });
     uploadedFiles = [];
     fileInput.value = '';
+    const errorBanner = document.getElementById('uploadErrors');
+    if (errorBanner) { errorBanner.innerHTML = ''; errorBanner.classList.add('hidden'); }
     renderFileList();
     updateStepClickability();
     goToStep(1);
