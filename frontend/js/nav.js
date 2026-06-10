@@ -68,12 +68,16 @@ function showConfirmNavDialog() {
         const n = uploadedFiles.filter(f => f.status === 'processing').length;
         titleEl.textContent = '⚠ Files are still processing';
         messageEl.innerHTML = `<strong>${n}</strong> file${n > 1 ? 's are' : ' is'} still being processed.<br>Stop processing and leave this page?`;
-        stopBtn.style.display = '';
+        stopBtn.textContent = 'Stop & Leave';
+        stopBtn.classList.remove('btn-secondary');
+        stopBtn.classList.add('btn-danger');
     } else {
         const n = uploadedFiles.filter(f => f.status === 'pending').length;
         titleEl.textContent = '⚠ Files are waiting to be processed';
-        messageEl.innerHTML = `<strong>${n}</strong> file${n > 1 ? 's are' : ' is'} waiting in the queue.<br>Leave this page anyway?`;
-        stopBtn.style.display = 'none';   // nothing to stop, just leave
+        messageEl.innerHTML = `<strong>${n}</strong> file${n > 1 ? 's are' : ' is'} waiting in the queue.<br>Leave this page? Files will stay in the queue for later processing.`;
+        stopBtn.textContent = 'Leave';
+        stopBtn.classList.remove('btn-danger');
+        stopBtn.classList.add('btn-secondary');
     }
     document.getElementById('confirmNavModal').classList.add('active');
 }
