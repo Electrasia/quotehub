@@ -545,6 +545,9 @@ async def skip(req: ProcessRequest):
 @router.post("/delete", dependencies=[Depends(require_role("admin", "master"))])
 async def delete(req: DeleteRequest):
     """Delete quotations by ID."""
+    import shutil
+    from pathlib import Path
+    
     if not req.ids:
         return {"status": "nothing to delete"}
     
@@ -552,30 +555,49 @@ async def delete(req: DeleteRequest):
     placeholders = ",".join("?" * len(req.ids))
     with get_db(readonly=True) as db:
         rows = db.execute(
-            f"SELECT filename FROM quotations WHERE id IN ({placeholders})", req.ids
+            f"SELECT id, filename FROM quotations WHERE id IN ({placeholders})", req.ids
         ).fetchall()
+    
+    if not rows:
+        return {"status": "nothing to delete", "detail": "No matching quotations found"}
     
     # Delete from database
     with get_db() as db:
-        db.execute(f"DELETE FROM quotations WHERE id IN ({placeholders})", req.ids)
+        cur = db.execute(f"DELETE FROM quotations WHERE id IN ({placeholders})", req.ids)
+        entries_deleted = cur.rowcount
     
-    # Delete archived PDFs
-    from ..main import ARCHIVE_DIR
+    # Delete archived PDFs and image directories
+    from ..main import ARCHIVE_DIR, IMAGES_DIR
+    files_deleted = 0
     for row in rows:
-        archive_path = ARCHIVE_DIR / row[0]
+        filename = row["filename"]
+        if not filename:
+            continue
+        
+        # Delete archive PDF
+        archive_path = ARCHIVE_DIR / filename
         try:
             if archive_path.exists():
                 archive_path.unlink()
+                files_deleted += 1
+        except OSError:
+            pass
+        
+        # Delete image directory
+        img_dir = IMAGES_DIR / Path(filename).stem
+        try:
+            if img_dir.exists():
+                shutil.rmtree(img_dir, ignore_errors=True)
         except OSError:
             pass
     
     logger.info("Quotations deleted", extra={
         'category': 'PROCESS',
         'ids': str(req.ids),
-        'count': len(req.ids)
+        'count': entries_deleted
     })
     
-    return {"status": "deleted", "count": len(req.ids)}
+    return {"status": "deleted", "count": entries_deleted, "files_deleted": files_deleted}
 
 
 @router.post("/update", dependencies=[Depends(require_role("admin", "master"))])
