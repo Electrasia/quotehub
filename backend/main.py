@@ -59,9 +59,13 @@ uploaded_files = []
 import logging
 import collections
 import sys
+from datetime import datetime, timezone, timedelta
 from io import StringIO
 
 log_buffer = collections.deque(maxlen=500)
+
+# Hong Kong/Macau timezone (UTC+8)
+HK_TZ = timezone(timedelta(hours=8))
 
 
 class StructuredFormatter(logging.Formatter):
@@ -83,6 +87,15 @@ class StructuredFormatter(logging.Formatter):
         'bytes_freed', 'row_count', 'zip_size', 'imported', 'pdfs_restored',
         'mode', 'fallback', 'keys_changed'
     ]
+    
+    def formatTime(self, record, datefmt=None):
+        """Override formatTime to use Hong Kong timezone."""
+        ct = datetime.fromtimestamp(record.created, tz=HK_TZ)
+        if datefmt:
+            s = ct.strftime(datefmt)
+        else:
+            s = ct.strftime('%Y-%m-%d %H:%M:%S')
+        return s
     
     def format(self, record):
         # Get category from record or default to SYSTEM
