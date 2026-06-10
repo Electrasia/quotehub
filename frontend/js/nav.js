@@ -194,6 +194,7 @@ async function _doShowSettings() {
     // Load users table if master
     if (isMaster()) {
         await loadUsersTable();
+        loadCleanupStats(); // Load cleanup stats
     }
 }
 

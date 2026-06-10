@@ -261,10 +261,40 @@ startIdleDetection();
 
 // ─── System Cleanup (master only) ─────────────────────────
 
+function loadCleanupStats() {
+    if (!isMaster()) return;
+    
+    apiFetch('/cleanup/stats')
+    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+        if (!ok) throw new Error('Failed to load stats');
+        
+        document.getElementById('cleanupStatEntries').textContent = data.total_entries.toLocaleString();
+        document.getElementById('cleanupStatPDFs').textContent = data.pdf_files.toLocaleString();
+        document.getElementById('cleanupStatImages').textContent = data.image_dirs.toLocaleString();
+        document.getElementById('cleanupStatSize').textContent = formatBytes(data.total_size);
+        
+        // Breakdown by type
+        const breakdown = document.getElementById('cleanupStatBreakdown');
+        if (data.by_type && Object.keys(data.by_type).length > 0) {
+            const parts = Object.entries(data.by_type).map(([type, count]) => `${type}: ${count}`);
+            breakdown.textContent = `By type: ${parts.join(' | ')}`;
+        } else {
+            breakdown.textContent = '';
+        }
+        
+        document.getElementById('cleanupStats').classList.remove('hidden');
+    })
+    .catch(() => {
+        // Silently ignore errors for stats
+    });
+}
+
 function previewCleanup() {
     if (!isMaster()) { showBriefPopup('Only Master can run cleanup'); return; }
     const monthsRaw = parseInt(document.getElementById('cleanupMonths').value);
     const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 ? monthsRaw : 6;
+    const docType = document.getElementById('cleanupDocType').value || 'ALL';
 
     const btn = document.getElementById('cleanupPreviewBtn');
     btn.disabled = true;
@@ -273,7 +303,7 @@ function previewCleanup() {
     apiFetch('/cleanup/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ months: months })
+        body: JSON.stringify({ months: months, document_type: docType })
     })
     .then(r => r.json().then(data => ({ ok: r.ok, data })))
     .then(({ ok, data }) => {
@@ -303,6 +333,7 @@ function executeCleanup() {
     const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 ? monthsRaw : 6;
     const deleteFiles = document.getElementById('cleanupDeleteFiles').checked;
     const confirmText = document.getElementById('cleanupConfirmInput').value.trim();
+    const docType = document.getElementById('cleanupDocType').value || 'ALL';
 
     if (confirmText !== 'DELETE') {
         showBriefPopup('Type DELETE exactly to confirm');
@@ -316,15 +347,16 @@ function executeCleanup() {
     apiFetch('/cleanup/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ months: months, delete_files: deleteFiles })
+        body: JSON.stringify({ months: months, delete_files: deleteFiles, document_type: docType })
     })
     .then(r => r.json().then(data => ({ ok: r.ok, data })))
     .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.detail || 'Cleanup failed');
+        if (!ok || data.success === false) throw new Error(data.detail || 'Cleanup failed');
         showBriefPopup(
             `Cleanup complete. Deleted ${data.entries_deleted} entries, ${data.files_deleted} files, freed ${formatBytes(data.bytes_freed)}.`
         );
         hideCleanupForm();
+        loadCleanupStats(); // Refresh stats after cleanup
     })
     .catch(e => {
         showBriefPopup('Cleanup failed: ' + e.message);
@@ -340,6 +372,7 @@ function hideCleanupForm() {
     document.getElementById('cleanupPreviewResult').classList.add('hidden');
     document.getElementById('cleanupConfirmInput').value = '';
     document.getElementById('cleanupExecuteBtn').disabled = true;
+    loadCleanupStats(); // Refresh stats
 }
 
 // Live-validate the DELETE confirmation input

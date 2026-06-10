@@ -64,26 +64,33 @@ def _cleanup_cutoff(months: int) -> str:
     return now.replace(year=year, month=month, day=day).date().isoformat()
 
 
-def _get_old_quotations(db, cutoff_date: str) -> list:
+def _get_old_quotations(db, cutoff_date: str, document_type: str = "all") -> list:
     """Return list of (id, filename) for quotations older than cutoff_date.
     
     Filters on quotation_date (the date on the document), not created_at (insertion time).
     Skips rows with NULL or empty quotation_date.
+    Optionally filters by document_type (PO, QUO, PL). "all" or "ALL" returns all types.
     """
-    rows = db.execute(
-        "SELECT id, filename FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != '' AND date(quotation_date) < ?",
-        (cutoff_date,)
-    ).fetchall()
+    base_query = "SELECT id, filename FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != '' AND date(quotation_date) < ?"
+    params = [cutoff_date]
+    
+    if document_type and document_type.upper() != "ALL":
+        base_query += " AND document_type = ?"
+        params.append(document_type.upper())
+    
+    rows = db.execute(base_query, params).fetchall()
     return [(r["id"], r["filename"]) for r in rows]
 
 
 class CleanupPreviewRequest(BaseModel):
     months: int = Field(3, ge=1, le=60)
+    document_type: str = Field("all", pattern="^(all|ALL|PO|QUO|PL)$")
 
 
 class CleanupExecuteRequest(BaseModel):
     months: int = Field(3, ge=1, le=60)
     delete_files: bool = False
+    document_type: str = Field("all", pattern="^(all|ALL|PO|QUO|PL)$")
 
 
 @router.post("/cleanup/preview", dependencies=[Depends(require_role("master"))])
@@ -93,7 +100,7 @@ async def cleanup_preview(req: CleanupPreviewRequest):
     
     from ..main import ARCHIVE_DIR
     with get_db(readonly=True) as db:
-        rows = _get_old_quotations(db, cutoff_date)
+        rows = _get_old_quotations(db, cutoff_date, req.document_type)
         entries = len(rows)
         file_count = 0
         total_size = 0
@@ -123,13 +130,14 @@ async def cleanup_preview(req: CleanupPreviewRequest):
 async def cleanup_execute(req: CleanupExecuteRequest):
     """Delete old quotations."""
     import shutil
+    import sqlite3
     cutoff_date = _cleanup_cutoff(req.months)
     
     from ..main import ARCHIVE_DIR, IMAGES_DIR, DB_PATH
     
     # Get old quotations
     with get_db(readonly=True) as db:
-        rows = _get_old_quotations(db, cutoff_date)
+        rows = _get_old_quotations(db, cutoff_date, req.document_type)
         seen = set()
         targets = []
         for _id, filename in rows:
@@ -139,13 +147,23 @@ async def cleanup_execute(req: CleanupExecuteRequest):
                 img_dir = IMAGES_DIR / Path(filename).stem
                 targets.append((filename, pdf_path, img_dir))
     
-    # Delete from database
-    with get_db() as db:
-        cur = db.execute(
-            "DELETE FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != '' AND date(quotation_date) < ?",
-            (cutoff_date,)
+    # Delete from database with error handling
+    try:
+        with get_db() as db:
+            base_query = "DELETE FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != '' AND date(quotation_date) < ?"
+            params = [cutoff_date]
+            
+            if req.document_type and req.document_type.upper() != "ALL":
+                base_query += " AND document_type = ?"
+                params.append(req.document_type.upper())
+            
+            cur = db.execute(base_query, params)
+            entries_deleted = cur.rowcount
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "detail": f"Database error: {str(e)}"}
         )
-        entries_deleted = cur.rowcount
     
     # Delete files
     file_count_deleted = 0
@@ -166,7 +184,6 @@ async def cleanup_execute(req: CleanupExecuteRequest):
                 pass
     
     # VACUUM
-    import sqlite3
     try:
         vacuum_conn = sqlite3.connect(DB_PATH)
         vacuum_conn.execute("VACUUM")
@@ -175,10 +192,61 @@ async def cleanup_execute(req: CleanupExecuteRequest):
         pass
     
     return {
+        "success": True,
         "entries_deleted": entries_deleted,
         "files_deleted": file_count_deleted,
         "bytes_freed": bytes_freed,
     }
+
+
+@router.get("/cleanup/stats", dependencies=[Depends(require_role("master"))])
+async def cleanup_stats():
+    """Get current database and file statistics for cleanup overview."""
+    from ..main import ARCHIVE_DIR, IMAGES_DIR
+    
+    stats = {}
+    
+    # Database stats
+    with get_db(readonly=True) as db:
+        # Total entries
+        row = db.execute("SELECT COUNT(*) as total FROM quotations").fetchone()
+        stats["total_entries"] = row["total"]
+        
+        # Entries by document type
+        rows = db.execute(
+            "SELECT document_type, COUNT(*) as count FROM quotations GROUP BY document_type"
+        ).fetchall()
+        stats["by_type"] = {r["document_type"]: r["count"] for r in rows}
+        
+        # Oldest and newest dates
+        row = db.execute(
+            "SELECT MIN(quotation_date) as oldest, MAX(quotation_date) as newest FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != ''"
+        ).fetchone()
+        stats["oldest_date"] = row["oldest"]
+        stats["newest_date"] = row["newest"]
+    
+    # File stats
+    pdf_count = 0
+    total_size = 0
+    if ARCHIVE_DIR.exists():
+        for pdf_file in ARCHIVE_DIR.glob("*.pdf"):
+            pdf_count += 1
+            try:
+                total_size += pdf_file.stat().st_size
+            except OSError:
+                pass
+    
+    img_count = 0
+    if IMAGES_DIR.exists():
+        for item in IMAGES_DIR.iterdir():
+            if item.is_dir():
+                img_count += 1
+    
+    stats["pdf_files"] = pdf_count
+    stats["image_dirs"] = img_count
+    stats["total_size"] = total_size
+    
+    return stats
 
 
 # ─── Search ────────────────────────────────────────────────
