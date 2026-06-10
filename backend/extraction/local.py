@@ -1,14 +1,14 @@
 """
-backend/extract.py — Rules-based quotation item extractor.
+backend/extraction/local.py — Rules-based quotation item extractor.
 
-Replaces the LLM normalize step. Reads the structured output of
-parse_pdf() (pdfplumber text + tables) and produces the same JSON
-shape as the VLM output: {filename, supplier, date, currency,
-document_type, items[]}.
+Reads the structured output of parse_pdf() (pdfplumber text + tables)
+and produces the same JSON shape as the LLM output:
+{filename, supplier, date, currency, document_type, items[]}.
 
 No external dependencies beyond standard library.
 
-v0.037.0 (Phase 3)
+This module is part of the extraction package and can be used standalone
+or as a fallback in the extraction router.
 """
 import re
 from datetime import datetime

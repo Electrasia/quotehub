@@ -23,6 +23,9 @@
                     <input type="password" id="loginPassword" autocomplete="current-password" required>
                 </div>
                 <div id="loginError" class="login-error hidden"></div>
+                <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;font-size:13px;cursor:pointer">
+                    <input type="checkbox" id="rememberMe"> Remember me
+                </label>
                 <button type="submit" class="btn btn-primary login-btn" id="loginSubmitBtn">Sign in</button>
             </form>
         </div>
@@ -114,13 +117,20 @@
                 </div>
             </div>
 
+            <!-- Extraction Mode Indicator -->
+            <div class="extraction-mode-badge" id="extractionModeBadge">
+                <span class="extraction-mode-label">Extraction Method:</span>
+                <span id="extractionModeIcon">🤖</span>
+                <span id="extractionModeText">LLM First (AI)</span>
+            </div>
+
             <!-- Step 1: Upload -->
             <div id="stepPanel1" class="step-panel">
                 <div class="upload-area" id="uploadArea">
                     <div class="icon">📄</div>
-                    <h2>Upload Quotation PDFs</h2>
+                    <h2>Upload Excel and PDF Files Here</h2>
                     <p>Drag and drop files here, or click to browse</p>
-                    <input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
+                    <input type="file" id="fileInput" accept=".pdf,.xlsx" multiple style="display:none">
                     <button class="btn btn-primary" style="margin-top:16px" onclick="document.getElementById('fileInput').click()">Choose Files</button>
                 </div>
             </div>
@@ -142,14 +152,30 @@
             <div id="stepPanel3" class="step-panel hidden">
                 <div class="file-list" id="processingFileListSection">
                     <h3>Files</h3>
+                    <div class="beta-warning" style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 16px;margin:8px 0 16px 0;color:#856404;font-size:14px;display:flex;align-items:center;gap:8px">
+                        <span style="font-size:18px">⚠️</span>
+                        <span>This App is Beta and all documents need to be validated before inserting them in Database</span>
+                    </div>
                     <div id="processingFileList"></div>
                 </div>
-                <div style="background:#fff;border-radius:12px;padding:40px;text-align:center;margin-top:24px">
-                    <div class="loading" style="justify-content:center;margin-bottom:16px">
-                        <div class="spinner"></div>
-                        <span style="font-size:16px">Processing documents...</span>
+
+                <!-- Inline progress area (replaces the old #processingModal overlay) -->
+                <div id="inlineProgress" class="hidden" style="background:#fff;border-radius:12px;padding:20px 24px;margin-top:24px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+                    <div id="overallProgressRow" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                        <span id="overallProgressLabel" style="font-size:13px;color:#666;font-weight:500">Overall progress</span>
+                        <span id="overallProgressPct" style="font-size:13px;color:#666;font-weight:600">0%</span>
                     </div>
-                    <p style="color:#666;font-size:14px">Please wait while the AI processes your files.</p>
+                    <div class="progress-bar" style="height:6px;margin:0 0 18px 0">
+                        <div class="progress-fill" id="overallProgressFill" style="width:0%;background:#95a5a6"></div>
+                    </div>
+
+                    <div id="perFileLabel" style="font-size:14px;color:#333;margin-bottom:8px;min-height:20px">Preparing...</div>
+                    <div style="display:flex;align-items:center;gap:16px">
+                        <div class="progress-bar" style="flex:1;height:10px;margin:0">
+                            <div class="progress-fill" id="perFileProgressFill" style="width:0%"></div>
+                        </div>
+                        <button class="btn btn-danger" id="perFileCancelBtn" onclick="cancelProcessing()">Cancel</button>
+                    </div>
                 </div>
             </div>
 
@@ -158,11 +184,10 @@
                 <div class="review-layout">
                     <!-- PDF viewer on the left -->
                     <div class="review-pdf" id="reviewPdf">
-                        <div class="zoom-toolbar" style="margin-top:12px;display:flex;justify-content:center;gap:8px;align-items:center;flex-wrap:wrap">
+                        <div class="zoom-toolbar" style="display:flex;justify-content:center;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:12px">
                             <button class="btn btn-sm btn-secondary" onclick="reviewZoomOut()" title="Zoom out">−</button>
                             <span id="reviewZoomInfo" style="min-width:50px;text-align:center;font-size:13px">100%</span>
                             <button class="btn btn-sm btn-secondary" onclick="reviewZoomIn()" title="Zoom in">+</button>
-                            <button class="btn btn-sm btn-secondary" onclick="reviewZoomReset()" title="Reset to 100% (natural size)">100%</button>
                             <button class="btn btn-sm btn-secondary" onclick="reviewFitWidth()" title="Fit image to container width">Fit</button>
                             <button class="btn btn-sm btn-secondary" onclick="reviewOpenNewWindow()" title="Open PDF in new browser window">↗ New Window</button>
                         </div>
@@ -186,6 +211,10 @@
                                     <input type="text" id="supplierName" value="">
                                 </div>
                                 <div class="meta-item">
+                                    <label>Date</label>
+                                    <input type="text" id="reviewDate" placeholder="YYYY-MM-DD">
+                                </div>
+                                <div class="meta-item">
                                     <label>Document Type <span id="docTypeWarning" style="color:#e67e22;font-size:12px;display:none">⚠ Please select</span></label>
                                     <select id="documentType" onchange="updateDocumentTypeWarning()">
                                         <option value="unknown">Unknown (not classified)</option>
@@ -198,30 +227,19 @@
 
                             <h3 style="margin-bottom:12px">Items (<span id="itemCount">0</span>)</h3>
 
-                            <!-- Bulk apply: Brand -->
-                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:#f8f9fa;border-radius:8px;flex-wrap:wrap">
-                                <span style="font-size:13px;color:#666;font-weight:500">Brand:</span>
-                                <input type="text" id="bulkBrandInput" placeholder="Bulk value..."
-                                       oninput="updateBulkCount(0, 'bulkCount')"
-                                       style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px">
-                                <button class="btn btn-sm btn-primary"
-                                        onclick="bulkApplyColumn(0, 'bulkBrandInput', 'bulkCount')"
-                                        title="Apply value to empty Brand cells only">Apply</button>
-                                <span style="font-size:13px;color:#666">(<span id="bulkCount" title="Empty Brand cells in table">0</span> empty)</span>
-                            </div>
-
                             <div style="overflow-x:auto">
                                 <table>
                                     <thead>
                                         <tr>
+                                            <th style="width:40px">#</th>
                                             <th>Brand</th>
                                             <th>Model</th>
                                             <th>Description</th>
-                                            <th class="price-cell">Unit Price</th>
-                                            <th class="date-cell">Date</th>
-                                            <th>Supplier</th>
                                             <th>Currency</th>
-                                            <th style="width:60px"></th>
+                                            <th class="price-cell">Unit Price</th>
+                                            <th class="price-cell">Total Qty</th>
+                                            <th class="price-cell">Total Price</th>
+                                            <th style="width:40px"></th>
                                         </tr>
                                     </thead>
                                     <tbody id="itemsTable"></tbody>
@@ -266,11 +284,27 @@
 
         <!-- ═══════════════ SETTINGS VIEW ═══════════════ -->
         <div id="settingsView" class="hidden">
-            <!-- AI Connection Section -->
-            <div class="settings-card ai-connection-section ai-admin-master">
-                <h3>🔌 AI Settings</h3>
+            <!-- General Settings -->
+            <div class="settings-card ai-admin-master ai-master-hidden">
+                <h3>⚙️ General</h3>
+                <div class="settings-field">
+                    <label>Popup duration (seconds)</label>
+                    <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10">
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        How long success/error popups stay visible across the app.
+                    </p>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                </div>
+            </div>
 
-                <h4>Server Configuration</h4>
+            <!-- LLM Setup -->
+            <div class="settings-card ai-admin-master">
+                <h3>🔌 LLM Setup</h3>
+                <p style="font-size:12px;color:#666;margin:0 0 12px 0">
+                    Connection settings for the AI language model used for extraction and OCR.
+                </p>
                 <div class="settings-field">
                     <label>AI Endpoint URL</label>
                     <input type="text" id="settingsEndpoint" class="ai-master-only" placeholder="http://192.168.0.196:1234/v1/chat/completions">
@@ -291,51 +325,48 @@
                     <label>Max Retries</label>
                     <input type="number" id="settingsRetries" class="ai-master-only" value="3" min="1" max="10">
                 </div>
-                <div class="settings-field">
-                    <label>Success popup duration (seconds)</label>
-                    <input type="number" id="settingsPopupDuration" class="ai-master-only" value="3" min="1" max="10">
-                </div>
-
-                <h4 style="margin-top:18px">Extraction Fallback (v0.037.0+)</h4>
-                <p style="font-size:12px;color:#666;margin:0 0 8px 0">
-                    When the local rules-based extractor returns 0 items, the LLM can be
-                    called as a fallback. The LLM is also usable per-file in the Debug
-                    Workspace regardless of this setting.
-                </p>
-                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
-                    <input type="checkbox" id="settingsLlmFallbackEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px">
-                    <label for="settingsLlmFallbackEnabled" style="cursor:pointer;margin:0">
-                        Use LLM fallback when local returns 0 items
-                    </label>
-                </div>
-
                 <div class="actions">
-                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn2" onclick="saveSettings()">Save Settings</button>
                 </div>
             </div>
 
-            <!-- Session Settings Section -->
-            <div class="settings-card session-settings-section ai-admin-master">
-                <h3>🔒 Session Settings</h3>
-                <p style="font-size:13px;color:#666;margin-bottom:16px">
-                    Configure how long users stay signed in and how long they can be inactive
-                    before being automatically logged out.
-                </p>
-                <p style="font-size:12px;color:#e67e22;margin-bottom:16px;padding:8px 12px;background:#fef5e7;border-radius:6px;border:1px solid #f5cba7">
-                    ⚠ Changes to <strong>Session Duration</strong> require an app restart to take effect.
-                </p>
-
-                <h4>Timeouts</h4>
+            <!-- Extraction Preferences -->
+            <div class="settings-card ai-admin-master ai-master-hidden">
+                <h3>📦 Extraction Preferences</h3>
                 <div class="settings-field">
-                    <label>Session Duration (days)</label>
-                    <input type="number" id="settingsSessionMaxAgeDays" class="ai-master-only" value="14" min="1" max="365">
+                    <label>Extraction Mode</label>
+                    <select id="settingsExtractionMode" class="ai-master-only">
+                        <option value="local_first">Local first (fast, no AI cost)</option>
+                        <option value="llm_first">LLM first (best quality, uses AI)</option>
+                        <option value="llm_only">LLM only (no fallback)</option>
+                        <option value="local_only">Local only (no AI)</option>
+                    </select>
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        Controls which extraction method is tried first. LLM produces better results but costs AI credits.
+                    </p>
                 </div>
-                <div class="settings-field">
-                    <label>Idle Timeout (minutes, 0 = disabled)</label>
-                    <input type="number" id="settingsIdleTimeout" class="ai-master-only" value="60" min="0" max="1440">
+
+                <h4 style="margin-top:18px">OCR (scanned PDFs)</h4>
+                <p style="font-size:12px;color:#666;margin:0 0 8px 0">
+                    Scanned/image-only PDFs have no text for the local extractor to read.
+                    Enable OCR to run pytesseract on each page. If tesseract's quality
+                    is low (avg confidence &lt; 40% or fewer than 5 numbers detected),
+                    a vision LLM can be used as a second pass.
+                </p>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" id="settingsOcrEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px" checked>
+                    <label for="settingsOcrEnabled" style="cursor:pointer;margin:0">
+                        Enable OCR for scanned PDFs (pytesseract)
+                    </label>
+                </div>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                    <input type="checkbox" id="settingsOcrLlmFallback" class="ai-master-only" style="cursor:pointer;width:16px;height:16px" checked>
+                    <label for="settingsOcrLlmFallback" style="cursor:pointer;margin:0">
+                        Use vision LLM as fallback when OCR quality is low
+                    </label>
                 </div>
                 <div class="actions">
-                    <button class="btn btn-primary ai-master-only" id="saveSessionSettingsBtn" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn-primary ai-master-only" id="saveSettingsBtn3" onclick="saveSettings()">Save Settings</button>
                 </div>
             </div>
 
@@ -345,10 +376,10 @@
                 <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📤 Export (Backup)</h4>
                     <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as a ZIP archive.</p>
-                    <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Download Backup</button>
+                    <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Export Backup</button>
                     <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
                 </div>
-                <div style="padding:16px;background:#f8f9fa;border-radius:8px">
+                <div class="ai-master-hidden" style="padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
                     <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
                     <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
@@ -367,6 +398,10 @@
                     <select id="logLevel" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px">
                         <option value="all">All logs</option>
                         <option value="errors">Errors only</option>
+                        <option value="auth">Auth (login, users)</option>
+                        <option value="process">Processing (upload, extract)</option>
+                        <option value="ai">AI (connection, extraction)</option>
+                        <option value="admin">Admin (config, cleanup)</option>
                     </select>
                 </div>
                 <div class="actions">
@@ -375,14 +410,48 @@
             </div>
 
             <!-- System Cleanup Section (master only) -->
-            <div class="settings-card cleanup-section ai-admin-master">
+            <div class="settings-card cleanup-section ai-admin-master ai-master-hidden">
                 <h3>🧹 System Cleanup</h3>
                 <p style="font-size:13px;color:#666;margin-bottom:16px">
                     Delete old quotations and (optionally) their associated PDF files and images.
                     <strong>This action is permanent and cannot be undone.</strong>
                 </p>
 
+                <!-- Step 0: Current Stats -->
+                <h4>Step 0: Current database status</h4>
+                <div id="cleanupStats" class="hidden" style="padding:12px;background:#f8f9fa;border-radius:6px;margin-bottom:16px">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;font-size:14px">
+                        <div>
+                            <div style="color:#666;font-size:12px">Database Entries</div>
+                            <div style="font-weight:600"><span id="cleanupStatEntries">0</span></div>
+                        </div>
+                        <div>
+                            <div style="color:#666;font-size:12px">PDF Files</div>
+                            <div style="font-weight:600"><span id="cleanupStatPDFs">0</span></div>
+                        </div>
+                        <div>
+                            <div style="color:#666;font-size:12px">Image Directories</div>
+                            <div style="font-weight:600"><span id="cleanupStatImages">0</span></div>
+                        </div>
+                        <div>
+                            <div style="color:#666;font-size:12px">Total File Size</div>
+                            <div style="font-weight:600"><span id="cleanupStatSize">0 B</span></div>
+                        </div>
+                    </div>
+                    <div id="cleanupStatBreakdown" style="margin-top:12px;font-size:12px;color:#666"></div>
+                </div>
+
+                <!-- Step 1: Choose threshold -->
                 <h4>Step 1: Choose age threshold</h4>
+                <div class="settings-field">
+                    <label>Document type</label>
+                    <select id="cleanupDocType" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px">
+                        <option value="ALL">ALL (all document types)</option>
+                        <option value="QUO">QUO (Quotation)</option>
+                        <option value="PO">PO (Purchase Order)</option>
+                        <option value="PL">PL (Price List)</option>
+                    </select>
+                </div>
                 <div class="settings-field">
                     <label>Delete entries older than (months)</label>
                     <input type="number" id="cleanupMonths" value="6" min="1" max="120">
@@ -416,28 +485,6 @@
                         <button class="btn btn-secondary btn-sm" onclick="hideCleanupForm()">Cancel</button>
                     </div>
                 </div>
-            </div>
-
-            <!-- Developer Tools / Debug Parse (master only) — v0.037.0 Phase 1 -->
-            <div class="settings-card debug-parse-section ai-master-only">
-                <h3>🔧 Developer Tools</h3>
-                <p style="font-size:13px;color:#666;margin-bottom:12px">
-                    Read-only inspection of an uploaded PDF using local parsers
-                    (pdfplumber + PyMuPDF). Does <strong>not</strong> call the AI,
-                    does <strong>not</strong> save anything. Used to validate parser
-                    quality before the new pipeline is wired in.
-                </p>
-                <div class="settings-field" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <label style="margin:0">File index:</label>
-                    <input type="number" id="debugParseIndex" value="0" min="0" style="width:80px">
-                    <button class="btn btn-primary" id="debugParseBtn" onclick="runDebugParse()">Parse PDF (debug)</button>
-                    <button class="btn btn-secondary" onclick="showDebug()">Open Debug Workspace →</button>
-                    <span id="debugParseStatus" style="font-size:12px;color:#666"></span>
-                </div>
-                <p style="font-size:12px;color:#888;margin-top:8px;margin-bottom:0">
-                    Tip: the <strong>Debug Workspace</strong> shows all uploaded files with
-                    side-by-side parser output and a format-for-LLM preview.
-                </p>
             </div>
 
             <!-- Users Management Section (master only) -->
@@ -538,8 +585,8 @@
                 <h3>👤 User Roles</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
                     <li><strong>User</strong> — search and browse existing data</li>
-                    <li><strong>Admin</strong> — all User actions, plus upload, process, edit, and read AI settings</li>
-                    <li><strong>Master</strong> — full control, including user management and system cleanup</li>
+                    <li><strong>Admin</strong> — upload, process, edit, export backup, view logs, read AI settings (no changes). Cannot access General, Extraction Mode, Import, Cleanup, or User Management</li>
+                    <li><strong>Master</strong> — full control, including all settings, import, cleanup, and user management</li>
                 </ul>
             </div>
 
@@ -565,95 +612,6 @@
                     <li>Fabio Monteiro — <a href="mailto:fabio@electrasia.com">fabio@electrasia.com</a></li>
                     <li>Antonio Ferrao — <a href="mailto:ajferrao@electrasia.com">ajferrao@electrasia.com</a></li>
                 </ul>
-            </div>
-        </div>
-
-        <!-- ═══════════════ DEBUG WORKSPACE (Phase 2 of v0.037.0, master only) ═══════════════ -->
-        <div id="debugView" class="hidden">
-            <h2 style="margin-bottom:8px">🔧 Debug Workspace <span style="font-size:12px;color:#888;font-weight:400">(master only · v0.037.0)</span></h2>
-            <p style="font-size:13px;color:#666;margin-bottom:16px">Inspect how local PDF parsers see a file before wiring them into the main processing flow. Read-only — does not call the LLM and does not save anything.</p>
-
-            <div style="display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start">
-                <!-- File picker (left) -->
-                <div class="settings-card" style="padding:12px;max-height:80vh;overflow-y:auto">
-                    <h3 style="margin-top:0">📁 Uploaded Files</h3>
-                    <div id="debugFileList" style="font-size:13px">
-                        <p style="color:#999;margin:8px 0">Loading…</p>
-                    </div>
-                    <button class="btn btn-sm btn-secondary" onclick="loadDebugFiles()" style="margin-top:8px;width:100%">Refresh</button>
-                </div>
-
-                <!-- Comparison (right) -->
-                <div style="display:flex;flex-direction:column;gap:12px">
-                    <!-- File metadata bar -->
-                    <div id="debugFileMeta" class="settings-card" style="padding:12px">
-                        <p style="color:#999;margin:0">Select a file from the list to inspect.</p>
-                    </div>
-
-                    <!-- Page selector (only shown when a file is selected) -->
-                    <div id="debugPageNav" class="settings-card hidden" style="padding:10px 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                        <button class="btn btn-sm btn-secondary" onclick="debugPrevPage()">◀ Prev</button>
-                        <span id="debugPageLabel" style="font-size:13px;font-weight:600">Page 1 of 1</span>
-                        <button class="btn btn-sm btn-secondary" onclick="debugNextPage()">Next ▶</button>
-                        <span style="flex:1"></span>
-                        <button class="btn btn-sm btn-primary" onclick="openDebugParseModal()">Open Debug Modal</button>
-                    </div>
-
-                    <!-- 3-column comparison -->
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-                        <!-- Column 1: pdfplumber text -->
-                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
-                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
-                                📄 pdfplumber text
-                                <span id="debugPpChars" style="float:right;color:#888;font-weight:400">—</span>
-                            </div>
-                            <pre id="debugPpText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
-                        </div>
-                        <!-- Column 2: pymupdf text -->
-                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
-                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
-                                📄 pymupdf text
-                                <span id="debugPmChars" style="float:right;color:#888;font-weight:400">—</span>
-                            </div>
-                            <pre id="debugPmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
-                        </div>
-                        <!-- Column 3: format-for-LLM (CSV) -->
-                        <div class="settings-card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:65vh">
-                            <div style="background:#f5f5f5;padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:12px;font-weight:600;color:#444">
-                                🤖 format for LLM
-                                <span style="float:right;color:#888;font-weight:400">preview</span>
-                            </div>
-                            <pre id="debugLlmText" style="margin:0;padding:12px;font-size:11px;line-height:1.4;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;overflow-y:auto;flex:1;background:#fff;max-height:60vh"></pre>
-                        </div>
-                    </div>
-
-                    <!-- Extraction section -->
-                    <div class="settings-card" style="padding:14px;margin-top:4px">
-                        <h3 style="margin:0 0 10px 0">🧪 Extraction Test</h3>
-                        <p style="font-size:12px;color:#666;margin:0 0 12px 0">
-                            Run the rules-based extractor on this file. The choice of model column is per-document and only affects this file.
-                        </p>
-                        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                            <label style="font-size:13px;font-weight:600">Model source:</label>
-                            <select id="debugModelSource" style="padding:6px 10px;font-size:13px;border:1px solid #ccc;border-radius:4px">
-                                <option value="auto">Auto (heuristic)</option>
-                                <option value="model">Model column</option>
-                                <option value="part_no">Part No column</option>
-                            </select>
-                            <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;margin-left:8px">
-                                <input type="checkbox" id="debugLlmFallback" style="cursor:pointer">
-                                Use LLM fallback if local returns 0 items
-                            </label>
-                            <button class="btn btn-primary btn-sm" id="debugRunExtractBtn" onclick="runDebugExtract()" style="margin-left:auto">
-                                Run extraction
-                            </button>
-                        </div>
-                        <div id="debugExtractStatus" style="font-size:12px;color:#666;margin-bottom:8px"></div>
-                        <div id="debugExtractMetadata" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;font-size:12px"></div>
-                        <div id="debugExtractWarnings" style="font-size:12px;color:#a85b00;margin-bottom:8px"></div>
-                        <div id="debugExtractItems"></div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -753,20 +711,19 @@
         </div>
     </div>
 
-    <!-- Processing Modal -->
-    <div class="modal-overlay" id="processingModal">
-        <div class="modal">
-            <h3>Processing Document</h3>
-            <div class="loading" style="justify-content:center; margin:20px 0">
-                <div class="spinner"></div>
-                <span id="processingText">Processing page 1...</span>
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width:0%"></div>
-            </div>
-            <p id="processingDetail">Please wait. Do not close this window.</p>
-            <div class="actions">
-                <button class="btn btn-danger" onclick="cancelProcessing()">Cancel</button>
+    <!-- Processing Modal (REMOVED in v0.038.0 UI cleanup; inline progress is now in step 3) -->
+
+    <!-- Confirm Navigation Modal (v0.038.0): shown when user tries to leave Process
+         page while files are still being processed or queued. -->
+    <div class="modal-overlay" id="confirmNavModal">
+        <div class="modal" style="max-width:480px">
+            <h3 id="confirmNavTitle">⚠ Files are still processing</h3>
+            <p id="confirmNavMessage" style="color:#444;font-size:14px;line-height:1.5;margin:16px 0">
+                Files are still being processed.
+            </p>
+            <div class="actions" style="justify-content:flex-end;display:flex;gap:8px;margin-top:24px">
+                <button class="btn btn-secondary" onclick="cancelNavConfirm()">Cancel</button>
+                <button class="btn btn-danger" id="confirmNavStopBtn" onclick="confirmNavStop()">Stop &amp; Leave</button>
             </div>
         </div>
     </div>
@@ -796,7 +753,7 @@
                     <option value="PL">PL — Price List</option>
                 </select>
             </div>
-            <div style="overflow-x:auto">
+            <div class="edit-modal-data" style="overflow-x:auto">
                 <table>
                     <thead>
                         <tr>
@@ -855,36 +812,16 @@
         </div>
     </div>
 
-    <!-- Debug Parse Result Modal (master only) — v0.037.0 Phase 1 -->
-    <div class="modal-overlay" id="debugParseModal">
-        <div class="modal" style="max-width:1000px;text-align:left;max-height:90vh;display:flex;flex-direction:column">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <h3 style="margin:0">🔍 Debug Parse Result</h3>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('debugParseModal')">Close</button>
-            </div>
-            <div id="debugParseSummary" style="margin-bottom:12px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:13px"></div>
-            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-                <button class="btn btn-sm btn-secondary" id="debugTabPlumber" onclick="switchDebugTab('plumber')">pdfplumber text</button>
-                <button class="btn btn-sm btn-secondary" id="debugTabPlumberTables" onclick="switchDebugTab('plumberTables')">pdfplumber tables</button>
-                <button class="btn btn-sm btn-secondary" id="debugTabMupdf" onclick="switchDebugTab('mupdf')">pymupdf text</button>
-                <button class="btn btn-sm btn-secondary" id="debugTabRaw" onclick="switchDebugTab('raw')">raw JSON</button>
-            </div>
-            <div id="debugParseContent" style="flex:1;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;font-family:monospace;font-size:12px;white-space:pre-wrap;line-height:1.5"></div>
-            <div id="debugParseActions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-                <button class="btn btn-secondary btn-sm" onclick="copyDebugJson()">Copy JSON</button>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('debugParseModal')">Close</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Scripts (defer = run in order after DOM is parsed) -->
+    <script src="/static/js/utils.js" defer></script>
     <script src="/static/js/app.js" defer></script>
     <script src="/static/js/auth.js" defer></script>
     <script src="/static/js/nav.js" defer></script>
     <script src="/static/js/upload.js" defer></script>
+    <script src="/static/js/progress.js" defer></script>
+    <script src="/static/js/review.js" defer></script>
     <script src="/static/js/search.js" defer></script>
     <script src="/static/js/settings.js" defer></script>
     <script src="/static/js/users.js" defer></script>
-    <script src="/static/js/debug.js" defer></script>
 </body>
 </html>

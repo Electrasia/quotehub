@@ -12,6 +12,10 @@ data/archive/
 data/secret.key
 data/init_password.txt
 
+# Local config (may contain private network IPs / secrets).
+# Copy config.example.json → config.json and edit locally.
+config.json
+
 # Old planning docs (replaced by README.md)
 rules.md/
 

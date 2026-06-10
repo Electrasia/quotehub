@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.036.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.048.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -86,9 +86,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.031.0`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.048.0`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.031.0 (a1b2c3d)`
+- The app header displays both: `v0.048.0 (2ca0bb0)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -109,8 +109,8 @@ QuoteHub has a 3-role authentication system (introduced in `0.030.0`). All acces
 A short summary:
 
 - **user** — read-only access. Can search and view PDFs. Cannot upload, edit, or change settings.
-- **admin** — day-to-day operations. Can upload, process, edit, delete, backup/restore, and view all settings. Cannot change the AI server endpoint / model / timeout — those are master-only.
-- **master** — full access, including AI Settings and user management.
+- **admin** — day-to-day operations. Can upload, process, edit, delete, export backup, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify Extraction Mode, import backups, access System Cleanup, or manage users. Those are master-only.
+- **master** — full access, including all settings, import, cleanup, and user management.
 
 ### First-Run Master Password
 
@@ -192,6 +192,16 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 | `max_retries` | Max retry attempts | `2` |
 | `external_url` | QuoteHub URL for image access | `""` (auto localhost) |
 | `popup_duration` | Success popup duration (seconds) | `3` |
+| `extraction_mode` | How to extract data from PDFs | `local_first` |
+
+### Extraction Modes
+
+| Mode | Description |
+|------|-------------|
+| `local_first` | **Default** — fast rules-based extraction, falls back to LLM if 0 items found |
+| `llm_first` | LLM extraction with local fallback (best quality, slower) |
+| `llm_only` | LLM extraction only (no local fallback) |
+| `local_only` | Rules-based extraction only (no LLM) |
 
 **Note:** `ai_endpoint` and `model` are intentionally empty in the committed `config.json` and `config.example.json`. Configure them in Settings → Server Connection (recommended) or edit your local `config.json` directly.
 
@@ -200,23 +210,40 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 ```
 quotehub/
 ├── backend/
-│   ├── main.py              # FastAPI application
-│   ├── auth.py              # Authentication primitives
+│   ├── main.py              # FastAPI application, middleware, router registration
+│   ├── utils.py             # Shared utilities (load_config, save_config, repair_json_quotes)
+│   ├── db.py                # Database connection manager (get_db context manager)
+│   ├── auth.py              # Authentication (password hashing, user CRUD, sessions)
+│   ├── parser.py            # PDF/XLSX parsing with OCR support
+│   ├── ocr.py               # OCR via pytesseract + vision LLM
+│   ├── extraction/           # Pluggable extraction package
+│   │   ├── __init__.py      # Unified interface (extract_items_async)
+│   │   ├── router.py        # Mode selection (local_first/llm_first/llm_only/local_only)
+│   │   ├── local.py         # Rules-based extractor
+│   │   └── llm.py           # LLM extractor
+│   ├── routes/               # Route modules (split from main.py)
+│   │   ├── __init__.py      # Route registry
+│   │   ├── auth.py          # Login/logout, user management
+│   │   ├── files.py         # Upload, processing, confirm, delete, export/import
+│   │   ├── ai.py            # AI server connection testing
+│   │   └── admin.py         # Config, cleanup, search, brand suggestions
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
 │   ├── index.html           # HTML structure
 │   ├── style.css            # All styles
 │   └── js/
-│       ├── app.js           # Global state, shared utilities, boot
+│       ├── utils.js         # Shared utilities (escapeHtml, formatBytes, popups, modals)
+│       ├── app.js           # Global state and init
 │       ├── auth.js          # Login, logout, password, roles
 │       ├── nav.js           # Navigation (Process / Search / Settings)
-│       ├── upload.js        # File upload, processing, review
+│       ├── upload.js        # File upload & queue management
+│       ├── progress.js      # SSE streaming & progress bars
+│       ├── review.js        # PDF viewer & items table
 │       ├── search.js        # Search, edit, delete, PDF viewer
 │       ├── settings.js      # Settings, AI connection, backup/restore, logs
 │       └── users.js         # User management (master only)
-├── data/                    # Runtime data — NOT in the repo (gitignored). Created at
-│   # build time and persists in the `quodb_data` Docker volume at runtime
-│   ├── quotations.db        # SQLite database
+├── data/                    # Runtime data (gitignored, persists in Docker volume)
+│   ├── quotations.db        # SQLite database with FTS5
 │   ├── archive/             # Archived PDFs
 │   └── temp/                # Temporary uploads
 ├── rules.md/                # UI system rules (layout, UX principles)
@@ -290,6 +317,7 @@ docker-compose up -d
 - **Backend:** Python, FastAPI, SQLite (FTS5), httpx
 - **Frontend:** Vanilla HTML/CSS/JavaScript (no frameworks)
 - **AI:** Any OpenAI-compatible VLM API (LM Studio, vLLM, etc.)
+- **Extraction:** Pluggable package (local rules-based + LLM with fallback)
 - **Container:** Docker with Python 3.11-slim
 
 ## License

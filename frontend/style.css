@@ -86,6 +86,9 @@ body.role-admin .ai-master-only {
 }
 body.role-admin .users-management-section { display: none !important; }
 
+/* Admin: hide sections that should not be visible at all */
+body.role-admin .ai-master-hidden { display: none !important; }
+
 /* AI Server status + Connect button — only relevant for admin/master */
 body.role-user .ai-admin-master { display: none !important; }
 
@@ -128,8 +131,8 @@ body.role-user .ai-admin-master { display: none !important; }
 
 /* Preview layout: PDF on left, data on right */
 .review-layout { display: flex; gap: 24px; align-items: flex-start; }
-.review-pdf { flex: 0 0 40%; position: sticky; top: 24px; background: #fff; border-radius: 12px; padding: 16px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; }
-.review-pdf-image-wrap { flex: 1 1 auto; overflow: auto; min-height: 0; }
+.review-pdf { flex: 0 0 35%; min-width: 0; position: sticky; top: 24px; background: #fff; border-radius: 12px; padding: 16px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: visible; }
+.review-pdf-image-wrap { flex: 1 1 auto; overflow: auto; min-height: 0; text-align: center; }
 .review-pdf img { display: block; border-radius: 8px; border: 1px solid #eee; }
 .review-pdf .page-nav { margin-top: 12px; display: flex; justify-content: center; gap: 12px; align-items: center; }
 .review-data { flex: 1; min-width: 0; }
@@ -218,6 +221,41 @@ th.sort-desc::after { content: ' ▼'; color: #3498db; }
 .step-connector.completed { background: #27ae60; }
 .step-panel { }
 
+/* Extraction Mode Badge */
+.extraction-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    margin: -8px auto 16px;
+    text-align: center;
+    background: #e8f4fd;
+    color: #2980b9;
+    border: 1px solid #bee5f7;
+}
+.extraction-mode-label {
+    color: #666;
+    font-weight: 400;
+}
+.extraction-mode-badge.mode-local_first {
+    background: #e8f8e8;
+    color: #27ae60;
+    border: #c3e6c3;
+}
+.extraction-mode-badge.mode-llm_only {
+    background: #fef3e2;
+    color: #e67e22;
+    border: #fde5c2;
+}
+.extraction-mode-badge.mode-local_only {
+    background: #f0f0f0;
+    color: #666;
+    border: #ddd;
+}
+
 /* Settings */
 .settings-card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
 .settings-card h3 { margin-bottom: 16px; font-size: 18px; }
@@ -229,6 +267,31 @@ th.sort-desc::after { content: ' ▼'; color: #3498db; }
     border-radius: 6px; font-size: 14px;
 }
 .settings-field input:focus { outline: none; border-color: #3498db; }
+
+/* Review table - Excel-like clean cells */
+.review-data table { background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; table-layout: auto; }
+.review-data th { background: #f0f2f5; font-size: 12px; padding: 8px 6px; white-space: nowrap; border-bottom: 2px solid #d0d0d0; font-weight: 600; color: #444; }
+.review-data td { font-size: 13px; padding: 2px 3px; border-bottom: 1px solid #eee; }
+.review-data td.row-number { text-align: center; color: #999; font-size: 12px; width: 36px; background: #fafbfc; }
+.review-data td input { border: 1px solid transparent; padding: 5px 3px; border-radius: 2px; font-size: 13px; width: 100%; background: transparent; box-sizing: border-box; }
+.review-data td input:hover { background: #f5f9fc; }
+.review-data td input:focus { outline: none; border-color: #3498db; background: #fff; box-shadow: 0 0 0 1px #3498db; }
+.review-data td input.price-input { white-space: nowrap; }
+.review-data tbody tr:hover { background: #f5f9fc; }
+.review-data tbody tr:nth-child(even) { background: #fafbfc; }
+.review-data tbody tr:nth-child(even):hover { background: #f0f5fa; }
+
+/* Edit modal - Excel-like clean cells (matching review page) */
+.edit-modal-data table { background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; table-layout: auto; }
+.edit-modal-data th { background: #f0f2f5; font-size: 12px; padding: 8px 6px; white-space: nowrap; border-bottom: 2px solid #d0d0d0; font-weight: 600; color: #444; }
+.edit-modal-data td { font-size: 13px; padding: 2px 3px; border-bottom: 1px solid #eee; }
+.edit-modal-data td input { border: 1px solid transparent; padding: 5px 3px; border-radius: 2px; font-size: 13px; width: 100%; background: transparent; box-sizing: border-box; }
+.edit-modal-data td input:hover { background: #f5f9fc; }
+.edit-modal-data td input:focus { outline: none; border-color: #3498db; background: #fff; box-shadow: 0 0 0 1px #3498db; }
+.edit-modal-data td input.price-input { white-space: nowrap; }
+.edit-modal-data tbody tr:hover { background: #f5f9fc; }
+.edit-modal-data tbody tr:nth-child(even) { background: #fafbfc; }
+.edit-modal-data tbody tr:nth-child(even):hover { background: #f0f5fa; }
 
 /* Hidden */
 .hidden { display: none !important; }

@@ -95,8 +95,7 @@ function applyAdminSettingsLock() {
     const inputs = [
         'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
-        'settingsLlmFallbackEnabled',
-        'settingsSessionMaxAgeDays', 'settingsIdleTimeout',
+        'settingsOcrEnabled', 'settingsOcrLlmFallback',
     ];
     inputs.forEach(id => {
         const el = document.getElementById(id);
@@ -108,23 +107,21 @@ function applyAdminSettingsLock() {
             el.removeAttribute('title');
         }
     });
-    const saveBtn = document.getElementById('saveSettingsBtn');
-    if (saveBtn) {
-        saveBtn.disabled = isAdmin;
-        if (isAdmin) saveBtn.title = 'Only Master can change AI settings';
-        else saveBtn.removeAttribute('title');
-    }
-    const sessionSaveBtn = document.getElementById('saveSessionSettingsBtn');
-    if (sessionSaveBtn) {
-        sessionSaveBtn.disabled = isAdmin;
-        if (isAdmin) sessionSaveBtn.title = 'Only Master can change Session settings';
-        else sessionSaveBtn.removeAttribute('title');
-    }
+    // Handle all save buttons
+    ['saveSettingsBtn', 'saveSettingsBtn2', 'saveSettingsBtn3'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.disabled = isAdmin;
+            if (isAdmin) btn.title = 'Only Master can change AI settings';
+            else btn.removeAttribute('title');
+        }
+    });
 }
 
 async function doLogin() {
     const u = document.getElementById('loginUsername').value.trim();
     const p = document.getElementById('loginPassword').value;
+    const rememberMe = document.getElementById('rememberMe').checked;
     if (!u || !p) return;
     const btn = document.getElementById('loginSubmitBtn');
     btn.disabled = true;
@@ -135,7 +132,7 @@ async function doLogin() {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: u, password: p }),
+            body: JSON.stringify({ username: u, password: p, remember_me: rememberMe }),
         });
         if (r.ok) {
             const data = await r.json();
@@ -223,9 +220,11 @@ async function doLogout() {
     document.getElementById('settingsView').classList.add('hidden');
     document.getElementById('fileListSection').classList.add('hidden');
     uploadedFiles = [];
-    currentFileIndex = -1;
+    currentFileIndex = null;
     isConnected = false;
     updateConnectionUI();
+    // Reset Remember Me checkbox
+    document.getElementById('rememberMe').checked = false;
     goToStep(1);
     showLogin();
 }

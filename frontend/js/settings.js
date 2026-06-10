@@ -63,16 +63,14 @@ async function saveSettings() {
     const timeoutRaw       = parseInt(document.getElementById('settingsTimeout').value);
     const retriesRaw       = parseInt(document.getElementById('settingsRetries').value);
     const popupDurationRaw = parseInt(document.getElementById('settingsPopupDuration').value);
-    const sessionDaysRaw   = parseInt(document.getElementById('settingsSessionMaxAgeDays').value);
-    const idleTimeoutRaw   = parseInt(document.getElementById('settingsIdleTimeout').value);
-    const llmFallbackEnabled = document.getElementById('settingsLlmFallbackEnabled').checked;
+    const ocrEnabled = document.getElementById('settingsOcrEnabled').checked;
+    const ocrLlmFallback = document.getElementById('settingsOcrLlmFallback').checked;
+    const extractionMode = document.getElementById('settingsExtractionMode').value;
 
     // Numeric safety: Number.isFinite() rejects NaN/Infinity, but allows 0 to pass through
     const timeout           = Number.isFinite(timeoutRaw)         ? timeoutRaw         : 120;
     const retries           = Number.isFinite(retriesRaw)         ? retriesRaw         : 3;
     const popupDuration     = Number.isFinite(popupDurationRaw)   ? popupDurationRaw   : 3;
-    const sessionMaxAgeDays = Number.isFinite(sessionDaysRaw)     ? sessionDaysRaw     : 14;
-    const idleTimeout       = Number.isFinite(idleTimeoutRaw)     ? idleTimeoutRaw     : 60;
 
     if (!endpoint) { showBriefPopup('AI endpoint URL is required'); return; }
     if (!model) { showBriefPopup('Model name is required'); return; }
@@ -88,17 +86,16 @@ async function saveSettings() {
                 timeout: timeout,
                 max_retries: retries,
                 popup_duration: popupDuration,
-                session_max_age: sessionMaxAgeDays * 86400,
-                idle_timeout_minutes: idleTimeout,
-                llm_fallback_enabled: llmFallbackEnabled,
+                ocr_enabled: ocrEnabled,
+                ocr_fallback_to_llm: ocrLlmFallback,
+                extraction_mode: extractionMode,
             })
         });
         const result = await resp.json();
         if (result.status === 'saved') {
             popupDurationSec = popupDuration;
-            // Hot-apply idle-timeout to front-end detector (no restart needed)
-            updateIdleTimeoutFromConfig(result.config);
-            showBriefPopup('Settings saved! Restart the app for Session Duration changes.');
+            updateExtractionModeBadge(extractionMode);
+            showBriefPopup('Settings saved!');
         }
     } catch (e) {
         showBriefPopup('Failed to save settings: ' + e.message);
@@ -186,11 +183,34 @@ function saveLogs() {
 }
 
 async function downloadLogs() {
-    const level = document.getElementById('logLevel').value;
+    const filter = document.getElementById('logLevel').value;
+    
+    // Map filter to level and category parameters
+    let level = 'all';
+    let category = 'all';
+    
+    if (filter === 'errors') {
+        level = 'errors';
+    } else if (filter !== 'all') {
+        category = filter;
+    }
+    
     try {
-        const resp = await fetch(`/logs?level=${level}`);
-        const data = await resp.json();
-        const blob = new Blob([data.logs || 'No logs available'], { type: 'text/plain' });
+        const resp = await fetch(`/logs?level=${level}&category=${category}`);
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => 'Server error');
+            showBriefPopup('Failed to get logs: ' + text);
+            return;
+        }
+        const contentType = resp.headers.get('content-type') || '';
+        let logs;
+        if (contentType.includes('application/json')) {
+            const data = await resp.json();
+            logs = data.logs || 'No logs available';
+        } else {
+            logs = await resp.text();
+        }
+        const blob = new Blob([logs], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -204,7 +224,7 @@ async function downloadLogs() {
 }
 
 // ─── Idle detection (UX improvement; backend is source of truth) ─
-let idleTimeoutMs = 60 * 60 * 1000;  // default 60 min; updated from config
+let idleTimeoutMs = 15 * 60 * 1000;  // default 15 min; updated from config
 let idleTimer = null;
 
 function resetIdleTimer() {
@@ -240,18 +260,41 @@ function updateIdleTimeoutFromConfig(cfg) {
 startIdleDetection();
 
 // ─── System Cleanup (master only) ─────────────────────────
-function formatBytes(bytes) {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-    const k = 1024;
-    const units = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1);
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + units[i];
+
+function loadCleanupStats() {
+    if (!isMaster()) return;
+    
+    apiFetch('/cleanup/stats')
+    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+        if (!ok) throw new Error('Failed to load stats');
+        
+        document.getElementById('cleanupStatEntries').textContent = data.total_entries.toLocaleString();
+        document.getElementById('cleanupStatPDFs').textContent = data.pdf_files.toLocaleString();
+        document.getElementById('cleanupStatImages').textContent = data.image_dirs.toLocaleString();
+        document.getElementById('cleanupStatSize').textContent = formatBytes(data.total_size);
+        
+        // Breakdown by type
+        const breakdown = document.getElementById('cleanupStatBreakdown');
+        if (data.by_type && Object.keys(data.by_type).length > 0) {
+            const parts = Object.entries(data.by_type).map(([type, count]) => `${type}: ${count}`);
+            breakdown.textContent = `By type: ${parts.join(' | ')}`;
+        } else {
+            breakdown.textContent = '';
+        }
+        
+        document.getElementById('cleanupStats').classList.remove('hidden');
+    })
+    .catch(() => {
+        // Silently ignore errors for stats
+    });
 }
 
 function previewCleanup() {
     if (!isMaster()) { showBriefPopup('Only Master can run cleanup'); return; }
     const monthsRaw = parseInt(document.getElementById('cleanupMonths').value);
     const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 ? monthsRaw : 6;
+    const docType = document.getElementById('cleanupDocType').value || 'ALL';
 
     const btn = document.getElementById('cleanupPreviewBtn');
     btn.disabled = true;
@@ -260,7 +303,7 @@ function previewCleanup() {
     apiFetch('/cleanup/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ months: months })
+        body: JSON.stringify({ months: months, document_type: docType })
     })
     .then(r => r.json().then(data => ({ ok: r.ok, data })))
     .then(({ ok, data }) => {
@@ -290,6 +333,7 @@ function executeCleanup() {
     const months = Number.isFinite(monthsRaw) && monthsRaw >= 1 ? monthsRaw : 6;
     const deleteFiles = document.getElementById('cleanupDeleteFiles').checked;
     const confirmText = document.getElementById('cleanupConfirmInput').value.trim();
+    const docType = document.getElementById('cleanupDocType').value || 'ALL';
 
     if (confirmText !== 'DELETE') {
         showBriefPopup('Type DELETE exactly to confirm');
@@ -303,15 +347,16 @@ function executeCleanup() {
     apiFetch('/cleanup/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ months: months, delete_files: deleteFiles })
+        body: JSON.stringify({ months: months, delete_files: deleteFiles, document_type: docType })
     })
     .then(r => r.json().then(data => ({ ok: r.ok, data })))
     .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.detail || 'Cleanup failed');
+        if (!ok || data.success === false) throw new Error(data.detail || 'Cleanup failed');
         showBriefPopup(
             `Cleanup complete. Deleted ${data.entries_deleted} entries, ${data.files_deleted} files, freed ${formatBytes(data.bytes_freed)}.`
         );
         hideCleanupForm();
+        loadCleanupStats(); // Refresh stats after cleanup
     })
     .catch(e => {
         showBriefPopup('Cleanup failed: ' + e.message);
@@ -327,6 +372,7 @@ function hideCleanupForm() {
     document.getElementById('cleanupPreviewResult').classList.add('hidden');
     document.getElementById('cleanupConfirmInput').value = '';
     document.getElementById('cleanupExecuteBtn').disabled = true;
+    loadCleanupStats(); // Refresh stats
 }
 
 // Live-validate the DELETE confirmation input
@@ -339,180 +385,3 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
-
-// ─── Debug Parse (master only) — v0.037.0 Phase 1 ──────────
-let _lastDebugResult = null;
-let _currentDebugTab = 'plumber';
-
-async function runDebugParse() {
-    if (!isMaster()) { showBriefPopup('Only Master can run debug parse'); return; }
-    const idxRaw = parseInt(document.getElementById('debugParseIndex').value);
-    if (!Number.isFinite(idxRaw) || idxRaw < 0) {
-        showBriefPopup('File index must be 0 or greater');
-        return;
-    }
-    const btn = document.getElementById('debugParseBtn');
-    const status = document.getElementById('debugParseStatus');
-    btn.disabled = true;
-    status.textContent = 'Parsing…';
-    status.style.color = '#666';
-    try {
-        const resp = await apiFetch(`/debug/parse?file_index=${idxRaw}`);
-        const data = await resp.json().then(d => ({ ok: resp.ok, data: d }));
-        if (!data.ok) throw new Error(data.data.detail || 'Parse failed');
-        _lastDebugResult = data.data;
-        _currentDebugTab = 'plumber';
-        renderDebugParseModal();
-        openModal('debugParseModal');
-        status.textContent = `Done in ${(data.data.parsers?.pdfplumber?.time_ms || 0) + (data.data.parsers?.pymupdf?.time_ms || 0)}ms`;
-        status.style.color = '#27ae60';
-    } catch (e) {
-        status.textContent = 'Error: ' + e.message;
-        status.style.color = '#e74c3c';
-        showBriefPopup('Debug parse failed: ' + e.message);
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-function renderDebugParseModal() {
-    const r = _lastDebugResult;
-    if (!r) return;
-    // Summary
-    const pp = r.parsers?.pdfplumber || {};
-    const pm = r.parsers?.pymupdf || {};
-    const fmt = (b) => {
-        if (!Number.isFinite(b)) return '—';
-        const k = 1024, u = ['B','KB','MB','GB'];
-        const i = Math.min(Math.floor(Math.log(b)/Math.log(k)), u.length-1);
-        return Math.round((b/Math.pow(k,i))*100)/100 + ' ' + u[i];
-    };
-    // Show which pdfplumber table strategy won per page
-    let strategiesLine = '';
-    if (pp.table_strategies_used && pp.table_strategies_used.length) {
-        const s = pp.table_strategies_used
-            .map(x => `p${x.page}:${x.strategy}(${x.rich_rows} rich rows)`)
-            .join('  ');
-        strategiesLine = `<div style="font-size:11px;color:#888;margin-top:4px">
-            table strategies picked: ${escapeHtml(s)}
-        </div>`;
-    }
-    document.getElementById('debugParseSummary').innerHTML = `
-        <div><strong>${escapeHtml(r.upload_filename || r.filename || '—')}</strong>
-            <span style="color:#666"> — ${r.num_pages || 0} pages, ${fmt(r.file_size)}</span></div>
-        <div style="display:flex;gap:16px;margin-top:8px;flex-wrap:wrap;font-size:12px">
-            <span><strong>pdfplumber:</strong>
-                ${pp.available === false
-                    ? `<span style="color:#e74c3c">unavailable: ${escapeHtml(pp.error || '')}</span>`
-                    : `<span style="color:#27ae60">${pp.time_ms}ms</span>, ${pp.total_text_chars} chars,
-                        ${pp.total_tables} tables, ${pp.total_table_rows} rows`}
-            </span>
-            <span><strong>pymupdf:</strong>
-                ${pm.available === false
-                    ? `<span style="color:#e74c3c">unavailable: ${pm.error || ''}</span>`
-                    : `<span style="color:#27ae60">${pm.time_ms}ms</span>, ${pm.total_text_chars} chars`}
-            </span>
-        </div>
-        ${strategiesLine}
-    `;
-    renderDebugTab();
-}
-
-function renderDebugTab() {
-    if (!_lastDebugResult) return;
-    const r = _lastDebugResult;
-    const content = document.getElementById('debugParseContent');
-    const tab = _currentDebugTab;
-    // Update active tab style
-    ['plumber','plumberTables','mupdf','raw'].forEach(t => {
-        const el = document.getElementById('debugTab' + (t === 'plumber' ? 'Plumber' : t === 'plumberTables' ? 'PlumberTables' : t === 'mupdf' ? 'Mupdf' : 'Raw'));
-        if (el) {
-            el.style.background = t === tab ? '#3498db' : '';
-            el.style.color = t === tab ? '#fff' : '';
-        }
-    });
-    if (tab === 'raw') {
-        content.textContent = JSON.stringify(r, null, 2);
-        return;
-    }
-    let out = '';
-    if (tab === 'plumber' || tab === 'plumberTables') {
-        const p = r.parsers?.pdfplumber;
-        if (!p || p.available === false) {
-            content.textContent = 'pdfplumber unavailable: ' + (p?.error || '?');
-            return;
-        }
-        if (tab === 'plumberTables') {
-            const lines = [];
-            p.pages.forEach(pg => {
-                lines.push(`─── Page ${pg.page} ───`);
-                if (!pg.tables || pg.tables.length === 0) {
-                    lines.push('  (no tables detected)');
-                } else {
-                    pg.tables.forEach(t => {
-                        lines.push(`  Table ${t.table_index}: ${t.row_count} rows (showing ${t.shown_rows})`);
-                        t.rows.forEach((row, i) => {
-                            const cells = Array.isArray(row) ? row.map(c => (c || '').toString().replace(/\s+/g, ' ').trim()) : ['(malformed)'];
-                            lines.push(`    [${i}] ${cells.join(' | ')}`);
-                        });
-                    });
-                }
-                lines.push('');
-            });
-            content.textContent = lines.join('\n');
-            return;
-        }
-        // tab === 'plumber' (text)
-        p.pages.forEach(pg => {
-            out += `─── Page ${pg.page} (${pg.text_chars} chars) ───\n${pg.text}\n\n`;
-        });
-        content.textContent = out || '(empty)';
-        return;
-    }
-    if (tab === 'mupdf') {
-        const p = r.parsers?.pymupdf;
-        if (!p || p.available === false) {
-            content.textContent = 'pymupdf unavailable: ' + (p?.error || '?');
-            return;
-        }
-        p.pages.forEach(pg => {
-            const bc = pg.block_count != null ? `, ${pg.block_count} blocks` : '';
-            out += `─── Page ${pg.page} (${pg.text_chars} chars${bc}) ───\n${pg.text}\n\n`;
-        });
-        content.textContent = out || '(empty)';
-        return;
-    }
-}
-
-function switchDebugTab(tab) {
-    _currentDebugTab = tab;
-    renderDebugTab();
-}
-
-function copyDebugJson() {
-    if (!_lastDebugResult) return;
-    const text = JSON.stringify(_lastDebugResult, null, 2);
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(
-            () => showBriefPopup('JSON copied to clipboard'),
-            () => fallbackCopy(text)
-        );
-    } else {
-        fallbackCopy(text);
-    }
-}
-
-function fallbackCopy(text) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); showBriefPopup('JSON copied'); }
-    catch (e) { showBriefPopup('Copy failed'); }
-    document.body.removeChild(ta);
-}
-
-function escapeHtml(s) {
-    if (s == null) return '';
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}

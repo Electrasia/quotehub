@@ -1,19 +1,17 @@
 """
-backend/normalize.py — LLM fallback for the rules-based extractor.
+backend/extraction/llm.py — LLM-based quotation item extractor.
 
-When the local extractor returns 0 items, this module calls the AI server
-(text mode, not image mode) to get a second chance at extraction.
-
-Text mode is much cheaper than the image-mode VLM call we use elsewhere
-in the app: a typical quotation PDF is <3,000 chars of text, which fits
-in the 4,096-token context window of small models like qwen3-vl-4b.
-
-The prompt is the same shape as the image-mode prompt in main.py:call_ai,
-so the LLM is told to return items in our exact JSON format.
+Calls the AI server (text mode, not image mode) to extract items from
+quotation documents. Text mode is cheaper than image-mode VLM calls:
+a typical quotation PDF is <3,000 chars of text, which fits in the
+4,096-token context window of small models like qwen3-vl-4b.
 
 The output is normalized to the same shape as the rules-based extractor
 (items = [{brand, model, description, quantity, unit, unit_price, total, remark}])
-so callers can drop in the LLM result without further processing.
+so callers can use either extractor interchangeably.
+
+This module is part of the extraction package and can be used standalone
+or as the primary/fallback method in the extraction router.
 """
 import json
 import re
@@ -90,6 +88,45 @@ Text:
 """
 
 
+import re as _re
+
+
+# Table header patterns that pdfplumber merges with the first data row.
+# These confuse the LLM because they look like item data.
+_TABLE_HEADER_PATTERNS = [
+    _re.compile(r"ITEM\s+BRAND\s+MODEL\s+DESCRIPTIONS?\s+QTY\s+.*", _re.IGNORECASE),
+    _re.compile(r"ITEM\s+BRAND\s+MODEL\s+DESCRIPTIONS?\s+.*", _re.IGNORECASE),
+    _re.compile(r"NO\.?\s+BRAND\s+MODEL\s+DESCRIPTIONS?\s+.*", _re.IGNORECASE),
+    _re.compile(r"BRAND\s+MODEL\s+DESCRIPTIONS?\s+QTY\s+.*", _re.IGNORECASE),
+    _re.compile(r"BRAND\s+MODEL\s+DESCRIPTION\s+QTY\s+.*", _re.IGNORECASE),
+    _re.compile(r"UNIT\s+PRICE\s+TOTAL\s+PRICE.*", _re.IGNORECASE),
+    _re.compile(r"HK\s+\(HKD\)\s+HK\s+\(HKD\)", _re.IGNORECASE),
+    _re.compile(r"\(HKD\)\s+\(HKD\)", _re.IGNORECASE),
+]
+
+
+def _strip_table_headers(text):
+    """Remove table header rows that get merged with data by pdfplumber.
+    
+    These headers (e.g. 'ITEM BRAND MODEL DESCRIPTIONS QTY...')
+    confuse the LLM because they look like the first item row.
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        skip = False
+        for pattern in _TABLE_HEADER_PATTERNS:
+            if pattern.search(stripped):
+                skip = True
+                break
+        if not skip:
+            cleaned.append(line)
+    return "\n".join(cleaned)
+
+
 def _format_text_for_llm(text, max_chars=8000):
     """Trim text to fit in the small model's context window.
     Prefer the first chunk (most of the metadata + first table is there).
@@ -162,8 +199,8 @@ async def normalize_text_with_llm(text, cfg=None):
 
     Returns ({}, error_string) on failure.
     """
-    # Import from utils to avoid circular dependency with main.py
-    from .utils import repair_json_quotes, load_config
+    # Import from backend.utils to avoid circular dependency with main.py
+    from ..utils import repair_json_quotes, load_config
 
     if cfg is None:
         cfg = load_config()
@@ -175,6 +212,9 @@ async def normalize_text_with_llm(text, cfg=None):
     if not endpoint or not model:
         return {}, "AI endpoint or model not configured"
 
+    # Strip table headers that confuse the LLM
+    text = _strip_table_headers(text)
+    
     formatted = _format_text_for_llm(text)
     if not formatted.strip():
         return {}, "No text to send to LLM"
@@ -282,8 +322,8 @@ async def normalize_pages_with_llm(pages_text: list, cfg=None):
             "per_page_errors": [...],   # populated on partial failure
         }
     """
-    # Import from utils to avoid circular dependency with main.py
-    from .utils import load_config
+    # Import from backend.utils to avoid circular dependency with main.py
+    from ..utils import load_config
 
     if cfg is None:
         cfg = load_config()
@@ -297,6 +337,7 @@ async def normalize_pages_with_llm(pages_text: list, cfg=None):
 
     for page_idx, page_text in enumerate(pages_text, start=1):
         if not page_text or not page_text.strip():
+            per_page_errors.append(f"Page {page_idx}: No extractable text (scanned/image page?)")
             continue
         result, err = await normalize_text_with_llm(page_text, cfg=cfg)
         if err:
