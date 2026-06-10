@@ -188,6 +188,7 @@ async function removeFile(index) {
 async function clearFiles() {
     await fetch('/clear', { method: 'POST' });
     uploadedFiles = [];
+    fileInput.value = '';
     renderFileList();
     updateStepClickability();
     goToStep(1);
