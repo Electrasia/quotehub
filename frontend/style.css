@@ -233,6 +233,10 @@ th.sort-desc::after { content: ' ▼'; color: #3498db; }
     color: #2980b9;
     border: 1px solid #bee5f7;
 }
+.extraction-mode-label {
+    color: #666;
+    font-weight: 400;
+}
 .extraction-mode-badge.mode-local_first {
     background: #e8f8e8;
     color: #27ae60;
