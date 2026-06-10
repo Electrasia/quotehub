@@ -65,9 +65,13 @@ def _cleanup_cutoff(months: int) -> str:
 
 
 def _get_old_quotations(db, cutoff_date: str) -> list:
-    """Return list of (id, filename) for quotations older than cutoff_date."""
+    """Return list of (id, filename) for quotations older than cutoff_date.
+    
+    Filters on quotation_date (the date on the document), not created_at (insertion time).
+    Skips rows with NULL or empty quotation_date.
+    """
     rows = db.execute(
-        "SELECT id, filename FROM quotations WHERE date(created_at) < ?",
+        "SELECT id, filename FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != '' AND date(quotation_date) < ?",
         (cutoff_date,)
     ).fetchall()
     return [(r["id"], r["filename"]) for r in rows]
@@ -138,7 +142,7 @@ async def cleanup_execute(req: CleanupExecuteRequest):
     # Delete from database
     with get_db() as db:
         cur = db.execute(
-            "DELETE FROM quotations WHERE date(created_at) < ?",
+            "DELETE FROM quotations WHERE quotation_date IS NOT NULL AND quotation_date != '' AND date(quotation_date) < ?",
             (cutoff_date,)
         )
         entries_deleted = cur.rowcount
