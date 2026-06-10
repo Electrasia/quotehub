@@ -86,6 +86,9 @@ body.role-admin .ai-master-only {
 }
 body.role-admin .users-management-section { display: none !important; }
 
+/* Admin: hide sections that should not be visible at all */
+body.role-admin .ai-master-hidden { display: none !important; }
+
 /* AI Server status + Connect button — only relevant for admin/master */
 body.role-user .ai-admin-master { display: none !important; }
 

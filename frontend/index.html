@@ -285,7 +285,7 @@
         <!-- ═══════════════ SETTINGS VIEW ═══════════════ -->
         <div id="settingsView" class="hidden">
             <!-- General Settings -->
-            <div class="settings-card ai-admin-master">
+            <div class="settings-card ai-admin-master ai-master-hidden">
                 <h3>⚙️ General</h3>
                 <div class="settings-field">
                     <label>Popup duration (seconds)</label>
@@ -331,7 +331,7 @@
             </div>
 
             <!-- Extraction Preferences -->
-            <div class="settings-card ai-admin-master">
+            <div class="settings-card ai-admin-master ai-master-hidden">
                 <h3>📦 Extraction Preferences</h3>
                 <div class="settings-field">
                     <label>Extraction Mode</label>
@@ -379,7 +379,7 @@
                     <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Export Backup</button>
                     <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
                 </div>
-                <div style="padding:16px;background:#f8f9fa;border-radius:8px">
+                <div class="ai-master-hidden" style="padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
                     <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
                     <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
@@ -410,7 +410,7 @@
             </div>
 
             <!-- System Cleanup Section (master only) -->
-            <div class="settings-card cleanup-section ai-admin-master">
+            <div class="settings-card cleanup-section ai-admin-master ai-master-hidden">
                 <h3>🧹 System Cleanup</h3>
                 <p style="font-size:13px;color:#666;margin-bottom:16px">
                     Delete old quotations and (optionally) their associated PDF files and images.
