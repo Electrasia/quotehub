@@ -116,6 +116,18 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 if not rows:
                     continue
                 
+                # Trim trailing empty columns — find last column with data
+                last_data_col = 0
+                for row in rows[:50]:
+                    for col_idx in range(len(row) - 1, -1, -1):
+                        if row[col_idx].strip():
+                            if col_idx + 1 > last_data_col:
+                                last_data_col = col_idx + 1
+                            break
+                
+                if last_data_col == 0:
+                    continue  # sheet is completely empty
+                
                 # Render sheet as a table-based image
                 font_size = 13
                 padding = 8
@@ -125,7 +137,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 border_color = "#cccccc"
                 header_bg = "#f0f0f0"
                 
-                max_cols = max(len(r) for r in rows) if rows else 1
+                max_cols = last_data_col
                 
                 # Auto-size columns based on content
                 col_widths = [min_col_width] * max_cols

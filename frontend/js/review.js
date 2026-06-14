@@ -129,14 +129,39 @@ function reviewFitWidth() {
 }
 
 /**
- * Open the original file (PDF/XLSX/etc.) in a new browser window.
+ * Open the original file in a new window.
+ * PDF → new browser tab (browser renders inline).
+ * XLSX/other → new popup window showing preview images.
  */
 function reviewOpenNewWindow() {
     if (!reviewOriginalFilename) {
         showBriefPopup('No file loaded.');
         return;
     }
-    window.open(`/archive/${encodeURIComponent(reviewOriginalFilename)}`, '_blank');
+    const ext = reviewOriginalFilename.split('.').pop().toLowerCase();
+    if (ext === 'pdf') {
+        // PDF: browser can render inline
+        window.open(`/archive/${encodeURIComponent(reviewOriginalFilename)}`, '_blank');
+    } else {
+        // XLSX/other: show preview images in a styled popup
+        if (!reviewPages || reviewPages.length === 0) {
+            showBriefPopup('No preview available for this file.');
+            return;
+        }
+        const previewHtml = `<!DOCTYPE html>
+<html><head><title>${reviewOriginalFilename}</title>
+<style>
+  body { margin: 0; background: #333; display: flex; flex-direction: column; align-items: center; padding: 16px; }
+  h2 { color: #fff; font-family: sans-serif; font-size: 14px; margin: 0 0 12px; }
+  img { max-width: 95vw; max-height: 90vh; margin-bottom: 12px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+</style></head><body>
+<h2>${reviewOriginalFilename}</h2>
+${reviewPages.map(p => `<img src="${p}">`).join('\n')}
+</body></html>`;
+        const blob = new Blob([previewHtml], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+    }
 }
 
 // ─── Review PDF mouse controls (wheel zoom + drag pan) ──────
