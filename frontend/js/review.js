@@ -144,110 +144,86 @@ function reviewOpenNewWindow() {
         return;
     }
 
-    // XLSX/other: open window and load SheetJS to render
-    const w = window.open('', '_blank');
-    if (!w) { showBriefPopup('Popup blocked. Allow popups for this site.'); return; }
-
-    w.document.write(`<!DOCTYPE html>
+    // XLSX/other: fetch file, parse with SheetJS, render in new window
+    const archiveUrl = `/archive/${encodeURIComponent(reviewOriginalFilename)}`;
+    const xlsxDashboard = `<!DOCTYPE html>
 <html><head><title>${escapeHtml(reviewOriginalFilename)}</title>
-<script src="/static/js/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
-  .header { background: #1a1a2e; color: #fff; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
-  .header h1 { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70vw; }
-  .tabs { display: flex; background: #16213e; padding: 0 8px; position: sticky; top: 40px; z-index: 9; }
-  .tabs button { background: none; border: none; color: #8899aa; padding: 8px 16px; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+  .header { background: #1a1a2e; color: #fff; padding: 10px 16px; display: flex; align-items: center; position: sticky; top: 0; z-index: 10; }
+  .header h1 { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabs { display: flex; background: #16213e; padding: 0 8px; position: sticky; top: 40px; z-index: 9; overflow-x: auto; }
+  .tabs button { background: none; border: none; color: #8899aa; padding: 8px 16px; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
   .tabs button.active { color: #fff; border-bottom-color: #4fc3f7; }
-  .sheet-container { overflow: auto; max-height: calc(100vh - 80px); padding: 8px; }
-  table { border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
-  th, td { border: 1px solid #e0e0e0; padding: 4px 8px; font-size: 13px; }
-  th { background: #f0f4f8; font-weight: 600; position: relative; overflow: visible; }
-  td { white-space: pre-wrap; word-wrap: break-word; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
-  tr:hover td { background: #f8f9fa; }
-  .col-resize { position: absolute; right: -3px; top: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 2; background: transparent; }
-  .col-resize:hover, .col-resize.dragging { background: rgba(79,195,247,0.6); }
-  .loading { padding: 40px; text-align: center; color: #666; font-size: 14px; }
+  .sheet-wrap { overflow: auto; max-height: calc(100vh - 80px); }
+  table { border-collapse: collapse; background: #fff; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; font-size: 13px; }
+  th { background: #f0f4f8; font-weight: 600; }
+  td { white-space: pre-wrap; word-wrap: break-word; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  tr:hover td { background: #e8f4fd; }
+  .loading { padding: 40px; text-align: center; color: #666; }
 </style></head><body>
 <div class="header"><h1>${escapeHtml(reviewOriginalFilename)}</h1></div>
 <div class="tabs" id="tabs"></div>
-<div class="sheet-container" id="container"><div class="loading">Loading spreadsheet...</div></div>
+<div class="sheet-wrap" id="container"><div class="loading">Loading spreadsheet...</div></div>
+<script src="/static/js/xlsx.full.min.js"><\/script>
 <script>
-let currentSheet = 0;
-let workbook = null;
+var workbook = null;
+
+function autoSize(table) {
+  var rows = table.querySelectorAll('tr');
+  if (!rows.length) return;
+  var colCount = 0;
+  rows.forEach(function(r) { if (r.cells.length > colCount) colCount = r.cells.length; });
+  var widths = [];
+  for (var c = 0; c < colCount; c++) widths[c] = 60;
+  rows.forEach(function(r) {
+    for (var i = 0; i < r.cells.length && i < colCount; i++) {
+      var txt = r.cells[i].textContent || '';
+      var w = Math.min(Math.max(txt.length * 7 + 20, 60), 300);
+      if (w > widths[i]) widths[i] = w;
+    }
+  });
+  rows.forEach(function(r) {
+    for (var i = 0; i < r.cells.length && i < colCount; i++) {
+      r.cells[i].style.width = widths[i] + 'px';
+      r.cells[i].style.minWidth = widths[i] + 'px';
+    }
+  });
+}
 
 function renderSheet(idx) {
-  currentSheet = idx;
-  const sheet = workbook.Sheets[workbook.SheetNames[idx]];
-  const html = XLSX.utils.sheet_to_html(sheet, { editable: false, id: 'sheetTable' });
+  var sheet = workbook.Sheets[workbook.SheetNames[idx]];
+  var html = XLSX.utils.sheet_to_html(sheet, { editable: false, id: 'sheetTable' });
   document.getElementById('container').innerHTML = html;
-  // Auto-size columns
-  const table = document.getElementById('sheetTable');
-  if (!table) return;
-  const rows = table.querySelectorAll('tr');
-  const colCount = Math.max(...Array.from(rows).map(r => r.cells.length));
-  const widths = Array(colCount).fill(60);
-  rows.forEach(r => Array.from(r.cells).forEach((c, i) => {
-    const txt = c.textContent || '';
-    const w = Math.min(Math.max(txt.length * 7 + 20, 60), 300);
-    if (w > widths[i]) widths[i] = w;
-  }));
-  Array.from(table.querySelectorAll('tr')).forEach(r => {
-    Array.from(r.cells).forEach((c, i) => {
-      c.style.width = widths[i] + 'px';
-      c.style.minWidth = widths[i] + 'px';
-    });
-  });
-  // Add resize handles to first row
-  const firstRow = table.querySelector('tr');
-  if (firstRow) {
-    Array.from(firstRow.cells).forEach((c, i) => {
-      c.style.position = 'relative';
-      const handle = document.createElement('div');
-      handle.className = 'col-resize';
-      handle.onmousedown = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const startX = e.clientX;
-        const startW = c.offsetWidth;
-        handle.classList.add('dragging');
-        const onMove = (e2) => {
-          const newW = Math.max(40, startW + e2.clientX - startX);
-          c.style.width = newW + 'px';
-          c.style.minWidth = newW + 'px';
-        };
-        const onUp = () => {
-          handle.classList.remove('dragging');
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-        };
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      };
-      c.appendChild(handle);
-    });
-  }
+  var table = document.getElementById('sheetTable');
+  if (table) autoSize(table);
 }
 
 function switchSheet(idx) {
-  document.querySelectorAll('.tabs button').forEach((b, i) => b.classList.toggle('active', i === idx));
+  var btns = document.querySelectorAll('.tabs button');
+  for (var i = 0; i < btns.length; i++) btns[i].className = (i === idx) ? 'active' : '';
   renderSheet(idx);
 }
 
-fetch('/archive/${encodeURIComponent(reviewOriginalFilename)}')
-  .then(r => r.arrayBuffer())
-  .then(buf => {
+fetch('${archiveUrl}')
+  .then(function(r) { return r.arrayBuffer(); })
+  .then(function(buf) {
     workbook = XLSX.read(buf, { type: 'array' });
-    const tabs = document.getElementById('tabs');
-    tabs.innerHTML = workbook.SheetNames.map((n, i) =>
-      '<button onclick="switchSheet(' + i + ')" class="' + (i === 0 ? 'active' : '') + '">' + n.replace(/</g, '&lt;') + '</button>'
-    ).join('');
+    var tabs = document.getElementById('tabs');
+    tabs.innerHTML = workbook.SheetNames.map(function(n, i) {
+      return '<button onclick="switchSheet(' + i + ')" class="' + (i === 0 ? 'active' : '') + '">' + n.replace(/</g, '&lt;') + '</button>';
+    }).join('');
     renderSheet(0);
   })
-  .catch(e => { document.getElementById('container').innerHTML = '<div class="loading">Failed to load: ' + e.message + '</div>'; });
-</script>
-</body></html>`);
-    w.document.close();
+  .catch(function(e) { document.getElementById('container').innerHTML = '<div class="loading">Failed to load: ' + e.message + '</div>'; });
+<\/script></body></html>`;
+
+    const blob = new Blob([xlsxDashboard], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
 }
 
 // ─── Review PDF mouse controls (wheel zoom + drag pan) ──────
