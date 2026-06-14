@@ -24,64 +24,105 @@ import httpx
 
 
 # A compact prompt that fits in the small context window of qwen3-vl-4b.
-# Mirrors the rules in main.py:call_ai (the image-mode prompt) so the
-# LLM is told to output the same JSON shape.
-_TEXT_NORMALIZE_PROMPT = """Extract items from this quotation document. Return ONLY valid JSON.
+# Hybrid approach: detect headers first, fall back to content inference.
+_TEXT_NORMALIZE_PROMPT = """Extract items from this document (quotation, purchase order, or price list). Return ONLY valid JSON.
+
+═══ STEP 1: IDENTIFY TABLE COLUMNS ═══
+
+The document text has tables with columns separated by ' | '. First, identify the column layout:
+
+OPTION A — HEADER ROW DETECTED:
+Look for a row containing keywords like: Item, No, #, Brand, Model, Description, Qty, Quantity, Unit, Price, Rate, Total, Amount.
+Map each column position to its field using these keywords.
+
+OPTION B — NO HEADER ROW (content-based inference):
+Use these rules to identify columns by content:
+- Starts with numbers like "1", "1.1", "A" → Item number column
+- Contains currency symbol ($, HKD, USD) or decimal price (16.60) → Price column
+- Contains formatted total (1,234.56 with comma separator) → Total column
+- Small integer (1-999) followed by text unit (pcs, set, m) → Quantity column
+- Short text like "pcs", "set", "m", "lot", "pair" → Unit column
+- Alphanumeric code with letters+numbers (e.g., "CZ7270-000", "SRP-X700") → Model column
+- Long text with product details → Description column
+- Brand names (Sony, QSC, Crestron) → Brand column
+
+═══ STEP 2: EXTRACT ITEMS ═══
 
 STRICT ITEM FILTERING:
-- A valid item MUST have a model/part number AND a numeric unit price.
-- Ignore rows that are category headers, subtotals, totals, or "Optional" notes.
+- A valid item MUST have: (a) model OR description, AND (b) a numeric price
+- If document has no price column (some POs), valid item needs model/description + quantity
+- IGNORE rows that are: category headers, subtotals, totals, discounts, "Optional" notes
+- IGNORE rows that have ONLY a letter/number (like "A", "B", "1") with no other data
 
-BRAND vs SUPPLIER (CRITICAL — DO NOT CONFUSE):
-- BRAND = the product manufacturer (e.g., Sony, QSC, Crestron, Musical Fidelity).
-  This is per-ITEM: which company made THIS product.
-- SUPPLIER = the company ISSUING the quotation (e.g., "ABC Distribution Ltd",
-  "Audio Visual Master Limited"). Usually near the top of the document,
-  after "From:", "Quotation from", or in the letterhead.
-- These are DIFFERENT. Example: a Sony TV sold by "ABC Distributor" has
-  brand="Sony" and supplier="ABC Distributor". Do NOT put the brand name
-  in the supplier field, and do NOT put the supplier name in the brand field.
-- If a header says "From: Sony Hong Kong" and the document sells Sony products,
-  the supplier might be "Sony Hong Kong" (the local entity) and the brand
-  is "Sony" (per-item).
+CATEGORY HEADERS — IGNORE:
+- Single letters (A, B, C) or Roman numerals (I, II, III)
+- Rows with only a description and NO model, NO price, NO quantity
+- Examples: "Fiber Accessories", "Audio System", "Cabling Infrastructure"
 
-MODEL RULES (CRITICAL):
-- Extract ONLY ONE model per item. If multiple, use ONLY the primary; ignore optional alternatives.
-- "change to X" → use ONLY X. "include in ..." → IGNORE the entire row.
+WORK ITEMS — VALID (include them):
+- Rows with description but no quantity (labor/service items)
+- Examples: "Supply and install all accessories...", "Testing and commissioning"
+- Set quantity="" and unit="" for these items
 
-ROW STRUCTURE:
-- Each item = ONE table row. DO NOT merge or mix values from adjacent rows.
+═══ STEP 3: FIELD RULES ═══
 
-DESCRIPTION RULES:
-- Copy full description exactly. Merge multiline into ONE field.
+BRAND vs SUPPLIER (CRITICAL):
+- BRAND = product manufacturer per-ITEM (e.g., Sony, QSC, Digisol)
+- SUPPLIER = company ISSUING the document (e.g., "CHONG HING ELECTRICAL")
+- NEVER confuse these. Brand is per-item, Supplier is per-document.
 
-FIELD NORMALIZATION:
-- PRICE: numeric only, comma as thousand separator, period as decimal, always 2 decimals. e.g. 1157.50, 1500.00. NO currency symbols.
-- CURRENCY: ISO 4217 code (USD, EUR, HKD, GBP, JPY, CNY, MOP, etc.). Infer from context.
-- DATE: YYYY-MM-DD. e.g. 20/1/2026 → 2026-01-20. Use DD/MM/YYYY if the document
-  is from a region that uses that format (HK, EU, AU).
+MODEL RULES:
+- Extract ONLY ONE model per item
+- "change to X" → use ONLY X
+- "include in ..." → IGNORE the entire row
+
+QUANTITY FIELD:
+- Must be numeric: "2", "10", "5.5"
+- If field contains text words (supply, install, include) → it's DESCRIPTION, not quantity
+- Empty quantity is OK for work items
+
+PRICE FIELD:
+- Strip currency symbols ($, HK$, USD, etc.)
+- Format: X,XXX.XX (comma as thousand separator, period as decimal)
+- Example: "$16.60" → "16.60", "$63,080.00" → "63,080.00"
 
 DOCUMENT TYPE: "QUO" (quotation), "PO" (purchase order), "PL" (price list), or "unknown".
+
+═══ OUTPUT FORMAT ═══
 
 Return this exact structure:
 {{
   "document_type": "QUO" | "PO" | "PL" | "unknown",
-  "supplier": "full company name ISSUING the quotation (NOT the product brand)",
-  "currency": "ISO 4217 code",
+  "supplier": "company name ISSUING the document (NOT the product brand)",
+  "currency": "ISO 4217 code (HKD, USD, MOP, etc.)",
   "date": "YYYY-MM-DD",
   "items": [
     {{
-      "brand": "product brand/manufacturer (NOT the supplier name)",
-      "model": "product model or part number",
-      "description": "full description",
-      "quantity": "numeric string",
-      "unit": "pc, m, set, etc.",
+      "brand": "product manufacturer (NOT supplier)",
+      "model": "model/part number",
+      "description": "full product description",
+      "quantity": "numeric string (empty for work items)",
+      "unit": "pcs, set, m, lot, etc.",
       "unit_price": "formatted: X,XXX.XX",
       "total": "formatted: X,XXX.XX",
       "remark": "any extra notes"
     }}
   ]
 }}
+
+═══ EXAMPLES ═══
+
+Example 1 — Valid item with all fields:
+"9.1 | CZ7270-000 | LC Duplex Adapter | 3800 | pcs | $16.60 | $63,080.00"
+→ {{"model": "CZ7270-000", "description": "LC Duplex Adapter", "quantity": "3800", "unit": "pcs", "unit_price": "16.60", "total": "63,080.00"}}
+
+Example 2 — Category header (IGNORE):
+"9 | Fiber Accessories"
+→ IGNORE (no model, no price)
+
+Example 3 — Work item (valid, no quantity):
+"1 | Supply and install all fiber accessories and equipment | | | | 15,000.00 | 15,000.00"
+→ {{"description": "Supply and install all fiber accessories and equipment", "quantity": "", "unit": "", "unit_price": "15,000.00", "total": "15,000.00"}}
 
 Return ONLY valid parseable JSON, no markdown, no explanation.
 
@@ -127,12 +168,24 @@ def _normalize_item(item):
     """Normalize a single LLM-extracted item to our schema."""
     if not isinstance(item, dict):
         return None
+    
+    # Handle quantity: if "3800 pcs", split to qty="3800", unit="pcs"
+    qty_raw = str(item.get("quantity", "") or "").strip()
+    unit_raw = str(item.get("unit", "") or "").strip()
+    
+    if qty_raw and not unit_raw:
+        # Check if quantity contains unit (e.g., "3800 pcs")
+        qty_match = re.match(r'^([\d,.]+)\s*([a-zA-Z]+)$', qty_raw)
+        if qty_match:
+            qty_raw = qty_match.group(1)
+            unit_raw = qty_match.group(2)
+    
     out = {
         "brand": str(item.get("brand", "") or "").strip(),
         "model": str(item.get("model", "") or "").strip(),
         "description": str(item.get("description", "") or "").strip(),
-        "quantity": str(item.get("quantity", "") or "").strip(),
-        "unit": str(item.get("unit", "") or "").strip(),
+        "quantity": qty_raw,
+        "unit": unit_raw,
         "unit_price": _normalize_price(item.get("unit_price", "")),
         "total": _normalize_price(item.get("total", "")),
         "remark": str(item.get("remark", "") or "").strip(),
@@ -144,6 +197,62 @@ def _normalize_item(item):
     if not out["model"] and out["description"]:
         out["model"] = out["description"]
     return out
+
+
+def _validate_item(item):
+    """Post-extraction validation to fix common LLM errors.
+    
+    Returns validated item, or None if item should be filtered out.
+    """
+    if not item:
+        return None
+    
+    # 1. Validate quantity — must be numeric if provided
+    qty = item.get("quantity", "")
+    if qty:
+        clean_qty = qty.replace(",", "").replace(" ", "").strip()
+        if not re.match(r'^\d+(\.\d+)?$', clean_qty):
+            # Quantity contains text — likely a description, not quantity
+            # Move to remark and clear quantity
+            remark = item.get("remark", "")
+            qty_info = f"Qty was: {qty}"
+            item["remark"] = f"{remark} | {qty_info}".strip(" |") if remark else qty_info
+            item["quantity"] = ""
+    
+    # 2. Validate unit_price — must be numeric if provided
+    price = item.get("unit_price", "")
+    if price:
+        clean_price = price.replace(",", "").replace(" ", "").replace("$", "").strip()
+        try:
+            float(clean_price)
+        except ValueError:
+            # Price is not numeric — cannot validate
+            pass
+    
+    # 3. Check for category headers (no model, no price, no quantity)
+    has_model = bool(item.get("model", "").strip())
+    has_price = bool(item.get("unit_price", "").strip()) or bool(item.get("total", "").strip())
+    has_qty = bool(item.get("quantity", "").strip())
+    has_desc = bool(item.get("description", "").strip())
+    
+    # If only description and nothing else — likely a category header
+    if has_desc and not has_model and not has_price and not has_qty:
+        desc_lower = item.get("description", "").lower()
+        # Check if it looks like a category header (short, no specific product info)
+        if len(desc_lower.split()) < 6:
+            return None
+    
+    return item
+
+
+def _validate_items(items):
+    """Validate and filter a list of extracted items."""
+    validated = []
+    for item in items:
+        result = _validate_item(item)
+        if result:
+            validated.append(result)
+    return validated
 
 
 async def normalize_text_with_llm(text, cfg=None):
@@ -233,12 +342,13 @@ async def normalize_text_with_llm(text, cfg=None):
                     if parsed is None:
                         last_error = f"Could not parse LLM JSON: {raw[:200]}"
                         continue
-                    # Normalize
-                    items = []
+                    # Normalize and validate
+                    raw_items = []
                     for it in (parsed.get("items") or []):
                         n = _normalize_item(it)
                         if n:
-                            items.append(n)
+                            raw_items.append(n)
+                    items = _validate_items(raw_items)
                     return {
                         "document_type": parsed.get("document_type", "unknown"),
                         "supplier": str(parsed.get("supplier", "") or "").strip(),

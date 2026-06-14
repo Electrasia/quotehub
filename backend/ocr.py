@@ -265,11 +265,14 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
 
     # Build prompt — ask for text per page, NOT structured JSON
     prompt = (
-        "This is page {p} of a quotation document. "
+        "This is page {p} of a document (quotation, purchase order, or price list). "
         "Read ALL the text on this page exactly as written. "
-        "Preserve table structure by using pipe characters ' | ' between "
-        "columns and newlines between rows. Return ONLY the text — no "
-        "explanation, no markdown formatting."
+        "CRITICAL for tables:\n"
+        "- Use pipe ' | ' between EACH column\n"
+        "- Capture ALL columns including: Item, Brand, Model, Description, Qty, Unit, Price, Total\n"
+        "- Do NOT skip columns on the right side of the table\n"
+        "- If a row has no value for a column, use empty space between the pipes\n"
+        "Return ONLY the raw text — no explanation, no markdown formatting."
     )
 
     try:
