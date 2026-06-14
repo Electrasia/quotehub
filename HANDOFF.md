@@ -2,20 +2,22 @@
 
 ## Current Version
 
-**v0.052.1** (dev branch)
+**v0.052.2** (dev branch)
 
 ---
 
 ## Last Completed Work
 
-### v0.052.1 — XLSX Preview Fixes
-- Fix: XLSX preview rendering — auto-sized columns, cell borders, header styling
+### v0.052.2 — XLSX Preview + Review Cancel
+- Feature: XLSX preview renders as interactive read-only HTML table via SheetJS
+- Feature: XLSX New Window opens spreadsheet viewer (auto-sized columns, sheet tabs)
+- Feature: leaving review without saving shows "Review cancelled" status
+- Fix: XLSX preview — auto-sized columns, cell borders, header styling
 - Fix: trim empty trailing columns in XLSX preview
 - Fix: text wraps within cells instead of spilling into adjacent columns
-- Fix: New Window button uses original filename (works for PDF, XLSX, etc.)
 - Fix: archive endpoint serves correct MIME type per file extension
-- Feature: XLSX New Window opens interactive read-only table view via SheetJS
-- Feature: PDF still opens in new browser tab (unchanged)
+- Fix: New Window button uses original filename (works for PDF, XLSX, etc.)
+- Fix: after cancelling review, always returns to step 1 (upload page)
 
 ### v0.052.0 — Search Enhancements + Validation
 - Feature: document type filter dropdown (ALL/PO/QUO/PL) on search page
@@ -45,8 +47,10 @@
 - `backend/routes/files.py` — reject save if items list empty, XLSX preview rendering improvements
 - `frontend/index.html` — document type dropdown, signout text
 - `frontend/js/app.js` — reviewOriginalFilename global variable
-- `frontend/js/search.js` — document type parameter, limited results handling
-- `frontend/js/review.js` — save button validation, updateDocumentTypeWarning timing fix, SheetJS XLSX viewer
+- `frontend/js/nav.js` — check for cancelled files in queue
+- `frontend/js/progress.js` — cancelled status for processing abort, re-process cancelled files
+- `frontend/js/review.js` — save button validation, updateDocumentTypeWarning timing fix, SheetJS XLSX viewer, backToUpload marks un-saved files as cancelled
+- `frontend/js/upload.js` — display cancelled status, allow remove/move for cancelled files
 - `frontend/js/xlsx.full.min.js` — SheetJS library for client-side XLSX parsing
 - `frontend/style.css` — search dropdown styling
 

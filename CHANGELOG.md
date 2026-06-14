@@ -1,5 +1,16 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.052.2 (2026-06-14)
+- Feature: XLSX preview renders as interactive read-only HTML table via SheetJS
+- Feature: XLSX New Window opens spreadsheet viewer (auto-sized columns, sheet tabs)
+- Feature: leaving review without saving shows "Review cancelled" status
+- Fix: XLSX preview — auto-sized columns, cell borders, header styling
+- Fix: trim empty trailing columns in XLSX preview
+- Fix: text wraps within cells instead of spilling into adjacent columns
+- Fix: archive endpoint serves correct MIME type per file extension
+- Fix: New Window button uses original filename (works for PDF, XLSX, etc.)
+- Fix: after cancelling review, always returns to step 1 (upload page)
+
 ## v0.052.0 (2026-06-14)
 - Feature: document type filter dropdown (ALL/PO/QUO/PL) on search page
 - Feature: auto-search on dropdown change
