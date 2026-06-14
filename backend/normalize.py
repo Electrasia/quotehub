@@ -32,8 +32,18 @@ _TEXT_NORMALIZE_PROMPT = """Extract items from this document (quotation, purchas
 The document text has tables with columns separated by ' | '. First, identify the column layout:
 
 OPTION A — HEADER ROW DETECTED:
-Look for a row containing keywords like: Item, No, #, Brand, Model, Description, Qty, Quantity, Unit, Price, Rate, Total, Amount.
-Map each column position to its field using these keywords.
+Look for a row containing column headers. Map each header to its field:
+
+| Header Keyword | Field Name |
+|----------------|------------|
+| Item, No, #, Line | item_number |
+| Brand, Manufacturer, Make | brand |
+| Model, Part No, P/N, SKU, Code | model |
+| Description, Desc, Product, Name | description |
+| Qty, QTY, Quantity, Q'ty | quantity |
+| Unit, UOM, Unit Type | unit |
+| Price, Unit Price, Rate, Cost | unit_price |
+| Total, Amount, Ext. Price | total |
 
 OPTION B — NO HEADER ROW (content-based inference):
 Use these rules to identify columns by content:
