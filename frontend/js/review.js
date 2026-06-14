@@ -28,6 +28,7 @@ let reviewAutoFit = true;    // true when a new file is loaded (fit-width on fir
  */
 function showReview(filename) {
     document.getElementById('reviewFilename').textContent = filename;
+    reviewOriginalFilename = filename;  // store for New Window button
     document.getElementById('supplierName').value = extractedData.supplier || '';
     document.getElementById('reviewDate').value = extractedData.date || '';
     document.getElementById('documentType').value = extractedData.document_type || 'unknown';
@@ -128,21 +129,14 @@ function reviewFitWidth() {
 }
 
 /**
- * Open the original PDF in a new browser window.
+ * Open the original file (PDF/XLSX/etc.) in a new browser window.
  */
 function reviewOpenNewWindow() {
-    if (!reviewPages || !reviewPages[0]) {
-        showBriefPopup('No PDF loaded.');
+    if (!reviewOriginalFilename) {
+        showBriefPopup('No file loaded.');
         return;
     }
-    // reviewPages[0] is like /images/{stem}/page_1.png — extract {stem} and reconstruct filename
-    const match = reviewPages[0].match(/\/images\/([^/]+)\/page_\d+\.png/);
-    if (!match) {
-        showBriefPopup('Cannot determine PDF filename from page URL.');
-        return;
-    }
-    const filename = `${match[1]}.pdf`;
-    window.open(`/archive/${encodeURIComponent(filename)}`, '_blank');
+    window.open(`/archive/${encodeURIComponent(reviewOriginalFilename)}`, '_blank');
 }
 
 // ─── Review PDF mouse controls (wheel zoom + drag pan) ──────

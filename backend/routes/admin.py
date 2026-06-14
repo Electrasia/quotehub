@@ -465,24 +465,35 @@ async def check_duplicate(filename: str = ""):
     return {"exists": exists, "in_database": db_count > 0, "filename": filename}
 
 
-# ─── View archived PDF ────────────────────────────────────
+# ─── View archived file ──────────────────────────────────
+
+MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+}
 
 @router.get("/archive/{filename}", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def serve_archive(filename: str):
-    """Serve archived PDF file."""
+    """Serve archived file (PDF, XLSX, etc.)."""
     from ..main import ARCHIVE_DIR, UPLOAD_DIR
+    
+    suffix = Path(filename).suffix.lower()
+    media_type = MIME_TYPES.get(suffix, "application/octet-stream")
     
     archive_path = (ARCHIVE_DIR / filename).resolve()
     if not archive_path.is_relative_to(ARCHIVE_DIR.resolve()):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
     if archive_path.exists():
-        return FileResponse(str(archive_path), media_type="application/pdf")
+        return FileResponse(str(archive_path), media_type=media_type)
     
     temp_path = (UPLOAD_DIR / filename).resolve()
     if not temp_path.is_relative_to(UPLOAD_DIR.resolve()):
         return JSONResponse(status_code=403, content={"error": "Access denied"})
     if temp_path.exists():
-        return FileResponse(str(temp_path), media_type="application/pdf")
+        return FileResponse(str(temp_path), media_type=media_type)
     
     return JSONResponse(status_code=404, content={"error": "File not found"})
 

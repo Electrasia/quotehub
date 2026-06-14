@@ -116,28 +116,50 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 if not rows:
                     continue
                 
-                # Render sheet as a simple text-based image
-                font_size = 14
-                padding = 10
-                col_width = 120
-                row_height = 22
+                # Render sheet as a table-based image
+                font_size = 13
+                padding = 8
+                row_height = 24
+                min_col_width = 80
+                max_col_width = 200
+                border_color = "#cccccc"
+                header_bg = "#f0f0f0"
+                
                 max_cols = max(len(r) for r in rows) if rows else 1
-                img_width = max(max_cols * col_width + padding * 2, 400)
-                img_height = max(len(rows) * row_height + padding * 2, 200)
                 
-                img = Image.new("RGB", (img_width, img_height), "white")
-                draw = ImageDraw.Draw(img)
-                
+                # Auto-size columns based on content
+                col_widths = [min_col_width] * max_cols
                 try:
                     font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
                 except Exception:
                     font = ImageFont.load_default()
                 
-                for row_idx, row in enumerate(rows[:50]):  # Limit to 50 rows
+                for row in rows[:50]:
                     for col_idx, cell in enumerate(row[:max_cols]):
-                        x = padding + col_idx * col_width
-                        y = padding + row_idx * row_height
-                        draw.text((x, y), cell[:30], fill="black", font=font)
+                        text_len = len(str(cell)[:40])
+                        needed = min(max(text_len * 8 + padding * 2, min_col_width), max_col_width)
+                        if needed > col_widths[col_idx]:
+                            col_widths[col_idx] = needed
+                
+                img_width = sum(col_widths) + padding * 2
+                img_height = len(rows[:50]) * row_height + padding * 2
+                
+                img = Image.new("RGB", (img_width, img_height), "white")
+                draw = ImageDraw.Draw(img)
+                
+                for row_idx, row in enumerate(rows[:50]):
+                    y = padding + row_idx * row_height
+                    x = padding
+                    for col_idx, cell in enumerate(row[:max_cols]):
+                        w = col_widths[col_idx]
+                        # Draw cell background for header row
+                        if row_idx == 0:
+                            draw.rectangle([x, y, x + w, y + row_height], fill=header_bg)
+                        # Draw cell border
+                        draw.rectangle([x, y, x + w, y + row_height], outline=border_color)
+                        # Draw text
+                        draw.text((x + 4, y + 4), str(cell)[:40], fill="black", font=font)
+                        x += w
                 
                 img_path = img_dir / f"page_{sheet_idx}.png"
                 img.save(str(img_path))

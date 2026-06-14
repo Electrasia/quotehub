@@ -4,6 +4,7 @@ let uploadedFiles = [];
 let currentFileIndex = null;
 let reviewPages = [];
 let reviewCurrentPage = 0;
+let reviewOriginalFilename = null;  // original filename with extension (e.g. "doc.xlsx")
 let extractedData = null;
 let processing = false;
 let abortController = null;
