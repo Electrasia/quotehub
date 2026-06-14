@@ -353,6 +353,7 @@ async def search(q: str = ""):
             filtered = []
             for item in d["items"]:
                 searchable = " ".join([
+                    str(d.get("supplier", "")),
                     str(item.get("brand", "")),
                     str(item.get("model", "")),
                     str(item.get("description", "")),
