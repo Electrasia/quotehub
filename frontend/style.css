@@ -157,7 +157,8 @@ td input.price-input { text-align: right; }
 .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 
 /* Search */
-.search-bar { display: flex; gap: 12px; margin-bottom: 24px; }
+.search-bar { display: flex; gap: 12px; margin-bottom: 24px; align-items: center; }
+.search-bar select { min-width: 90px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
 .search-bar input { flex: 1; padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
 .search-bar input:focus { outline: none; border-color: #3498db; }
 
