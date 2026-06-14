@@ -2,11 +2,15 @@
 
 ## Current Version
 
-**v0.051.0** (dev branch)
+**v0.051.1** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.051.1 — Minor Fixes
+- Fix: pydantic protected_namespaces warning on ProcessRequest
+- Fix: add delay in deploy.sh before reading init password
 
 ### v0.051.0 — Bug Fixes + Deploy Improvement
 - Fix: upload error banner persists after Clear All
@@ -22,20 +26,16 @@
 - Automated test suite: 41 tests across 3 files (config validation, upload validation, extraction)
 - Error banner for upload failures (replaces ephemeral popups)
 
-### v0.049.0 — Admin Role Restrictions + Documentation
-- Admin role: hidden General, Extraction, Cleanup; Import disabled
-- README and Help view updated with correct admin permissions
-- Stale debug docstrings cleaned up
-
 ---
 
 ## Files Changed Recently
 
+- `backend/routes/files.py` — suppress pydantic protected_namespaces warning
 - `backend/db.py` — users table creation in init_db(), migration function for future columns
 - `backend/routes/auth.py` — clear_must_change_password after password change
 - `frontend/js/auth.js` — acknowledge init password after first change
 - `frontend/js/upload.js` — clear error banner on Clear All
-- `deploy.sh` — show initial master password after fresh install
+- `deploy.sh` — show initial master password, add delay before reading it
 
 ---
 

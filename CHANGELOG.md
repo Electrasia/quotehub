@@ -1,5 +1,9 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.051.1 (2026-06-14)
+- Fix: pydantic protected_namespaces warning on ProcessRequest
+- Fix: add delay in deploy.sh before reading init password
+
 ## v0.051.0 (2026-06-14)
 - Fix: upload error banner persists after Clear All
 - Fix: must_change_password flag not cleared after password change
