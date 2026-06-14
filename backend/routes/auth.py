@@ -19,7 +19,7 @@ from ..auth import (
     create_user, update_user_password, update_user_role,
     hard_delete_user, list_users,
     read_init_password, acknowledge_init_password,
-    verify_password, record_login,
+    clear_must_change_password, verify_password, record_login,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,6 +109,7 @@ async def change_password(req: ChangePasswordRequest, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     update_user_password(user["id"], req.new_password)
+    clear_must_change_password(user["id"])
     logger.info("Password changed", extra={
         'category': 'AUTH',
         'user_id': user["id"]

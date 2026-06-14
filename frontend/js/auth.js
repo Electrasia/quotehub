@@ -189,6 +189,8 @@ async function doChangePassword() {
             document.getElementById('cpNew').value = '';
             document.getElementById('cpConfirm').value = '';
             if (currentUser) currentUser.must_change_password = false;
+            // Delete the init password file (one-time after first password change)
+            try { await _nativeFetch('/init-password/acknowledge', { method: 'POST', credentials: 'include' }); } catch(e) {}
             if (!appInitialized) {
                 await initApp();
             }
