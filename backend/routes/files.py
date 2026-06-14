@@ -501,6 +501,8 @@ async def confirm(req: ConfirmRequest):
     
     data = req.data
     items = data.get("items", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="Cannot save: at least one item is required")
     supplier = data.get("supplier", "")
     quotation_date = data.get("date", "")
     currency = items[0].get("currency", "") if items else ""

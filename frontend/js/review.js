@@ -49,7 +49,8 @@ function updateDocumentTypeWarning() {
     const warn = document.getElementById('docTypeWarning');
     warn.style.display = (val === 'unknown') ? 'inline' : 'none';
     const saveBtn = document.querySelector('button[onclick="confirmSave()"]');
-    if (saveBtn) saveBtn.disabled = (val === 'unknown');
+    const rowCount = document.querySelectorAll('#itemsTable tr').length;
+    if (saveBtn) saveBtn.disabled = (val === 'unknown' || rowCount === 0);
 }
 
 // ─── Review PDF viewer ───────────────────────────────────────
@@ -494,6 +495,10 @@ function getEditedData() {
 async function confirmSave() {
     try {
         const data = getEditedData();
+        if (!data.items || data.items.length === 0) {
+            showBriefPopup('Cannot save: add at least one item before saving.');
+            return;
+        }
         data.extraction_method = 'llm_first';
         const resp = await fetch('/confirm', {
             method: 'POST',
