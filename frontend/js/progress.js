@@ -25,14 +25,14 @@ async function processAll() {
     if (!isConnected) { showBriefPopup('Please connect to AI server first.'); return; }
     if (uploadedFiles.length === 0) return;
 
-    let fileIdx = uploadedFiles.findIndex(f => f.status === 'pending');
+    let fileIdx = uploadedFiles.findIndex(f => f.status === 'pending' || f.status === 'cancelled');
     if (fileIdx === -1) { showBriefPopup('No pending files to process.'); return; }
 
     const file = uploadedFiles[fileIdx];
     const fileId = file.file_id;
     currentFileIndex = fileId;
 
-    // Mark as processing
+    // Mark as processing (reset cancelled status)
     uploadedFiles[fileIdx].status = 'processing';
     uploadedFiles[fileIdx].progress = 'Starting...';
     renderFileList();
@@ -191,20 +191,21 @@ function cancelProcessing() {
     }
     processing = false;
     currentFilePercent = 0;
-    // Reset current file status to pending
+    // Mark current file as cancelled (not pending — user explicitly stopped)
     if (currentFileIndex) {
         const fileIdx = uploadedFiles.findIndex(f => f.file_id === currentFileIndex);
-        if (fileIdx !== -1) {
-            uploadedFiles[fileIdx].status = 'pending';
+        if (fileIdx !== -1 && uploadedFiles[fileIdx].status === 'processing') {
+            uploadedFiles[fileIdx].status = 'cancelled';
             uploadedFiles[fileIdx].progress = '';
             renderFileList();
         }
     }
+    currentFileIndex = null;
     // Hide inline progress area (v0.038.0: replaces old modal)
     const inlineProgress = document.getElementById('inlineProgress');
     if (inlineProgress) inlineProgress.classList.add('hidden');
     updateOverallProgress();
     // Return to file list (step 3 has no cancel/progress, so don't leave user stuck there)
-    const hasPending = uploadedFiles.some(f => f.status === 'pending');
+    const hasPending = uploadedFiles.some(f => f.status === 'pending' || f.status === 'cancelled');
     goToStep(hasPending ? 2 : 1);
 }

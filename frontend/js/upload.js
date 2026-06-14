@@ -139,7 +139,7 @@ function renderFileList() {
         return;
     }
     section.classList.remove('hidden');
-    const pendingCount = uploadedFiles.filter(f => f.status === 'pending').length;
+    const pendingCount = uploadedFiles.filter(f => f.status === 'pending' || f.status === 'cancelled').length;
     const doneCount = uploadedFiles.filter(f => f.status === 'done' || f.status === 'saved').length;
     const html = uploadedFiles.map((f, i) => {
         let statusHtml = '';
@@ -149,15 +149,16 @@ function renderFileList() {
         else if (f.status === 'saved') statusHtml = '<span class="file-status done">✓ Saved</span>';
         else if (f.status === 'error') statusHtml = '<span class="file-status error">✗ Error</span>';
         else if (f.status === 'skipped') statusHtml = '<span class="file-status" style="color:#999">Skipped</span>';
+        else if (f.status === 'cancelled') statusHtml = '<span class="file-status" style="color:#e67e22">⊘ Review cancelled</span>';
         const dupBadge = f.duplicate ? '<span class="file-status" style="background:#fef9e7;color:#e67e22;margin-right:6px">⚠ Duplicate</span>' : '';
-        const canMove = f.status === 'pending';
+        const canMove = f.status === 'pending' || f.status === 'cancelled';
         const moveHtml = canMove ? `
             <span style="display:inline-flex;gap:2px;margin-right:8px">
                 <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up" style="padding:2px 6px;font-size:11px">▲</button>
                 <button class="btn btn-sm btn-secondary" onclick="moveFile(${i}, 1)" ${i === uploadedFiles.length - 1 ? 'disabled' : ''} title="Move down" style="padding:2px 6px;font-size:11px">▼</button>
             </span>
         ` : '';
-        const canRemove = f.status === 'pending' || f.status === 'error' || f.status === 'skipped';
+        const canRemove = f.status === 'pending' || f.status === 'error' || f.status === 'skipped' || f.status === 'cancelled';
         const removeHtml = canRemove
             ? `<button class="btn btn-sm btn-danger" onclick="removeFile(${i})" title="Remove" style="padding:2px 6px;font-size:11px">✕</button>`
             : '';

@@ -612,7 +612,7 @@ function backToUpload() {
     extractedData = null;
     reviewPages = [];
     showProcessView();
-    const hasPending = uploadedFiles.some(f => f.status === 'pending');
+    const hasPending = uploadedFiles.some(f => f.status === 'pending' || f.status === 'cancelled');
     if (hasPending) {
         goToStep(2);
     } else {
@@ -623,7 +623,7 @@ function backToUpload() {
 
 function autoProcessNext() {
     if (!isConnected) return;
-    const nextIdx = uploadedFiles.findIndex(f => f.status === 'pending');
+    const nextIdx = uploadedFiles.findIndex(f => f.status === 'pending' || f.status === 'cancelled');
     if (nextIdx !== -1) {
         processAll();
     }

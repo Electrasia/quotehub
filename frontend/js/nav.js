@@ -86,7 +86,7 @@ function isOnProcessView() {
 
 function hasProcessWorkInProgress() {
     if (processing) return true;                       // active stream
-    if (isOnProcessView() && uploadedFiles.some(f => f.status === 'pending')) return true; // queue not drained
+    if (isOnProcessView() && uploadedFiles.some(f => f.status === 'pending' || f.status === 'cancelled')) return true; // queue not drained
     return false;
 }
 
@@ -102,7 +102,7 @@ function showConfirmNavDialog() {
         stopBtn.classList.remove('btn-secondary');
         stopBtn.classList.add('btn-danger');
     } else {
-        const n = uploadedFiles.filter(f => f.status === 'pending').length;
+        const n = uploadedFiles.filter(f => f.status === 'pending' || f.status === 'cancelled').length;
         titleEl.textContent = '⚠ Files are waiting to be processed';
         messageEl.innerHTML = `<strong>${n}</strong> file${n > 1 ? 's are' : ' is'} waiting in the queue.<br>Leave this page? Files will stay in the queue for later processing.`;
         stopBtn.textContent = 'Leave';
