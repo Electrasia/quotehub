@@ -145,7 +145,7 @@ function reviewOpenNewWindow() {
     }
 
     // XLSX/other: fetch file, parse with SheetJS, render in new window
-    const archiveUrl = `/archive/${encodeURIComponent(reviewOriginalFilename)}`;
+    const archiveUrl = window.location.origin + '/archive/' + encodeURIComponent(reviewOriginalFilename);
     const xlsxDashboard = `<!DOCTYPE html>
 <html><head><title>${escapeHtml(reviewOriginalFilename)}</title>
 <style>
@@ -168,7 +168,7 @@ function reviewOpenNewWindow() {
 <div class="header"><h1>${escapeHtml(reviewOriginalFilename)}</h1></div>
 <div class="tabs" id="tabs"></div>
 <div class="sheet-wrap" id="container"><div class="loading">Loading spreadsheet...</div></div>
-<script src="/static/js/xlsx.full.min.js"><\/script>
+<script src="${window.location.origin}/static/js/xlsx.full.min.js"><\/script>
 <script>
 var workbook = null;
 
