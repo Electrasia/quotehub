@@ -161,12 +161,12 @@ function reviewOpenNewWindow() {
   .tabs button.active { color: #fff; border-bottom-color: #4fc3f7; }
   .sheet-container { overflow: auto; max-height: calc(100vh - 80px); padding: 8px; }
   table { border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
-  th, td { border: 1px solid #e0e0e0; padding: 4px 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
-  th { background: #f0f4f8; font-weight: 600; position: relative; }
+  th, td { border: 1px solid #e0e0e0; padding: 4px 8px; font-size: 13px; }
+  th { background: #f0f4f8; font-weight: 600; position: relative; overflow: visible; }
+  td { white-space: pre-wrap; word-wrap: break-word; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
   tr:hover td { background: #f8f9fa; }
-  td { word-wrap: break-word; white-space: pre-wrap; }
-  .col-resize { position: absolute; right: -2px; top: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 1; }
-  .col-resize:hover, .col-resize.dragging { background: #4fc3f7; }
+  .col-resize { position: absolute; right: -3px; top: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 2; background: transparent; }
+  .col-resize:hover, .col-resize.dragging { background: rgba(79,195,247,0.6); }
   .loading { padding: 40px; text-align: center; color: #666; font-size: 14px; }
 </style></head><body>
 <div class="header"><h1>${escapeHtml(reviewOriginalFilename)}</h1></div>
@@ -196,25 +196,37 @@ function renderSheet(idx) {
     Array.from(r.cells).forEach((c, i) => {
       c.style.width = widths[i] + 'px';
       c.style.minWidth = widths[i] + 'px';
-      if (r === table.querySelector('tr') && c.tagName === 'TH') {
-        const handle = document.createElement('div');
-        handle.className = 'col-resize';
-        let startX, startW;
-        handle.onmousedown = (e) => {
-          e.preventDefault();
-          startX = e.clientX;
-          startW = widths[i];
-          handle.classList.add('dragging');
-          const onMove = (e2) => { c.style.width = Math.max(40, startW + e2.clientX - startX) + 'px'; c.style.minWidth = c.style.width; };
-          const onUp = () => { handle.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-          document.addEventListener('mousemove', onMove);
-          document.addEventListener('mouseup', onUp);
-        };
-        c.appendChild(handle);
-        c.style.position = 'relative';
-      }
     });
   });
+  // Add resize handles to first row
+  const firstRow = table.querySelector('tr');
+  if (firstRow) {
+    Array.from(firstRow.cells).forEach((c, i) => {
+      c.style.position = 'relative';
+      const handle = document.createElement('div');
+      handle.className = 'col-resize';
+      handle.onmousedown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startW = c.offsetWidth;
+        handle.classList.add('dragging');
+        const onMove = (e2) => {
+          const newW = Math.max(40, startW + e2.clientX - startX);
+          c.style.width = newW + 'px';
+          c.style.minWidth = newW + 'px';
+        };
+        const onUp = () => {
+          handle.classList.remove('dragging');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      };
+      c.appendChild(handle);
+    });
+  }
 }
 
 function switchSheet(idx) {
