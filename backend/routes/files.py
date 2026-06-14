@@ -183,6 +183,7 @@ router = APIRouter(tags=["files"])
 # ─── Models ────────────────────────────────────────────────
 
 class ProcessRequest(BaseModel):
+    model_config = {'protected_namespaces': ()}
     file_id: str | None = None
     file_index: int | None = None
     model_source: str = "auto"
