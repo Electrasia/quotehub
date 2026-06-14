@@ -131,11 +131,11 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 # Render sheet as a table-based image
                 font_size = 13
                 padding = 8
-                row_height = 24
                 min_col_width = 80
                 max_col_width = 200
                 border_color = "#cccccc"
                 header_bg = "#f0f0f0"
+                line_height = 16
                 
                 max_cols = last_data_col
                 
@@ -146,32 +146,66 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 except Exception:
                     font = ImageFont.load_default()
                 
+                def _wrap_text(text, max_width):
+                    """Break text into lines that fit within max_width pixels."""
+                    words = str(text).split()
+                    if not words:
+                        return [""]
+                    lines = []
+                    current = words[0]
+                    for word in words[1:]:
+                        test = current + " " + word
+                        bbox = font.getbbox(test)
+                        if bbox[2] - bbox[0] <= max_width:
+                            current = test
+                        else:
+                            lines.append(current)
+                            current = word
+                    lines.append(current)
+                    return lines
+                
+                # Pre-calculate wrapped text for all cells
+                cell_lines = []  # cell_lines[row_idx][col_idx] = list of lines
                 for row in rows[:50]:
+                    row_lines = []
                     for col_idx, cell in enumerate(row[:max_cols]):
-                        text_len = len(str(cell)[:40])
-                        needed = min(max(text_len * 8 + padding * 2, min_col_width), max_col_width)
-                        if needed > col_widths[col_idx]:
-                            col_widths[col_idx] = needed
+                        w = col_widths[col_idx]
+                        max_text_w = w - padding  # 4px left + ~4px right
+                        lines = _wrap_text(cell, max_text_w)
+                        row_lines.append(lines)
+                    cell_lines.append(row_lines)
+                
+                # Calculate row heights based on wrapped text
+                row_heights = []
+                for row_idx, row_lc in enumerate(cell_lines):
+                    max_lines = 1
+                    for lines in row_lc:
+                        if len(lines) > max_lines:
+                            max_lines = len(lines)
+                    row_heights.append(max(max_lines * line_height + padding, 24))
                 
                 img_width = sum(col_widths) + padding * 2
-                img_height = len(rows[:50]) * row_height + padding * 2
+                img_height = sum(row_heights) + padding * 2
                 
                 img = Image.new("RGB", (img_width, img_height), "white")
                 draw = ImageDraw.Draw(img)
                 
-                for row_idx, row in enumerate(rows[:50]):
-                    y = padding + row_idx * row_height
+                y = padding
+                for row_idx, row_lc in enumerate(cell_lines):
+                    rh = row_heights[row_idx]
                     x = padding
-                    for col_idx, cell in enumerate(row[:max_cols]):
+                    for col_idx, lines in enumerate(row_lc):
                         w = col_widths[col_idx]
                         # Draw cell background for header row
                         if row_idx == 0:
-                            draw.rectangle([x, y, x + w, y + row_height], fill=header_bg)
+                            draw.rectangle([x, y, x + w, y + rh], fill=header_bg)
                         # Draw cell border
-                        draw.rectangle([x, y, x + w, y + row_height], outline=border_color)
-                        # Draw text
-                        draw.text((x + 4, y + 4), str(cell)[:40], fill="black", font=font)
+                        draw.rectangle([x, y, x + w, y + rh], outline=border_color)
+                        # Draw wrapped text
+                        for line_idx, line in enumerate(lines):
+                            draw.text((x + 4, y + 4 + line_idx * line_height), line, fill="black", font=font)
                         x += w
+                    y += rh
                 
                 img_path = img_dir / f"page_{sheet_idx}.png"
                 img.save(str(img_path))
