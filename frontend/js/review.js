@@ -31,11 +31,11 @@ function showReview(filename) {
     document.getElementById('supplierName').value = extractedData.supplier || '';
     document.getElementById('reviewDate').value = extractedData.date || '';
     document.getElementById('documentType').value = extractedData.document_type || 'unknown';
-    updateDocumentTypeWarning();
     const tbody = document.getElementById('itemsTable');
     tbody.innerHTML = '';
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
+    updateDocumentTypeWarning();
     reviewAutoFit = true;
     updateReviewPdf();
     goToStep(4);
