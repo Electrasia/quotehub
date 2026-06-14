@@ -1,5 +1,14 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.052.3 (2026-06-14)
+- Feature: hybrid column detection (header row + content-based inference)
+- Feature: post-processing validation for extracted items
+- Feature: quantity/unit splitting (e.g., "3800 pcs" → qty=3800, unit=pcs)
+- Feature: category headers automatically filtered out
+- Feature: few-shot examples for valid items, headers, and work items
+- Fix: OCR prompt now captures ALL columns including Price/Total
+- Fix: LLM prompt handles PO format (no unit price required)
+
 ## v0.052.2 (2026-06-14)
 - Feature: XLSX preview renders as interactive read-only HTML table via SheetJS
 - Feature: XLSX New Window opens spreadsheet viewer (auto-sized columns, sheet tabs)

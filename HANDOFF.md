@@ -2,11 +2,20 @@
 
 ## Current Version
 
-**v0.052.2** (dev branch)
+**v0.052.3** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.052.3 — LLM Extraction Improvements
+- Feature: hybrid column detection (header row + content-based inference)
+- Feature: post-processing validation for extracted items
+- Feature: quantity/unit splitting (e.g., "3800 pcs" → qty=3800, unit=pcs)
+- Feature: category headers automatically filtered out
+- Feature: few-shot examples for valid items, headers, and work items
+- Fix: OCR prompt now captures ALL columns including Price/Total
+- Fix: LLM prompt handles PO format (no unit price required)
 
 ### v0.052.2 — XLSX Preview + Review Cancel
 - Feature: XLSX preview renders as interactive read-only HTML table via SheetJS
