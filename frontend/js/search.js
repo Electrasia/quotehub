@@ -137,7 +137,9 @@ async function searchQuotations() {
         params.set('document_type', docType);
     }
     const resp = await fetch(`/search?${params}`);
-    const results = await resp.json();
+    const data = await resp.json();
+    const results = data.results || [];
+    const limited = data.limited || false;
     const container = document.getElementById('searchResults');
     searchSelectedIds.clear();
     document.getElementById('searchActions').classList.add('hidden');
@@ -157,6 +159,12 @@ async function searchQuotations() {
 
     lastSearchItems = allItems;
     renderSearchResults();
+
+    // Show helper message when results are limited
+    if (limited) {
+        const helperMsg = '<p style="padding:8px 16px;font-size:12px;color:#888;background:#f8f9fa;border-radius:6px;margin-bottom:12px">Showing 10 most recent. Enter a search term to see all results.</p>';
+        container.innerHTML = helperMsg + container.innerHTML;
+    }
 }
 
 // ─── PDF Viewer ──────────────────────────────────────────────

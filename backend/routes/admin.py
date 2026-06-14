@@ -367,11 +367,11 @@ async def search(q: str = "", document_type: str = ""):
             # No search query — just filter by document_type if provided
             if document_type and document_type.upper() != "ALL":
                 rows = db.execute(
-                    "SELECT * FROM quotations WHERE document_type = ? ORDER BY created_at DESC",
+                    "SELECT * FROM quotations WHERE document_type = ? ORDER BY created_at DESC LIMIT 10",
                     (document_type.upper(),)
                 ).fetchall()
             else:
-                rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
+                rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC LIMIT 10").fetchall()
     
     q_lower = q.lower() if q else ""
     words = q_lower.split() if q_lower else []
@@ -397,7 +397,11 @@ async def search(q: str = "", document_type: str = ""):
                     filtered.append(item)
             d["items"] = filtered
         results.append(d)
-    return results
+    
+    # Determine if results are limited (empty search with no query)
+    limited = (not q or not q.strip()) and len(rows) == 10
+    
+    return {"results": results, "limited": limited}
 
 
 # ─── Brand Suggestion ─────────────────────────────────────
