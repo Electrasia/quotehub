@@ -75,4 +75,18 @@ docker exec quodb cat /app/VERSION 2>/dev/null || echo "(could not read version)
 docker exec quodb cat /app/GIT_COMMIT 2>/dev/null || echo "(could not read commit)"
 echo ""
 echo "App is available at: http://localhost:8000"
+
+# Show initial master password (only on fresh install or after password reset)
+INIT_PW=$(docker exec quodb cat /app/data/init_password.txt 2>/dev/null || true)
+if [ -n "$INIT_PW" ]; then
+    echo ""
+    echo "================================================"
+    echo "  INITIAL MASTER PASSWORD"
+    echo "================================================"
+    echo "  Username: master"
+    echo "  Password: $INIT_PW"
+    echo ""
+    echo "  Login and change this password immediately."
+    echo "================================================"
+fi
 echo ""
