@@ -2,11 +2,20 @@
 
 ## Current Version
 
-**v0.052.0** (dev branch)
+**v0.052.1** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.052.1 — XLSX Preview Fixes
+- Fix: XLSX preview rendering — auto-sized columns, cell borders, header styling
+- Fix: trim empty trailing columns in XLSX preview
+- Fix: text wraps within cells instead of spilling into adjacent columns
+- Fix: New Window button uses original filename (works for PDF, XLSX, etc.)
+- Fix: archive endpoint serves correct MIME type per file extension
+- Feature: XLSX New Window opens interactive read-only table view via SheetJS
+- Feature: PDF still opens in new browser tab (unchanged)
 
 ### v0.052.0 — Search Enhancements + Validation
 - Feature: document type filter dropdown (ALL/PO/QUO/PL) on search page
@@ -32,11 +41,13 @@
 
 ## Files Changed Recently
 
-- `backend/routes/admin.py` — search with document_type filter, LIMIT 10 for empty search, supplier in item filtering
-- `backend/routes/files.py` — reject save if items list empty
+- `backend/routes/admin.py` — search with document_type filter, LIMIT 10 for empty search, supplier in item filtering, archive MIME types
+- `backend/routes/files.py` — reject save if items list empty, XLSX preview rendering improvements
 - `frontend/index.html` — document type dropdown, signout text
+- `frontend/js/app.js` — reviewOriginalFilename global variable
 - `frontend/js/search.js` — document type parameter, limited results handling
-- `frontend/js/review.js` — save button validation, updateDocumentTypeWarning timing fix
+- `frontend/js/review.js` — save button validation, updateDocumentTypeWarning timing fix, SheetJS XLSX viewer
+- `frontend/js/xlsx.full.min.js` — SheetJS library for client-side XLSX parsing
 - `frontend/style.css` — search dropdown styling
 
 ---
@@ -60,6 +71,7 @@
 ## Known Issues
 
 - `data/images/` directory may have orphaned files (permission issues with Docker-owned files)
+- **XLSX viewer column resizing** — SheetJS renders a read-only HTML table; user cannot manually resize columns. Columns are auto-sized to fit content. To revisit: consider a library with built-in column resize support (e.g., ReoGrid, Luckysheet/Univer, or custom drag handlers with better event handling)
 
 ---
 
