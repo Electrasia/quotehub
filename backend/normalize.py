@@ -142,14 +142,36 @@ Text:
 
 
 def _format_text_for_llm(text, max_chars=8000):
-    """Trim text to fit in the small model's context window.
-    Prefer the first chunk (most of the metadata + first table is there).
+    """Clean and trim text to fit in the small model's context window.
+    
+    Pre-processing:
+    - Remove empty rows (pipe-only lines like "| | | | | | |")
+    - Remove markdown table separators (| --- | --- | ...)
+    - Keep only rows with actual content
     """
     if not text:
         return ""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "\n\n[... text truncated for context window ...]"
+    
+    lines = text.splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip empty lines
+        if not stripped:
+            continue
+        # Skip pipe-only lines (empty table rows)
+        if stripped.replace("|", "").replace("-", "").replace(" ", "") == "":
+            continue
+        # Skip markdown table separators (| --- | --- |)
+        if re.match(r'^\|[\s\-|]+\|$', stripped):
+            continue
+        cleaned.append(line)
+    
+    cleaned_text = "\n".join(cleaned)
+    
+    if len(cleaned_text) <= max_chars:
+        return cleaned_text
+    return cleaned_text[:max_chars] + "\n\n[... text truncated for context window ...]"
 
 
 def _normalize_price(s):
