@@ -1,5 +1,11 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.051.0 (2026-06-14)
+- Fix: upload error banner persists after Clear All
+- Fix: must_change_password flag not cleared after password change
+- Fix: users table missing on fresh Docker installs
+- Feature: deploy.sh shows initial master password
+
 ## v0.050.0 (2026-06-11)
 - Config validation: timeout, retries, extraction_mode, endpoint URL, booleans
 - Empty file upload rejection (backend + frontend validation)

@@ -2,11 +2,17 @@
 
 ## Current Version
 
-**v0.050.0** (dev branch)
+**v0.051.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.051.0 — Bug Fixes + Deploy Improvement
+- Fix: upload error banner persists after Clear All
+- Fix: must_change_password flag not cleared after password change (backend + frontend)
+- Fix: users table missing on fresh Docker installs (init_db now creates it)
+- Feature: deploy.sh shows initial master password after fresh install
 
 ### v0.050.0 — Hardening + Automated Tests
 - Config validation: timeout (10-300), retries (1-10), extraction_mode enum, endpoint URL format, booleans
@@ -21,27 +27,15 @@
 - README and Help view updated with correct admin permissions
 - Stale debug docstrings cleaned up
 
-### v0.048.0 — Bug Fixes + Dev Tools Removal
-- Search sort fix: Date and Supplier columns now work correctly
-- Search delete fix: rowcount check, image dir cleanup, accurate count
-- Cleanup fix: ImportError for DB_PATH resolved
-- Developer Tools feature removed (843 lines deleted)
-
 ---
 
 ## Files Changed Recently
 
-- `backend/routes/files.py` — Upload validation, extraction_mode default fix
-- `backend/routes/admin.py` — Config validation (_validate_config), HTTP 422 on invalid
-- `backend/utils.py` — Canonical _CONFIG_DEFAULTS
-- `frontend/js/upload.js` — Client-side validation, error banner
-- `frontend/js/settings.js` — Config save error display
-- `frontend/index.html` — #uploadErrors div
-- `config.example.json` — extraction_mode key
-- `tests/conftest.py` — Shared fixtures
-- `tests/test_config_validation.py` — 15 tests
-- `tests/test_upload_validation.py` — 5 tests
-- `tests/test_extract.py` — 20 tests
+- `backend/db.py` — users table creation in init_db(), migration function for future columns
+- `backend/routes/auth.py` — clear_must_change_password after password change
+- `frontend/js/auth.js` — acknowledge init password after first change
+- `frontend/js/upload.js` — clear error banner on Clear All
+- `deploy.sh` — show initial master password after fresh install
 
 ---
 
