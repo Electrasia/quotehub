@@ -47,7 +47,7 @@ class TestValidateConfig:
     # ── Extraction mode ────────────────────────────────────
 
     def test_valid_extraction_modes(self):
-        for mode in ("llm_first", "local_first", "llm_only", "local_only"):
+        for mode in ("vision_first", "llm_first", "local_first", "vision_only", "llm_only", "local_only"):
             assert _validate_config({"extraction_mode": mode}) == []
 
     def test_invalid_extraction_mode(self):
@@ -96,6 +96,23 @@ class TestValidateConfig:
         errors = _validate_config({"max_retries": -1})
         assert len(errors) == 1
 
+    # ── DPI validation ────────────────────────────────────
+
+    def test_valid_dpi(self):
+        assert _validate_config({"llm_dpi": 72}) == []
+        assert _validate_config({"llm_dpi": 150}) == []
+        assert _validate_config({"llm_dpi": 300}) == []
+
+    def test_invalid_dpi(self):
+        errors = _validate_config({"llm_dpi": 50})
+        assert len(errors) == 1
+        assert "llm_dpi" in errors[0]
+
+    def test_invalid_dpi_too_high(self):
+        errors = _validate_config({"llm_dpi": 400})
+        assert len(errors) == 1
+        assert "llm_dpi" in errors[0]
+
     # ── Multiple errors ────────────────────────────────────
 
     def test_multiple_errors_returned(self):
@@ -103,6 +120,7 @@ class TestValidateConfig:
             "timeout": -1,
             "max_retries": 999,
             "extraction_mode": "invalid",
+            "llm_dpi": 50,
         }
         errors = _validate_config(config)
-        assert len(errors) == 3
+        assert len(errors) == 4

@@ -36,7 +36,7 @@ async def get_config():
     return load_config()
 
 
-VALID_EXTRACTION_MODES = {"llm_first", "local_first", "llm_only", "local_only"}
+VALID_EXTRACTION_MODES = {"vision_first", "llm_first", "local_first", "vision_only", "llm_only", "local_only"}
 
 
 def _validate_config(config: dict) -> list[str]:
@@ -77,6 +77,12 @@ def _validate_config(config: dict) -> list[str]:
         val = config.get(key)
         if val is not None and not isinstance(val, bool):
             errors.append(f"{key} must be true or false")
+
+    # llm_dpi: must be 72-300
+    dpi = config.get("llm_dpi")
+    if dpi is not None:
+        if not isinstance(dpi, (int, float)) or dpi < 72 or dpi > 300:
+            errors.append("llm_dpi must be between 72 and 300")
 
     return errors
 

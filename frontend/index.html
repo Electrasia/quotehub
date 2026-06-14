@@ -337,19 +337,29 @@
                 </div>
             </div>
 
-            <!-- Extraction Preferences -->
+                <!-- Extraction Preferences -->
             <div class="settings-card ai-admin-master ai-master-hidden">
                 <h3>📦 Extraction Preferences</h3>
                 <div class="settings-field">
                     <label>Extraction Mode</label>
                     <select id="settingsExtractionMode" class="ai-master-only">
+                        <option value="vision_first">Vision LLM first (best quality for scanned PDFs)</option>
+                        <option value="llm_first">Text LLM first (best quality, uses AI)</option>
                         <option value="local_first">Local first (fast, no AI cost)</option>
-                        <option value="llm_first">LLM first (best quality, uses AI)</option>
+                        <option value="vision_only">Vision LLM only (no fallback)</option>
                         <option value="llm_only">LLM only (no fallback)</option>
                         <option value="local_only">Local only (no AI)</option>
                     </select>
                     <p style="font-size:12px;color:#888;margin-top:4px">
-                        Controls which extraction method is tried first. LLM produces better results but costs AI credits.
+                        Controls which extraction method is tried first. Vision LLM analyzes PDF images directly for best accuracy on scanned documents.
+                    </p>
+                </div>
+
+                <div class="settings-field">
+                    <label>Image Resolution (DPI) for Vision LLM</label>
+                    <input type="number" id="settingsLlmDpi" class="ai-master-only" value="150" min="72" max="300">
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        Resolution for rendering PDF pages when using Vision LLM. Higher values improve accuracy but increase processing time and memory usage. Default: 150.
                     </p>
                 </div>
 

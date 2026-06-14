@@ -1,6 +1,21 @@
 """
 backend/ocr.py — OCR fallback for scanned/image-only PDFs.
 
+WHY THIS MODULE IS KEPT:
+========================
+This OCR module is retained as a backup for the Vision LLM approach.
+While the Vision LLM (vision.py) can analyze PDF images directly, this
+module provides an alternative path when:
+1. Vision LLM is unavailable or fails
+2. Text-based extraction needs OCR input
+3. You want to compare OCR quality vs Vision LLM quality
+
+The OCR module (Tesseract + Vision LLM fallback) remains available for
+use in local_first and llm_first modes, where it serves as a fallback
+when pdfplumber cannot extract text from scanned documents.
+
+FUNCTIONALITY:
+=============
 When pdfplumber and PyMuPDF both return little or no text from a PDF
 (typical for scanned documents or image-only PDFs), this module:
 

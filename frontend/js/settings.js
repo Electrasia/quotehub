@@ -66,11 +66,13 @@ async function saveSettings() {
     const ocrEnabled = document.getElementById('settingsOcrEnabled').checked;
     const ocrLlmFallback = document.getElementById('settingsOcrLlmFallback').checked;
     const extractionMode = document.getElementById('settingsExtractionMode').value;
+    const llmDpiRaw = parseInt(document.getElementById('settingsLlmDpi').value);
 
     // Numeric safety: Number.isFinite() rejects NaN/Infinity, but allows 0 to pass through
     const timeout           = Number.isFinite(timeoutRaw)         ? timeoutRaw         : 120;
     const retries           = Number.isFinite(retriesRaw)         ? retriesRaw         : 3;
     const popupDuration     = Number.isFinite(popupDurationRaw)   ? popupDurationRaw   : 3;
+    const llmDpi            = Number.isFinite(llmDpiRaw)          ? llmDpiRaw          : 150;
 
     if (!endpoint) { showBriefPopup('AI endpoint URL is required'); return; }
     if (!model) { showBriefPopup('Model name is required'); return; }
@@ -89,6 +91,7 @@ async function saveSettings() {
                 ocr_enabled: ocrEnabled,
                 ocr_fallback_to_llm: ocrLlmFallback,
                 extraction_mode: extractionMode,
+                llm_dpi: llmDpi,
             })
         });
         const result = await resp.json();

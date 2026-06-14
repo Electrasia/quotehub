@@ -11,9 +11,11 @@ function updateExtractionModeBadge(mode) {
     badge.className = 'extraction-mode-badge';
     
     const modes = {
-        'llm_first':    { icon: '🤖', text: 'LLM First (AI)', cls: '' },
+        'vision_first': { icon: '👁️', text: 'Vision LLM First', cls: '' },
+        'llm_first':    { icon: '🤖', text: 'Text LLM First', cls: '' },
         'local_first':  { icon: '⚡', text: 'Local First', cls: 'mode-local_first' },
-        'llm_only':     { icon: '🤖', text: 'LLM Only', cls: 'mode-llm_only' },
+        'vision_only':  { icon: '👁️', text: 'Vision LLM Only', cls: 'mode-llm_only' },
+        'llm_only':     { icon: '🤖', text: 'Text LLM Only', cls: 'mode-llm_only' },
         'local_only':   { icon: '⚡', text: 'Local Only', cls: 'mode-local_only' }
     };
     
@@ -27,7 +29,7 @@ async function loadExtractionModeBadge() {
     try {
         const resp = await fetch('/config');
         const cfg = await resp.json();
-        updateExtractionModeBadge(cfg.extraction_mode || 'llm_first');
+        updateExtractionModeBadge(cfg.extraction_mode || 'vision_first');
     } catch (e) { /* ignore */ }
 }
 
@@ -186,8 +188,9 @@ async function _doShowSettings() {
         document.getElementById('settingsPopupDuration').value = cfg.popup_duration || 3;
         document.getElementById('settingsOcrEnabled').checked = cfg.ocr_enabled !== false;
         document.getElementById('settingsOcrLlmFallback').checked = cfg.ocr_fallback_to_llm !== false;
-        document.getElementById('settingsExtractionMode').value = cfg.extraction_mode || 'llm_first';
-        updateExtractionModeBadge(cfg.extraction_mode || 'llm_first');
+        document.getElementById('settingsExtractionMode').value = cfg.extraction_mode || 'vision_first';
+        document.getElementById('settingsLlmDpi').value = cfg.llm_dpi || 150;
+        updateExtractionModeBadge(cfg.extraction_mode || 'vision_first');
         updateIdleTimeoutFromConfig(cfg);
         applyAdminSettingsLock();
     } catch (e) { /* ignore */ }

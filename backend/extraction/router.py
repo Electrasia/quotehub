@@ -4,9 +4,11 @@ backend/extraction/router.py — Extraction mode router for QuoteHub.
 Handles mode selection and fallback logic between local and LLM extractors.
 
 Extraction Modes:
-  - llm_first: Try LLM first, fall back to local if LLM fails or returns 0 items
+  - vision_first: Try Vision LLM first, fall back to local if LLM fails
+  - llm_first: Try text-based LLM first, fall back to local if LLM fails
   - local_first: Try local first, fall back to LLM if local returns 0 items
-  - llm_only: Only use LLM (no fallback)
+  - vision_only: Only use Vision LLM (no fallback)
+  - llm_only: Only use text-based LLM (no fallback)
   - local_only: Only use local rules (no fallback)
 
 The router provides a unified async interface that can be called from
@@ -20,6 +22,7 @@ from typing import Optional
 
 from .local import extract_items as local_extract
 from .llm import normalize_pages_with_llm
+from .vision import extract_with_vision, _validate_items
 
 logger = logging.getLogger(__name__)
 
@@ -157,13 +160,13 @@ class ExtractionResult:
 
 async def extract_items_async(
     parse_result: dict,
-    mode: str = "llm_first",
+    mode: str = "vision_first",
 ) -> ExtractionResult:
     """Extract items from a parse result using the specified mode.
     
     Args:
         parse_result: Output from parse_file_with_ocr()
-        mode: Extraction mode (llm_first/local_first/llm_only/local_only)
+        mode: Extraction mode (vision_first/llm_first/local_first/vision_only/llm_only/local_only)
         
     Returns:
         ExtractionResult with extracted items and metadata
@@ -175,6 +178,11 @@ async def extract_items_async(
     # Try local extraction
     local_result = local_extract(parse_result)
     local_items = local_result.get("items", [])
+    
+    # Get config for Vision LLM
+    from ..utils import load_config
+    cfg = load_config()
+    dpi = cfg.get("llm_dpi", 150)
     
     # Route based on mode, then apply date/currency fallback
     result = None
@@ -189,6 +197,25 @@ async def extract_items_async(
             extraction_method="local",
             warnings=local_result.get("extraction_warnings", []),
         )
+    
+    elif mode == "vision_only":
+        vision_result = await extract_with_vision(parse_result.get("pdf_path", ""), cfg, dpi)
+        if vision_result and vision_result.get("items"):
+            validated_items = _validate_items(vision_result["items"])
+            result = ExtractionResult(
+                items=validated_items,
+                supplier=vision_result.get("supplier", ""),
+                date=vision_result.get("date", ""),
+                currency=vision_result.get("currency", ""),
+                document_type=vision_result.get("document_type", "unknown"),
+                extraction_method="vision",
+                llm_warnings=vision_result.get("warnings", []),
+            )
+        else:
+            result = ExtractionResult(
+                extraction_method="vision",
+                llm_warnings=["Vision LLM extraction failed or returned no items"],
+            )
     
     elif mode == "llm_only":
         llm_result = await normalize_pages_with_llm(pages_text)
@@ -208,7 +235,35 @@ async def extract_items_async(
                 llm_warnings=["LLM extraction failed or returned no items"],
             )
     
+    elif mode == "vision_first":
+        # Try Vision LLM first (sends PDF image directly to Vision LLM)
+        vision_result = await extract_with_vision(parse_result.get("pdf_path", ""), cfg, dpi)
+        if vision_result and vision_result.get("items"):
+            validated_items = _validate_items(vision_result["items"])
+            result = ExtractionResult(
+                items=validated_items,
+                supplier=vision_result.get("supplier", ""),
+                date=vision_result.get("date", ""),
+                currency=vision_result.get("currency", ""),
+                document_type=vision_result.get("document_type", "unknown"),
+                extraction_method="vision",
+                llm_warnings=vision_result.get("warnings", []),
+            )
+        else:
+            # Vision failed, fall back to local
+            result = ExtractionResult(
+                items=local_items,
+                supplier=local_result.get("supplier", ""),
+                date=local_result.get("date", ""),
+                currency=local_result.get("currency", ""),
+                document_type=local_result.get("document_type", "unknown"),
+                extraction_method="local",
+                warnings=local_result.get("extraction_warnings", []),
+                llm_warnings=["Vision LLM failed, using local extraction"],
+            )
+    
     elif mode == "llm_first":
+        # Try text-based LLM first
         llm_result = await normalize_pages_with_llm(pages_text)
         if llm_result and llm_result.get("items"):
             result = ExtractionResult(
