@@ -609,6 +609,13 @@ async function confirmSave() {
 
 function backToUpload() {
     document.getElementById('searchView').classList.add('hidden');
+    // If file was processed but not saved, mark as cancelled
+    if (currentFileIndex) {
+        const fileIdx = uploadedFiles.findIndex(f => f.file_id === currentFileIndex);
+        if (fileIdx !== -1 && uploadedFiles[fileIdx].status === 'done') {
+            uploadedFiles[fileIdx].status = 'cancelled';
+        }
+    }
     extractedData = null;
     reviewPages = [];
     showProcessView();
