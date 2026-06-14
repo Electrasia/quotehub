@@ -156,7 +156,7 @@ function reviewOpenNewWindow() {
   img { max-width: 95vw; max-height: 90vh; margin-bottom: 12px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
 </style></head><body>
 <h2>${reviewOriginalFilename}</h2>
-${reviewPages.map(p => `<img src="${p}">`).join('\n')}
+${reviewPages.map(p => `<img src="${window.location.origin}${p}">`).join('\n')}
 </body></html>`;
         const blob = new Blob([previewHtml], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
