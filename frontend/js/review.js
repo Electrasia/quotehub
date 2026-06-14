@@ -131,7 +131,7 @@ function reviewFitWidth() {
 /**
  * Open the original file in a new window.
  * PDF → new browser tab (browser renders inline).
- * XLSX/other → new popup window showing preview images.
+ * XLSX/other → parsed with SheetJS, rendered as interactive HTML table.
  */
 function reviewOpenNewWindow() {
     if (!reviewOriginalFilename) {
@@ -140,28 +140,102 @@ function reviewOpenNewWindow() {
     }
     const ext = reviewOriginalFilename.split('.').pop().toLowerCase();
     if (ext === 'pdf') {
-        // PDF: browser can render inline
         window.open(`/archive/${encodeURIComponent(reviewOriginalFilename)}`, '_blank');
-    } else {
-        // XLSX/other: show preview images in a styled popup
-        if (!reviewPages || reviewPages.length === 0) {
-            showBriefPopup('No preview available for this file.');
-            return;
-        }
-        const previewHtml = `<!DOCTYPE html>
-<html><head><title>${reviewOriginalFilename}</title>
-<style>
-  body { margin: 0; background: #333; display: flex; flex-direction: column; align-items: center; padding: 16px; }
-  h2 { color: #fff; font-family: sans-serif; font-size: 14px; margin: 0 0 12px; }
-  img { max-width: 95vw; max-height: 90vh; margin-bottom: 12px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
-</style></head><body>
-<h2>${reviewOriginalFilename}</h2>
-${reviewPages.map(p => `<img src="${window.location.origin}${p}">`).join('\n')}
-</body></html>`;
-        const blob = new Blob([previewHtml], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
+        return;
     }
+
+    // XLSX/other: open window and load SheetJS to render
+    const w = window.open('', '_blank');
+    if (!w) { showBriefPopup('Popup blocked. Allow popups for this site.'); return; }
+
+    w.document.write(`<!DOCTYPE html>
+<html><head><title>${escapeHtml(reviewOriginalFilename)}</title>
+<script src="/static/js/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }
+  .header { background: #1a1a2e; color: #fff; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  .header h1 { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70vw; }
+  .tabs { display: flex; background: #16213e; padding: 0 8px; position: sticky; top: 40px; z-index: 9; }
+  .tabs button { background: none; border: none; color: #8899aa; padding: 8px 16px; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tabs button.active { color: #fff; border-bottom-color: #4fc3f7; }
+  .sheet-container { overflow: auto; max-height: calc(100vh - 80px); padding: 8px; }
+  table { border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  th, td { border: 1px solid #e0e0e0; padding: 4px 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+  th { background: #f0f4f8; font-weight: 600; position: relative; }
+  tr:hover td { background: #f8f9fa; }
+  td { word-wrap: break-word; white-space: pre-wrap; }
+  .col-resize { position: absolute; right: -2px; top: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 1; }
+  .col-resize:hover, .col-resize.dragging { background: #4fc3f7; }
+  .loading { padding: 40px; text-align: center; color: #666; font-size: 14px; }
+</style></head><body>
+<div class="header"><h1>${escapeHtml(reviewOriginalFilename)}</h1></div>
+<div class="tabs" id="tabs"></div>
+<div class="sheet-container" id="container"><div class="loading">Loading spreadsheet...</div></div>
+<script>
+let currentSheet = 0;
+let workbook = null;
+
+function renderSheet(idx) {
+  currentSheet = idx;
+  const sheet = workbook.Sheets[workbook.SheetNames[idx]];
+  const html = XLSX.utils.sheet_to_html(sheet, { editable: false, id: 'sheetTable' });
+  document.getElementById('container').innerHTML = html;
+  // Auto-size columns
+  const table = document.getElementById('sheetTable');
+  if (!table) return;
+  const rows = table.querySelectorAll('tr');
+  const colCount = Math.max(...Array.from(rows).map(r => r.cells.length));
+  const widths = Array(colCount).fill(60);
+  rows.forEach(r => Array.from(r.cells).forEach((c, i) => {
+    const txt = c.textContent || '';
+    const w = Math.min(Math.max(txt.length * 7 + 20, 60), 300);
+    if (w > widths[i]) widths[i] = w;
+  }));
+  Array.from(table.querySelectorAll('tr')).forEach(r => {
+    Array.from(r.cells).forEach((c, i) => {
+      c.style.width = widths[i] + 'px';
+      c.style.minWidth = widths[i] + 'px';
+      if (r === table.querySelector('tr') && c.tagName === 'TH') {
+        const handle = document.createElement('div');
+        handle.className = 'col-resize';
+        let startX, startW;
+        handle.onmousedown = (e) => {
+          e.preventDefault();
+          startX = e.clientX;
+          startW = widths[i];
+          handle.classList.add('dragging');
+          const onMove = (e2) => { c.style.width = Math.max(40, startW + e2.clientX - startX) + 'px'; c.style.minWidth = c.style.width; };
+          const onUp = () => { handle.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        };
+        c.appendChild(handle);
+        c.style.position = 'relative';
+      }
+    });
+  });
+}
+
+function switchSheet(idx) {
+  document.querySelectorAll('.tabs button').forEach((b, i) => b.classList.toggle('active', i === idx));
+  renderSheet(idx);
+}
+
+fetch('/archive/${encodeURIComponent(reviewOriginalFilename)}')
+  .then(r => r.arrayBuffer())
+  .then(buf => {
+    workbook = XLSX.read(buf, { type: 'array' });
+    const tabs = document.getElementById('tabs');
+    tabs.innerHTML = workbook.SheetNames.map((n, i) =>
+      '<button onclick="switchSheet(' + i + ')" class="' + (i === 0 ? 'active' : '') + '">' + n.replace(/</g, '&lt;') + '</button>'
+    ).join('');
+    renderSheet(0);
+  })
+  .catch(e => { document.getElementById('container').innerHTML = '<div class="loading">Failed to load: ' + e.message + '</div>'; });
+</script>
+</body></html>`);
+    w.document.close();
 }
 
 // ─── Review PDF mouse controls (wheel zoom + drag pan) ──────
