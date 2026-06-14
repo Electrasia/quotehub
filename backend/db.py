@@ -91,6 +91,7 @@ def init_db():
     Creates:
         - quotations: Stores extracted quotation data
         - quotations_fts: Full-text search index for fast searching
+        - users: User accounts with role-based access
         - triggers: Keep FTS index in sync with quotations table
 
     Schema version: 2 (adds currency and extraction_method columns)
@@ -114,6 +115,23 @@ def init_db():
         # Migration: Add currency and extraction_method columns if missing
         # (for existing databases created before v0.040.0)
         _migrate_db(db)
+
+        # Create users table for authentication
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                must_change_password INTEGER DEFAULT 0,
+                active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now')),
+                last_login TEXT
+            )
+        """)
+
+        # Migrate users table (add columns missing from older schemas)
+        _migrate_users_db(db)
 
         # Create FTS5 virtual table for fast full-text search
         db.execute("""
@@ -169,3 +187,23 @@ def _migrate_db(db):
     if "extraction_method" not in columns:
         db.execute("ALTER TABLE quotations ADD COLUMN extraction_method TEXT DEFAULT 'local'")
         print("Migration: Added 'extraction_method' column to quotations table")
+
+
+def _migrate_users_db(db):
+    """Migrate users table to the latest schema.
+    
+    Adds any missing columns to the users table.
+    Safe to call multiple times.
+    """
+    # Check if users table exists first
+    cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not cursor.fetchone():
+        return  # Table doesn't exist yet, CREATE TABLE IF NOT EXISTS handles it
+    
+    cursor = db.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in cursor.fetchall()]
+    
+    # Future migrations go here, e.g.:
+    # if "email" not in columns:
+    #     db.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
+    #     print("Migration: Added 'email' column to users table")
