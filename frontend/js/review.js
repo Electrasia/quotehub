@@ -619,12 +619,7 @@ function backToUpload() {
     extractedData = null;
     reviewPages = [];
     showProcessView();
-    const hasPending = uploadedFiles.some(f => f.status === 'pending' || f.status === 'cancelled');
-    if (hasPending) {
-        goToStep(2);
-    } else {
-        goToStep(1);
-    }
+    goToStep(1);
     renderFileList();
 }
 
