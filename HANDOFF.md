@@ -2,11 +2,21 @@
 
 ## Current Version
 
-**v0.051.1** (dev branch)
+**v0.052.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.052.0 — Search Enhancements + Validation
+- Feature: document type filter dropdown (ALL/PO/QUO/PL) on search page
+- Feature: auto-search on dropdown change
+- Feature: limit empty search to 10 most recent documents
+- Feature: require at least one item before saving quotation
+- Fix: supplier now searchable in item-level filtering
+- Fix: prevent layout shift on search dropdown toggle
+- Fix: replace signout icon with text for cross-system compatibility
+- Fix: save button now correctly enables after items loaded
 
 ### v0.051.1 — Minor Fixes
 - Fix: pydantic protected_namespaces warning on ProcessRequest
@@ -18,24 +28,16 @@
 - Fix: users table missing on fresh Docker installs (init_db now creates it)
 - Feature: deploy.sh shows initial master password after fresh install
 
-### v0.050.0 — Hardening + Automated Tests
-- Config validation: timeout (10-300), retries (1-10), extraction_mode enum, endpoint URL format, booleans
-- Empty file upload rejection: backend validates extension + 0-byte, frontend checks size
-- Config default consistency: files.py uses get_config_data() (was hardcoded)
-- config.example.json: extraction_mode key added, stale llm_fallback_enabled removed
-- Automated test suite: 41 tests across 3 files (config validation, upload validation, extraction)
-- Error banner for upload failures (replaces ephemeral popups)
-
 ---
 
 ## Files Changed Recently
 
-- `backend/routes/files.py` — suppress pydantic protected_namespaces warning
-- `backend/db.py` — users table creation in init_db(), migration function for future columns
-- `backend/routes/auth.py` — clear_must_change_password after password change
-- `frontend/js/auth.js` — acknowledge init password after first change
-- `frontend/js/upload.js` — clear error banner on Clear All
-- `deploy.sh` — show initial master password, add delay before reading it
+- `backend/routes/admin.py` — search with document_type filter, LIMIT 10 for empty search, supplier in item filtering
+- `backend/routes/files.py` — reject save if items list empty
+- `frontend/index.html` — document type dropdown, signout text
+- `frontend/js/search.js` — document type parameter, limited results handling
+- `frontend/js/review.js` — save button validation, updateDocumentTypeWarning timing fix
+- `frontend/style.css` — search dropdown styling
 
 ---
 

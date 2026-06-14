@@ -1,5 +1,15 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.052.0 (2026-06-14)
+- Feature: document type filter dropdown (ALL/PO/QUO/PL) on search page
+- Feature: auto-search on dropdown change
+- Feature: limit empty search to 10 most recent documents
+- Feature: require at least one item before saving quotation
+- Fix: supplier now searchable in item-level filtering
+- Fix: prevent layout shift on search dropdown toggle
+- Fix: replace signout icon with text for cross-system compatibility
+- Fix: save button now correctly enables after items loaded
+
 ## v0.051.1 (2026-06-14)
 - Fix: pydantic protected_namespaces warning on ProcessRequest
 - Fix: add delay in deploy.sh before reading init password
