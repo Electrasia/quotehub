@@ -272,6 +272,12 @@
         <div id="searchView" class="hidden">
             <h2 style="margin-bottom:16px">Search Quotations</h2>
             <div class="search-bar">
+                <select id="searchDocType" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px">
+                    <option value="ALL">ALL</option>
+                    <option value="PO">PO</option>
+                    <option value="QUO">QUO</option>
+                    <option value="PL">PL</option>
+                </select>
                 <input type="text" id="searchInput" placeholder="Search by supplier, date, or item description..." onkeyup="debounceSearch()">
                 <button class="btn btn-primary" onclick="searchQuotations()">Search</button>
             </div>

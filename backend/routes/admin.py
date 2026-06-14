@@ -301,8 +301,8 @@ async def cleanup_stats():
 # ─── Search ────────────────────────────────────────────────
 
 @router.get("/search", dependencies=[Depends(require_role("user", "admin", "master"))])
-async def search(q: str = ""):
-    """Search quotations using full-text search."""
+async def search(q: str = "", document_type: str = ""):
+    """Search quotations using full-text search with optional document type filter."""
     import sqlite3
     
     with get_db(readonly=True) as db:
@@ -311,33 +311,67 @@ async def search(q: str = ""):
             fts_words = [w.replace('"', '""') + '*' for w in words]
             fts_query = " ".join(fts_words)
             
+            # Build base query with optional document_type filter
+            doc_type_filter = ""
+            params = [fts_query]
+            if document_type and document_type.upper() != "ALL":
+                doc_type_filter = " AND q.document_type = ?"
+                params.append(document_type.upper())
+            
             try:
                 rows = db.execute(
-                    """SELECT q.* FROM quotations q
+                    f"""SELECT q.* FROM quotations q
                        INNER JOIN quotations_fts fts ON q.id = fts.rowid
-                       WHERE quotations_fts MATCH ?
+                       WHERE quotations_fts MATCH ?{doc_type_filter}
                        ORDER BY q.created_at DESC""",
-                    (fts_query,)
+                    params
                 ).fetchall()
             except sqlite3.OperationalError:
-                if len(words) == 1:
-                    rows = db.execute(
-                        "SELECT * FROM quotations WHERE supplier LIKE ? OR items LIKE ? ORDER BY created_at DESC",
-                        (f"%{words[0]}%", f"%{words[0]}%")
-                    ).fetchall()
+                # Fallback to LIKE search
+                if document_type and document_type.upper() != "ALL":
+                    if len(words) == 1:
+                        rows = db.execute(
+                            "SELECT * FROM quotations WHERE (supplier LIKE ? OR items LIKE ?) AND document_type = ? ORDER BY created_at DESC",
+                            (f"%{words[0]}%", f"%{words[0]}%", document_type.upper())
+                        ).fetchall()
+                    else:
+                        conditions = []
+                        params = []
+                        for word in words:
+                            conditions.append("(supplier LIKE ? OR items LIKE ?)")
+                            params.extend([f"%{word}%", f"%{word}%"])
+                        where_clause = " AND ".join(conditions)
+                        params.append(document_type.upper())
+                        rows = db.execute(
+                            f"SELECT * FROM quotations WHERE {where_clause} AND document_type = ? ORDER BY created_at DESC",
+                            params
+                        ).fetchall()
                 else:
-                    conditions = []
-                    params = []
-                    for word in words:
-                        conditions.append("(supplier LIKE ? OR items LIKE ?)")
-                        params.extend([f"%{word}%", f"%{word}%"])
-                    where_clause = " AND ".join(conditions)
-                    rows = db.execute(
-                        f"SELECT * FROM quotations WHERE {where_clause} ORDER BY created_at DESC",
-                        params
-                    ).fetchall()
+                    if len(words) == 1:
+                        rows = db.execute(
+                            "SELECT * FROM quotations WHERE supplier LIKE ? OR items LIKE ? ORDER BY created_at DESC",
+                            (f"%{words[0]}%", f"%{words[0]}%")
+                        ).fetchall()
+                    else:
+                        conditions = []
+                        params = []
+                        for word in words:
+                            conditions.append("(supplier LIKE ? OR items LIKE ?)")
+                            params.extend([f"%{word}%", f"%{word}%"])
+                        where_clause = " AND ".join(conditions)
+                        rows = db.execute(
+                            f"SELECT * FROM quotations WHERE {where_clause} ORDER BY created_at DESC",
+                            params
+                        ).fetchall()
         else:
-            rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
+            # No search query — just filter by document_type if provided
+            if document_type and document_type.upper() != "ALL":
+                rows = db.execute(
+                    "SELECT * FROM quotations WHERE document_type = ? ORDER BY created_at DESC",
+                    (document_type.upper(),)
+                ).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
     
     q_lower = q.lower() if q else ""
     words = q_lower.split() if q_lower else []

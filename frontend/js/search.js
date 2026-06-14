@@ -129,9 +129,14 @@ function renderSearchResults() {
 
 async function searchQuotations() {
     const q = document.getElementById('searchInput').value;
+    const docType = document.getElementById('searchDocType').value;
     sortField = '';
     sortDir = 'asc';
-    const resp = await fetch(`/search?q=${encodeURIComponent(q)}`);
+    const params = new URLSearchParams({ q });
+    if (docType && docType !== 'ALL') {
+        params.set('document_type', docType);
+    }
+    const resp = await fetch(`/search?${params}`);
     const results = await resp.json();
     const container = document.getElementById('searchResults');
     searchSelectedIds.clear();
