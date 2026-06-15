@@ -486,11 +486,10 @@ async def process_stream(req: ProcessRequest):
         try:
             from ..utils import get_config_data
             cfg = get_config_data()
-            extraction_mode = cfg.get("extraction_mode", "llm_first")
+            extraction_enabled = cfg.get("extraction_enabled", True)
             
             result = await extract_items_async(
                 parse_result,
-                mode=extraction_mode,
             )
         except Exception as e:
             logger.error("Extraction failed", extra={
@@ -513,7 +512,7 @@ async def process_stream(req: ProcessRequest):
             'method': result.extraction_method,
             'items': len(result.items),
             'time': f"{processing_time}s",
-            'warnings': len(result.warnings) + len(result.llm_warnings)
+            'warnings': len(result.warnings)
         })
         
         # Send page_done for each page with item counts
@@ -539,7 +538,6 @@ async def process_stream(req: ProcessRequest):
                 "document_type": result.document_type,
                 "extraction_method": result.extraction_method,
                 "warnings": result.warnings,
-                "llm_warnings": result.llm_warnings,
             }
         })
     

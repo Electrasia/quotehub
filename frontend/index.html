@@ -117,11 +117,11 @@
                 </div>
             </div>
 
-            <!-- Extraction Mode Indicator -->
+            <!-- AI Extraction Status -->
             <div class="extraction-mode-badge" id="extractionModeBadge">
-                <span class="extraction-mode-label">Extraction Method:</span>
-                <span id="extractionModeIcon">🤖</span>
-                <span id="extractionModeText">LLM First (AI)</span>
+                <span class="extraction-mode-label">AI Extraction:</span>
+                <span id="extractionModeIcon">✅</span>
+                <span id="extractionModeText">Auto (ON)</span>
             </div>
 
             <!-- Step 1: Upload -->
@@ -337,31 +337,18 @@
                 </div>
             </div>
 
-                <!-- Extraction Preferences -->
+            <!-- Extraction Preferences -->
             <div class="settings-card ai-admin-master ai-master-hidden">
-                <h3>📦 Extraction Preferences</h3>
-                <div class="settings-field">
-                    <label>Extraction Mode</label>
-                    <select id="settingsExtractionMode" class="ai-master-only">
-                        <option value="vision_first">Vision LLM first (best quality for scanned PDFs)</option>
-                        <option value="llm_first">Text LLM first (best quality, uses AI)</option>
-                        <option value="local_first">Local first (fast, no AI cost)</option>
-                        <option value="vision_only">Vision LLM only (no fallback)</option>
-                        <option value="llm_only">LLM only (no fallback)</option>
-                        <option value="local_only">Local only (no AI)</option>
-                    </select>
-                    <p style="font-size:12px;color:#888;margin-top:4px">
-                        Controls which extraction method is tried first. Vision LLM analyzes PDF images directly for best accuracy on scanned documents.
-                    </p>
+                <h3>📦 Extraction</h3>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" id="settingsExtractionEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px" checked>
+                    <label for="settingsExtractionEnabled" style="cursor:pointer;margin:0">
+                        Enable AI extraction (auto-detects scanned vs text PDFs)
+                    </label>
                 </div>
-
-                <div class="settings-field">
-                    <label>Image Resolution (DPI) for Vision LLM</label>
-                    <input type="number" id="settingsLlmDpi" class="ai-master-only" value="150" min="72" max="300">
-                    <p style="font-size:12px;color:#888;margin-top:4px">
-                        Resolution for rendering PDF pages when using Vision LLM. Higher values improve accuracy but increase processing time and memory usage. Default: 150.
-                    </p>
-                </div>
+                <p style="font-size:12px;color:#888;margin-top:4px;margin-left:24px">
+                    When enabled, the system automatically selects the best method: Vision LLM for scanned PDFs, Text LLM for documents with extractable text. Falls back to local rules if the AI is unavailable.
+                </p>
 
                 <h4 style="margin-top:18px">OCR (scanned PDFs)</h4>
                 <p style="font-size:12px;color:#666;margin:0 0 8px 0">

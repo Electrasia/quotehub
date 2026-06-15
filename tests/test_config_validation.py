@@ -16,7 +16,7 @@ class TestValidateConfig:
             "timeout": 90,
             "max_retries": 2,
             "popup_duration": 3,
-            "extraction_mode": "llm_first",
+            "extraction_enabled": True,
             "ocr_enabled": True,
             "ocr_fallback_to_llm": True,
         }
@@ -44,16 +44,16 @@ class TestValidateConfig:
         assert len(_validate_config({"popup_duration": 0})) == 1
         assert len(_validate_config({"popup_duration": 11})) == 1
 
-    # ── Extraction mode ────────────────────────────────────
+    # ── Extraction enabled ─────────────────────────────────
 
-    def test_valid_extraction_modes(self):
-        for mode in ("vision_first", "llm_first", "local_first", "vision_only", "llm_only", "local_only"):
-            assert _validate_config({"extraction_mode": mode}) == []
+    def test_valid_extraction_enabled(self):
+        assert _validate_config({"extraction_enabled": True}) == []
+        assert _validate_config({"extraction_enabled": False}) == []
 
-    def test_invalid_extraction_mode(self):
-        errors = _validate_config({"extraction_mode": "banana"})
+    def test_invalid_extraction_enabled(self):
+        errors = _validate_config({"extraction_enabled": "yes"})
         assert len(errors) == 1
-        assert "extraction_mode" in errors[0]
+        assert "extraction_enabled" in errors[0]
 
     # ── AI endpoint ────────────────────────────────────────
 
@@ -96,31 +96,13 @@ class TestValidateConfig:
         errors = _validate_config({"max_retries": -1})
         assert len(errors) == 1
 
-    # ── DPI validation ────────────────────────────────────
-
-    def test_valid_dpi(self):
-        assert _validate_config({"llm_dpi": 72}) == []
-        assert _validate_config({"llm_dpi": 150}) == []
-        assert _validate_config({"llm_dpi": 300}) == []
-
-    def test_invalid_dpi(self):
-        errors = _validate_config({"llm_dpi": 50})
-        assert len(errors) == 1
-        assert "llm_dpi" in errors[0]
-
-    def test_invalid_dpi_too_high(self):
-        errors = _validate_config({"llm_dpi": 400})
-        assert len(errors) == 1
-        assert "llm_dpi" in errors[0]
-
     # ── Multiple errors ────────────────────────────────────
 
     def test_multiple_errors_returned(self):
         config = {
             "timeout": -1,
             "max_retries": 999,
-            "extraction_mode": "invalid",
-            "llm_dpi": 50,
+            "extraction_enabled": "nope",
         }
         errors = _validate_config(config)
-        assert len(errors) == 4
+        assert len(errors) == 3

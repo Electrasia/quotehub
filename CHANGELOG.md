@@ -1,5 +1,20 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.053.1 (2026-06-14)
+- Fix: SSE stream crash after extraction — removed `result.llm_warnings` reference that didn't exist on `ExtractionResult` dataclass (caused "Network error" on frontend)
+- Fix: Added `document_type` to Vision and Text LLM prompts so model identifies QUO/PO/PL instead of defaulting to "unknown"
+
+## v0.053.0 (2026-06-14)
+- Feature: Vision LLM integration — analyzes PDF images for scanned documents
+- Feature: Auto extraction mode — 6 modes collapsed into 1; detects scanned vs text PDF vs XLSX
+- Feature: `extraction_enabled` ON/OFF toggle replaces mode dropdown in settings
+- Change: Vision LLM prompt simplified to ~15 lines; removed post-processing (`_norm_price`, `_validate_items`)
+- Change: Text LLM prompt simplified to ~15 lines; removed field mapping, few-shot examples, header detection (~460 lines removed)
+- Change: Fixed DPI at 200 (removed configurable `llm_dpi`)
+- Fix: `normalize_date()` handles DD-MM-YYYY, DD-Mon-YYYY, MM/DD/YYYY, YYYY-MM-DD with dayfirst preference
+- Fix: Brand defaults to empty string (not "unknown") when no brand column exists
+- Fix: Prices returned as raw numbers — no more comma-stripping corruption
+
 ## v0.052.3 (2026-06-14)
 - Feature: hybrid column detection (header row + content-based inference)
 - Feature: post-processing validation for extracted items

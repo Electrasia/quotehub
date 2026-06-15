@@ -19,9 +19,9 @@ def tmp_config(tmp_path):
         "max_retries": 2,
         "external_url": "",
         "popup_duration": 3,
+        "extraction_enabled": True,
         "ocr_enabled": True,
         "ocr_fallback_to_llm": True,
-        "extraction_mode": "llm_first",
     }
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config_data, indent=2))

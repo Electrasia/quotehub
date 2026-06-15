@@ -36,7 +36,7 @@ async def get_config():
     return load_config()
 
 
-VALID_EXTRACTION_MODES = {"vision_first", "llm_first", "local_first", "vision_only", "llm_only", "local_only"}
+VALID_EXTRACTION_MODES = set()  # Deprecated — extraction is now auto
 
 
 def _validate_config(config: dict) -> list[str]:
@@ -61,10 +61,10 @@ def _validate_config(config: dict) -> list[str]:
         if not isinstance(popup, (int, float)) or popup < 1 or popup > 10:
             errors.append("popup_duration must be between 1 and 10 seconds")
 
-    # extraction_mode: must be one of the valid values
-    mode = config.get("extraction_mode")
-    if mode is not None and mode not in VALID_EXTRACTION_MODES:
-        errors.append(f"extraction_mode must be one of: {', '.join(sorted(VALID_EXTRACTION_MODES))}")
+    # extraction_enabled: must be boolean
+    enabled = config.get("extraction_enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        errors.append("extraction_enabled must be true or false")
 
     # ai_endpoint: must be empty or a valid URL
     endpoint = config.get("ai_endpoint")
@@ -77,12 +77,6 @@ def _validate_config(config: dict) -> list[str]:
         val = config.get(key)
         if val is not None and not isinstance(val, bool):
             errors.append(f"{key} must be true or false")
-
-    # llm_dpi: must be 72-300
-    dpi = config.get("llm_dpi")
-    if dpi is not None:
-        if not isinstance(dpi, (int, float)) or dpi < 72 or dpi > 300:
-            errors.append("llm_dpi must be between 72 and 300")
 
     return errors
 
