@@ -831,6 +831,10 @@ async def import_upload(file: UploadFile = File(...)):
                             return JSONResponse(status_code=400, content={
                                 "error": "File integrity check failed — the data has been modified since export"
                             })
+                    else:
+                        logger.warning("Import ZIP has no SHA checksum — integrity not verified", extra={
+                            'category': 'ADMIN', 'file': file.filename,
+                        })
                     data = json.loads(zf.read("quotations.json"))
                     quotations = data.get("quotations", [])
                 from ..main import ARCHIVE_DIR
