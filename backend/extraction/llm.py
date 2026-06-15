@@ -92,44 +92,19 @@ def _clean_item(item):
     return cleaned
 
 
-async def normalize_pages_with_llm(pages_text: list, cfg: dict = None, is_xlsx: bool = False) -> dict:
-    """Extract items from text pages using the LLM.
+async def _call_llm(text: str, cfg: dict, is_xlsx: bool = False) -> dict:
+    """Make a single LLM call and return parsed result.
 
-    Args:
-        pages_text: List of text strings, one per page
-        cfg: Config dict (loaded from config.json if None)
-        is_xlsx: True if the source is an XLSX file (uses XLSX-specific prompt)
-
-    Returns:
-        dict with keys: document_type, supplier, currency, date, items, llm_warnings
+    Returns dict with keys: document_type, supplier, currency, date,
+    items, llm_warnings.
     """
-    from ..utils import load_config
-
-    if cfg is None:
-        cfg = load_config()
-
     endpoint = cfg.get("ai_endpoint", "")
     model = cfg.get("model", "")
     timeout = cfg.get("timeout", 120)
     max_retries = cfg.get("max_retries", 2)
+    max_tokens = 8192 if is_xlsx else 4096
 
-    if not endpoint or not model:
-        return {"supplier": "", "date": "", "currency": "",
-                "document_type": "unknown", "items": [],
-                "llm_warnings": ["AI endpoint or model not configured"]}
-
-    # Combine all page text
-    combined = "\n\n=== Page {}\n".join(
-        text for text in pages_text if text.strip()
-    )
-
-    if not combined.strip():
-        return {"supplier": "", "date": "", "currency": "",
-                "document_type": "unknown", "items": [],
-                "llm_warnings": ["No text content to extract from"]}
-
-    prompt = (EXTRACT_PROMPT_XLSX if is_xlsx else EXTRACT_PROMPT).format(text=combined)
-
+    prompt = (EXTRACT_PROMPT_XLSX if is_xlsx else EXTRACT_PROMPT).format(text=text)
     messages = [{"role": "user", "content": prompt}]
 
     last_error = None
@@ -143,7 +118,7 @@ async def normalize_pages_with_llm(pages_text: list, cfg: dict = None, is_xlsx: 
                     json={
                         "model": model,
                         "messages": messages,
-                        "max_tokens": 4096,
+                        "max_tokens": max_tokens,
                         "temperature": 0.1,
                     },
                 )
@@ -206,3 +181,74 @@ async def normalize_pages_with_llm(pages_text: list, cfg: dict = None, is_xlsx: 
     return {"supplier": "", "date": "", "currency": "",
             "document_type": "unknown", "items": [],
             "llm_warnings": [f"LLM extraction failed: {last_error}"]}
+
+
+async def normalize_pages_with_llm(pages_text: list, cfg: dict = None, is_xlsx: bool = False) -> dict:
+    """Extract items from text pages using the LLM.
+
+    Args:
+        pages_text: List of text strings, one per page
+        cfg: Config dict (loaded from config.json if None)
+        is_xlsx: True if the source is an XLSX file (uses XLSX-specific prompt)
+
+    Returns:
+        dict with keys: document_type, supplier, currency, date, items, llm_warnings
+    """
+    from ..utils import load_config
+
+    if cfg is None:
+        cfg = load_config()
+
+    endpoint = cfg.get("ai_endpoint", "")
+    model = cfg.get("model", "")
+
+    if not endpoint or not model:
+        return {"supplier": "", "date": "", "currency": "",
+                "document_type": "unknown", "items": [],
+                "llm_warnings": ["AI endpoint or model not configured"]}
+
+    # Filter to non-empty pages
+    non_empty = [t for t in pages_text if t.strip()]
+    if not non_empty:
+        return {"supplier": "", "date": "", "currency": "",
+                "document_type": "unknown", "items": [],
+                "llm_warnings": ["No text content to extract from"]}
+
+    # XLSX: process each sheet separately to avoid token overflow.
+    # PDF: combine all pages into one call (fewer pages, fits in 4096 tokens).
+    if is_xlsx:
+        all_items = []
+        all_warnings = []
+        doc_type = "unknown"
+        supplier = ""
+        currency = ""
+        date = ""
+
+        for i, text in enumerate(non_empty):
+            result = await _call_llm(text, cfg, is_xlsx=True)
+            all_items.extend(result.get("items", []))
+            all_warnings.extend(result.get("llm_warnings", []))
+            # Use metadata from first sheet that provides it
+            if doc_type == "unknown" and result.get("document_type", "unknown") != "unknown":
+                doc_type = result["document_type"]
+            if not supplier and result.get("supplier"):
+                supplier = result["supplier"]
+            if not currency and result.get("currency"):
+                currency = result["currency"]
+            if not date and result.get("date"):
+                date = result["date"]
+
+        return {
+            "document_type": doc_type,
+            "supplier": supplier,
+            "currency": currency,
+            "date": date,
+            "items": all_items,
+            "llm_warnings": all_warnings,
+        }
+
+    # PDF: combine all pages into one call
+    combined = "\n\n=== Page {}\n".join(
+        text for text in non_empty if text.strip()
+    )
+    return await _call_llm(combined, cfg, is_xlsx=False)
