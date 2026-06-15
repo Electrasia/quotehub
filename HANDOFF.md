@@ -93,6 +93,18 @@
 
 ## Files Changed Recently
 
+### v0.054.0
+- `backend/routes/files.py` — Upload size limit check (reject oversized files before write); SHA256 checksum on export; SHA verification on import; integrity warning in response
+- `backend/utils.py` — Added `max_upload_size_mb: 5` to `_CONFIG_DEFAULTS`
+- `backend/routes/admin.py` — Added validation rule for `max_upload_size_mb` (int 1–20)
+- `frontend/index.html` — Added "Max Upload Size (MB)" input with `master-only` class
+- `frontend/js/settings.js` — Save/load `max_upload_size_mb`; display integrity warning on import
+- `frontend/js/nav.js` — Populate `settingsMaxUploadSizeMb` from config
+- `frontend/js/auth.js` — Add `settingsMaxUploadSizeMb` to admin lock list
+- `config.example.json` — Added `"max_upload_size_mb": 5`
+- `.gitignore` — Added confidential test file patterns
+
+### v0.053.4
 - `backend/parser.py` — XLSX cell newline cleaning, 24K char limit per sheet; +12 `logger.exception/warning` calls
 - `backend/ocr.py` — +8 `logger.exception/warning` calls for OCR/tesseract failures
 - `backend/main.py` — +2 `logger.warning` calls for upload state load/save
@@ -130,7 +142,7 @@
 | Export/Import | ✅ Complete |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
-| Automated Tests | ✅ 84 tests passing |
+| Automated Tests | ✅ 85 tests passing |
 | Vision LLM (scanned PDFs) | ✅ Working (fixed pdf_path bug) |
 | Multi-page PDF extraction | ✅ Working (single prompt for all pages) |
 
@@ -153,9 +165,27 @@
 
 ---
 
+## Production Readiness Checklist
+
+Items still needed before the app can be considered production-ready:
+
+| Priority | Item | Effort | Notes |
+|----------|------|--------|-------|
+| 🔴 High | **Persistent sessions** | 1 day | Sessions are in-memory (Starlette middleware). Container restart logs everyone out. Need file-based or Redis session store. |
+| 🔴 High | **Database migration system** | 2 days | Schema changes rely on `CREATE TABLE IF NOT EXISTS`. Adding columns requires manual SQL. Need Alembic or simple versioned migration. |
+| 🟡 Medium | **SQLite WAL mode** | 1 line | Enables concurrent reads without blocking. `PRAGMA journal_mode=WAL` on startup. Simple win. |
+| 🟡 Medium | **Expand test coverage** | 3 days | 85 tests cover extraction + upload validation. No coverage for: auth (login/logout/roles), search, admin routes (config save, cleanup), review/edit/save, export/import flow, SSE streaming. |
+| 🟡 Medium | **Rate limiting on upload** | 0.5 day | No protection against accidental batch upload of hundreds of files at once. |
+| 🟢 Low | **HTTPS via reverse proxy** | 1 day | App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt. |
+| 🟢 Low | **Orphaned file cleanup** | 0.5 day | `data/images/` accumulates files when uploaded files are removed. No automated cleanup. |
+| 🟢 Low | **Custom error pages** | 0.5 day | No 404/500 error pages. Returns raw JSON or blank page on unexpected errors. |
+| 🟢 Low | **XLSX column resizing** | 2 days | Documented in Known Issues. SheetJS renders read-only table; users cannot resize columns. |
+
+---
+
 ## Next Session Start Here
 
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
-3. Run `pytest tests/ -v` to verify all tests pass (currently 84)
-4. Review the next recommended step — see user's latest recommendation
+3. Run `pytest tests/ -v` to verify all tests pass (currently 85)
+4. Production Readiness Checklist above shows priorities — start with Persistent Sessions or SQLite WAL mode
