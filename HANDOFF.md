@@ -2,11 +2,20 @@
 
 ## Current Version
 
-**v0.053.3** (dev branch)
+**v0.053.4** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.053.4 — Logging hardening + infrastructure
+- Change: Added `logger.exception()`/`logger.warning()` to 41 silent `except Exception` blocks across 9 files — DB errors, PDF/XLSX parse failures, AI call errors, image gen failures, cleanup operations, VACUUM, upload state, and zip downloads now all visible in logs
+- Change: Switched `deploy.sh` from raw `docker build/stop/rm/run` to single `docker compose up -d --build`
+- Change: Added `container_name: quodb` to `docker-compose.yml` for consistent `docker exec` access
+- Feature: Added `GET /health` endpoint returning `{"status": "ok"}` for Docker HEALTHCHECK (curls every 30s)
+- Feature: Added 42 mock-based extraction pipeline tests (`tests/test_extraction_pipeline.py`)
+- Feature: Added health check endpoint test (`tests/test_health.py`)
+- Chore: Added `curl` to Dockerfile, `pytest.ini` with `asyncio_mode = auto`
 
 ### v0.053.3 — XLSX extraction fix
 - Fix: XLSX extraction — clean cell newlines before pipe-joining (fixes "Unit Price\n(HKD)" splitting across multiple lines)
@@ -78,19 +87,28 @@
 
 ## Files Changed Recently
 
-- `backend/extraction/vision.py` — Vision LLM with single-prompt approach for all pages, fixed 200 DPI, no post-processing
-- `backend/extraction/llm.py` — Text LLM with per-sheet processing for XLSX, 8192 token budget, `_call_llm()` helper
+- `backend/parser.py` — XLSX cell newline cleaning, 24K char limit per sheet; +12 `logger.exception/warning` calls
+- `backend/ocr.py` — +8 `logger.exception/warning` calls for OCR/tesseract failures
+- `backend/main.py` — +2 `logger.warning` calls for upload state load/save
+- `backend/db.py` — +1 `logger.exception` call for DB rollback
+- `backend/routes/files.py` — +9 `logger.warning` calls for page count/image gen failures; added `pdf_path` to parse result
+- `backend/routes/admin.py` — +2 logging calls for cleanup/VACUUM; removed `extraction_mode`/`llm_dpi` validation
+- `backend/routes/ai.py` — +1 `logger.warning` for AI status check
+- `backend/extraction/vision.py` — +2 logging calls for AI retry/outer loop failures
+- `backend/extraction/llm.py` — +1 `logger.warning` for AI retry failure
 - `backend/extraction/router.py` — Single auto mode router; auto-detects scanned vs text vs XLSX
 - `backend/extraction/__init__.py` — Updated exports
-- `backend/parser.py` — XLSX cell newline cleaning, 24K char limit per sheet
-- `backend/routes/admin.py` — Removed `extraction_mode`/`llm_dpi` validation; added `extraction_enabled` boolean check
-- `backend/routes/files.py` — Added `pdf_path` to parse result for Vision LLM; removed `extraction_mode` param
 - `backend/utils.py` — Added `normalize_date()`, removed `extraction_mode` defaults
 - `frontend/index.html` — 6-mode dropdown → ON/OFF AI toggle; OCR settings preserved
 - `frontend/js/settings.js` — Removed mode/DPI from save; added `extraction_enabled` checkbox
 - `frontend/js/nav.js` — Removed extraction mode badge function
-- `tests/test_config_validation.py` — Replaced mode/DPI tests with `extraction_enabled` tests
+- `tests/test_extraction_pipeline.py` — 42 mock-based extraction tests (router, LLM calls, normalize, clean item, integration)
+- `tests/test_health.py` — Health check endpoint test
 - `tests/conftest.py` — Updated fixture config
+- `pytest.ini` — Added with `asyncio_mode = auto`
+- `deploy.sh` — Switched to `docker compose up -d --build`
+- `docker-compose.yml` — Added `container_name: quodb`, `healthcheck`
+- `Dockerfile` — Added `curl` package
 
 ---
 
@@ -106,7 +124,7 @@
 | Export/Import | ✅ Complete |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
-| Automated Tests | ✅ 41 tests passing |
+| Automated Tests | ✅ 84 tests passing |
 | Vision LLM (scanned PDFs) | ✅ Working (fixed pdf_path bug) |
 | Multi-page PDF extraction | ✅ Working (single prompt for all pages) |
 
@@ -133,5 +151,5 @@
 
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
-3. Run `pytest tests/ -v` to verify all tests pass
-4. Ask user what they want to work on next
+3. Run `pytest tests/ -v` to verify all tests pass (currently 84)
+4. Review the next recommended step — see user's latest recommendation

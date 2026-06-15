@@ -11,12 +11,15 @@ little or no text (scanned/image-only PDFs).
 import json
 import base64
 import io
+import logging
 
 import httpx
 from PIL import Image
 import fitz
 
 from ..utils import normalize_date
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Simple Prompt (used for every page) ───────────────────────
@@ -208,12 +211,14 @@ async def extract_with_vision(pdf_path: str, cfg: dict = None) -> dict:
                 except httpx.TimeoutException:
                     last_error = "Timeout"
                 except Exception as e:
+                    logger.warning("vision LLM retry failed (caution: may contain doc data)", exc_info=True)
                     last_error = f"Error: {e}"
 
             if last_error:
                 warnings.append(f"Page {page_idx + 1}: {last_error}")
 
         except Exception as e:
+            logger.exception("vision LLM outer loop failed for page %d", page_idx + 1)
             warnings.append(f"Page {page_idx + 1}: {str(e)}")
 
     return {

@@ -37,6 +37,7 @@ def _count_pages(filepath: Path) -> int:
             with pdfplumber.open(str(filepath)) as pdf:
                 return len(pdf.pages)
         except Exception:
+            logger.warning("pdfplumber page count failed for %s", filepath, exc_info=True)
             try:
                 import fitz
                 doc = fitz.open(str(filepath))
@@ -44,6 +45,7 @@ def _count_pages(filepath: Path) -> int:
                 doc.close()
                 return n
             except Exception:
+                logger.warning("pymupdf page count also failed for %s", filepath, exc_info=True)
                 return 0
     elif suffix == ".xlsx":
         try:
@@ -53,6 +55,7 @@ def _count_pages(filepath: Path) -> int:
             wb.close()
             return n
         except Exception:
+            logger.warning("openpyxl page count failed for %s", filepath, exc_info=True)
             return 0
     return 0
 
@@ -83,6 +86,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
                     pages.append(f"/images/{stem}/page_{i}.png")
             return pages
         except Exception:
+            logger.warning("pdfplumber image gen failed for %s", filepath, exc_info=True)
             pass
         # Fallback: try PyMuPDF
         try:
@@ -97,6 +101,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
             doc.close()
             return pages
         except Exception:
+            logger.warning("pymupdf image gen failed for %s", filepath, exc_info=True)
             pass
     
     elif suffix == ".xlsx":
@@ -144,6 +149,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 try:
                     font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
                 except Exception:
+                    logger.warning("Font load failed, using default", exc_info=True)
                     font = ImageFont.load_default()
                 
                 def _wrap_text(text, max_width):
@@ -212,6 +218,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 pages.append(f"/images/{stem}/page_{sheet_idx}.png")
             return pages
         except Exception:
+            logger.warning("openpyxl image gen failed for %s", filepath, exc_info=True)
             pass
     
     return pages
@@ -475,6 +482,7 @@ async def process_stream(req: ProcessRequest):
             page_images = _generate_page_images(Path(filepath))
             entry["pages"] = page_images
         except Exception:
+            logger.warning("Page image generation failed for %s", entry.get("filename"), exc_info=True)
             page_images = []
         
         # Send progress for each page (synthetic since parsing is already done)
@@ -773,6 +781,7 @@ async def export_db():
             }
         )
     except Exception:
+        logger.warning("Zip download stream failed", exc_info=True)
         if os.path.exists(zip_path):
             os.unlink(zip_path)
         raise

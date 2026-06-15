@@ -8,9 +8,12 @@ Both parsers are wrapped to never raise — a failing parser returns
 {"available": False, "error": "..."} so the system can still
 return results from the other parser.
 """
+import logging
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Per-page text cap to keep responses manageable.
 # Real quotations are <5KB of text per page; 8KB is safe and shows
@@ -85,6 +88,7 @@ def _extract_best_tables(page) -> tuple[list, str, int]:
             table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"}
         ) or []
     except Exception:
+        logger.warning("pdfplumber clean table extraction failed", exc_info=True)
         clean_tables = []
     clean_score = _count_rich_rows(clean_tables)
     if clean_score >= MIN_RICH_ROWS_FOR_CLEAN_STRATEGY:
@@ -96,6 +100,7 @@ def _extract_best_tables(page) -> tuple[list, str, int]:
             table_settings={"vertical_strategy": "text", "horizontal_strategy": "text"}
         ) or []
     except Exception:
+        logger.warning("pdfplumber fallback table extraction failed", exc_info=True)
         text_tables = []
     text_score = _count_rich_rows(text_tables)
     if text_score > clean_score:
@@ -153,6 +158,7 @@ def parse_with_pdfplumber(pdf_path: str) -> dict[str, Any]:
                     "rich_rows": score,
                 })
     except Exception as e:
+        logger.exception("pdfplumber parse failed")
         out["available"] = False
         out["error"] = f"{type(e).__name__}: {e}"
     finally:
@@ -188,6 +194,7 @@ def parse_with_pymupdf(pdf_path: str) -> dict[str, Any]:
                     blocks = page.get_text("blocks")
                     block_count = len(blocks)
                 except Exception:
+                    logger.warning("pymupdf block extraction failed on page %d", page_idx, exc_info=True)
                     block_count = None
                 out["pages"].append({
                     "page": page_idx,
@@ -199,6 +206,7 @@ def parse_with_pymupdf(pdf_path: str) -> dict[str, Any]:
         finally:
             doc.close()
     except Exception as e:
+        logger.exception("pymupdf parse failed")
         out["available"] = False
         out["error"] = f"{type(e).__name__}: {e}"
     finally:
@@ -241,12 +249,14 @@ def parse_pdf(pdf_path: str, ocr_enabled: bool = True, use_llm_fallback: bool = 
         with pdfplumber.open(pdf_path) as pdf:
             num_pages = len(pdf.pages)
     except Exception:
+        logger.warning("pdfplumber page count failed, trying pymupdf", exc_info=True)
         try:
             import fitz
             doc = fitz.open(pdf_path)
             num_pages = len(doc)
             doc.close()
         except Exception as e:
+            logger.exception("pymupdf page count also failed")
             return {
                 "filename": p.name,
                 "file_size": file_size,
@@ -298,6 +308,7 @@ def parse_pdf(pdf_path: str, ocr_enabled: bool = True, use_llm_fallback: bool = 
                 if ocr_result.get("text"):
                     _merge_ocr_into_pymupdf(result, ocr_result)
         except Exception as e:
+            logger.exception("Sync OCR fallback failed")
             # OCR is best-effort — never let it fail the parse
             result["parsers"]["ocr"] = {
                 "source": "error",
@@ -371,12 +382,14 @@ async def _parse_pdf_with_ocr_impl(pdf_path: str, ocr_enabled: bool = True,
         with pdfplumber.open(pdf_path) as pdf:
             num_pages = len(pdf.pages)
     except Exception:
+        logger.warning("(async) pdfplumber page count failed, trying pymupdf", exc_info=True)
         try:
             import fitz
             doc = fitz.open(pdf_path)
             num_pages = len(doc)
             doc.close()
         except Exception as e:
+            logger.exception("(async) pymupdf page count also failed")
             return {
                 "filename": p.name,
                 "file_size": file_size,
@@ -405,6 +418,7 @@ async def _parse_pdf_with_ocr_impl(pdf_path: str, ocr_enabled: bool = True,
                 if ocr_result.get("text"):
                     _merge_ocr_into_pymupdf(result, ocr_result)
         except Exception as e:
+            logger.exception("Async OCR fallback failed")
             result["parsers"]["ocr"] = {
                 "source": "error",
                 "text": "",
@@ -504,6 +518,7 @@ def parse_xlsx(xlsx_path: str) -> dict[str, Any]:
         finally:
             wb.close()
     except Exception as e:
+        logger.exception("parse_xlsx failed")
         out["available"] = False
         out["error"] = f"{type(e).__name__}: {e}"
     finally:

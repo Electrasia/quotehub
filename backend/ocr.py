@@ -33,10 +33,13 @@ items" — quotations always have prices/qtys which are numbers. If the
 OCR found <5 numbers, it's probably noise.
 """
 import io
+import logging
 import re
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Tesseract returns per-page confidence in image_to_data's "conf" field,
 # as an int from -1 (none) to 100. We treat anything < 40 as "low
@@ -54,6 +57,7 @@ def _is_tesseract_available() -> bool:
         pytesseract.get_tesseract_version()
         return True
     except Exception:
+        logger.warning("tesseract availability check failed", exc_info=True)
         return False
 
 
@@ -78,6 +82,7 @@ def ocr_page_pytesseract(page) -> dict:
     try:
         import pytesseract
     except Exception:
+        logger.warning("pytesseract import failed in ocr_page_pytesseract", exc_info=True)
         return {"text": "", "confidence": 0.0, "num_count": 0,
                 "error": "pytesseract not installed"}
 
@@ -91,6 +96,7 @@ def ocr_page_pytesseract(page) -> dict:
         return {"text": "", "confidence": 0.0, "num_count": 0,
                 "error": f"tesseract error: {e}"}
     except Exception as e:
+        logger.warning("pytesseract runtime error in ocr_page_pytesseract: %s", e, exc_info=True)
         return {"text": "", "confidence": 0.0, "num_count": 0,
                 "error": f"OCR error: {e}"}
 
@@ -152,6 +158,7 @@ def ocr_pdf_pytesseract(pdf_path: str) -> dict:
     try:
         doc = fitz.open(pdf_path)
     except Exception as e:
+        logger.exception("fitz.open failed in ocr_pdf_pytesseract")
         out["error"] = f"Could not open PDF: {e}"
         out["time_ms"] = int((time.time() - t0) * 1000)
         return out
@@ -263,6 +270,7 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
         finally:
             doc.close()
     except Exception as e:
+        logger.exception("PDF render failed in ocr_pdf_llm")
         out["error"] = f"Could not render PDF: {e}"
         out["time_ms"] = int((time.time() - t0) * 1000)
         # Clean up any partial renders
@@ -270,6 +278,7 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
             try:
                 Path(p).unlink(missing_ok=True)
             except Exception:
+                logger.warning("cleanup failed removing %s", p, exc_info=True)
                 pass
         return out
 
@@ -356,6 +365,7 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
             except httpx.TimeoutException:
                 last_error = "Timeout"
             except Exception as e:
+                logger.warning("AI retry failed (caution: may contain document data)", exc_info=True)
                 last_error = f"Error: {e}"
         out["error"] = last_error or "All retries exhausted"
     finally:
@@ -363,6 +373,7 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
             try:
                 Path(p).unlink(missing_ok=True)
             except Exception:
+                logger.warning("cleanup failed removing %s", p, exc_info=True)
                 pass
     out["time_ms"] = int((time.time() - t0) * 1000)
     return out

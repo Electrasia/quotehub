@@ -13,11 +13,14 @@ This module handles:
 
 import calendar
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -206,6 +209,7 @@ async def cleanup_execute(req: CleanupExecuteRequest):
             cur = db.execute(base_query, params)
             entries_deleted = cur.rowcount
     except Exception as e:
+        logger.exception("Cleanup DB operation failed")
         return JSONResponse(
             status_code=500,
             content={"success": False, "detail": f"Database error: {str(e)}"}
@@ -235,6 +239,7 @@ async def cleanup_execute(req: CleanupExecuteRequest):
         vacuum_conn.execute("VACUUM")
         vacuum_conn.close()
     except Exception:
+        logger.warning("VACUUM failed during cleanup", exc_info=True)
         pass
     
     return {

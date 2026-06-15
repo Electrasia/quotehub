@@ -62,6 +62,7 @@ from datetime import datetime, timezone, timedelta
 from io import StringIO
 
 log_buffer = collections.deque(maxlen=500)
+logger = logging.getLogger(__name__)
 
 # Hong Kong/Macau timezone (UTC+8)
 HK_TZ = timezone(timedelta(hours=8))
@@ -204,6 +205,7 @@ def load_upload_state():
             uploaded_files = restored
             print(f"Restored {len(restored)} file(s) from previous session")
         except Exception as e:
+            logger.warning("Failed to load upload state: %s", e, exc_info=True)
             print(f"Failed to load upload state: {e}")
 
 
@@ -224,6 +226,7 @@ def save_upload_state():
         with open(UPLOAD_STATE_PATH, "w") as f:
             json.dump(to_save, f, indent=2)
     except Exception as e:
+        logger.warning("Failed to save upload state: %s", e, exc_info=True)
         print(f"Failed to save upload state: {e}")
 
 

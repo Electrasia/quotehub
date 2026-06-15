@@ -1,5 +1,12 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.053.4 (2026-06-15)
+- Change: Added `logger.exception()`/`logger.warning()` to 41 silent `except Exception` blocks across 9 files (parser, ocr, main, db, files, admin, ai, vision, llm)
+- Change: Switched `deploy.sh` from raw docker commands to `docker compose up -d --build` (healthcheck, container_name)
+- Feature: Added `GET /health` endpoint returning `{"status": "ok"}` for Docker HEALTHCHECK
+- Feature: Added 42 mock-based extraction pipeline tests and 1 health check test (84 total tests)
+- Chore: Added `curl` to Dockerfile, `pytest.ini` with `asyncio_mode = auto`
+
 ## v0.053.3 (2026-06-15)
 - Fix: XLSX extraction — clean cell newlines before pipe-joining (fixes "Unit Price\n(HKD)" splitting across multiple lines)
 - Fix: XLSX extraction — increase text limit from 8K to 24K chars per sheet (was truncating large quotations)

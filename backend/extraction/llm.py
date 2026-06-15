@@ -8,10 +8,13 @@ Used when pdfplumber successfully extracts text from a PDF
 Same simple prompt as vision.py, but text-mode (no images).
 """
 import json
+import logging
 
 import httpx
 
 from ..utils import normalize_date
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Simple Prompt (same shape as vision.py) ─────────────────
@@ -176,6 +179,7 @@ async def _call_llm(text: str, cfg: dict, is_xlsx: bool = False) -> dict:
         except httpx.TimeoutException:
             last_error = "Timeout"
         except Exception as e:
+            logger.warning("LLM extraction retry failed (caution: may contain doc data)", exc_info=True)
             last_error = f"Error: {e}"
 
     return {"supplier": "", "date": "", "currency": "",

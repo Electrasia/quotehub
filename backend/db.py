@@ -18,9 +18,12 @@ Usage:
         # Connection is automatically committed when exiting the context
 """
 
+import logging
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 # ─── Database Path ───────────────────────────────────────────────────────────
 # Single source of truth for the database location.
@@ -74,6 +77,7 @@ def get_db(readonly=False):
         if not readonly:
             conn.commit()
     except Exception:
+        logger.exception("DB operation failed, rolling back")
         # Rollback on error
         conn.rollback()
         raise

@@ -85,4 +85,5 @@ async def ai_status():
             else:
                 return {"connected": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
+        logger.warning("AI status check failed: %s", e, exc_info=True)
         return {"connected": False, "error": str(e)}
