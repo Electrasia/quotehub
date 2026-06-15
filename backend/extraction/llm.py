@@ -43,6 +43,41 @@ Document text:
 {text}"""
 
 
+# ─── XLSX-specific prompt ─────────────────────────────────────
+# Spreadsheets are pipe-delimited (|). The first row is always
+# the column header — the model uses it to identify each column.
+EXTRACT_PROMPT_XLSX = """Extract items from this spreadsheet quotation.
+
+The data is pipe-delimited (|). The first row is the column header —
+use it to identify what each column represents.
+
+Return JSON with:
+- document_type: "QUO" for quotation, "PO" for purchase order, "PL" for packing list, or "unknown"
+- supplier: company issuing the document
+- date: the date as shown in the document
+- currency: HKD/USD/etc
+- items: list of objects
+
+Each item:
+- brand: manufacturer name, or empty string if not listed
+- model: part/model number
+- description: product name
+- quantity: number only
+- unit: pcs/m/set/etc
+- unit_price: number only, no commas or symbols (if available)
+- total: number only, no commas or symbols (if available)
+
+Rules:
+- Each row is one item
+- If the row has a unit price OR a total price, include it as an item
+- Only skip if BOTH unit price and total are blank (likely a section header)
+- "Total" or "Subtotal" rows — SKIP them entirely
+- Return ONLY valid JSON, no other text
+
+Document text:
+{text}"""
+
+
 def _clean_item(item):
     """Basic cleanup: strip whitespace. No validation."""
     if not isinstance(item, dict):
@@ -57,12 +92,13 @@ def _clean_item(item):
     return cleaned
 
 
-async def normalize_pages_with_llm(pages_text: list, cfg: dict = None) -> dict:
+async def normalize_pages_with_llm(pages_text: list, cfg: dict = None, is_xlsx: bool = False) -> dict:
     """Extract items from text pages using the LLM.
 
     Args:
         pages_text: List of text strings, one per page
         cfg: Config dict (loaded from config.json if None)
+        is_xlsx: True if the source is an XLSX file (uses XLSX-specific prompt)
 
     Returns:
         dict with keys: document_type, supplier, currency, date, items, llm_warnings
@@ -92,7 +128,7 @@ async def normalize_pages_with_llm(pages_text: list, cfg: dict = None) -> dict:
                 "document_type": "unknown", "items": [],
                 "llm_warnings": ["No text content to extract from"]}
 
-    prompt = EXTRACT_PROMPT.format(text=combined)
+    prompt = (EXTRACT_PROMPT_XLSX if is_xlsx else EXTRACT_PROMPT).format(text=combined)
 
     messages = [{"role": "user", "content": prompt}]
 

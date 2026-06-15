@@ -88,7 +88,7 @@ async def extract_items_async(parse_result: dict) -> ExtractionResult:
 
     if is_xlsx or not is_scanned:
         # Text-mode: XLSX or PDF with extractable text
-        result = await _try_text_llm(pages_text, cfg)
+        result = await _try_text_llm(pages_text, cfg, is_xlsx=is_xlsx)
 
     if result is None:
         # Scanned PDF or text LLM failed → try Vision LLM
@@ -131,12 +131,12 @@ def _run_local(parse_result: dict) -> ExtractionResult:
     )
 
 
-async def _try_text_llm(pages_text: list, cfg: dict) -> ExtractionResult | None:
+async def _try_text_llm(pages_text: list, cfg: dict, is_xlsx: bool = False) -> ExtractionResult | None:
     """Try Text LLM extraction. Returns None if it fails."""
     if not pages_text or not any(t.strip() for t in pages_text):
         return None
 
-    result = await normalize_pages_with_llm(pages_text, cfg)
+    result = await normalize_pages_with_llm(pages_text, cfg, is_xlsx=is_xlsx)
     if result and result.get("items"):
         return ExtractionResult(
             items=result["items"],
