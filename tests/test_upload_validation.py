@@ -69,6 +69,20 @@ class TestUploadValidation:
         assert data["uploaded"] == 1
         assert len(data["errors"]) == 0
 
+    def test_oversized_file_rejected(self, app_client):
+        """A file exceeding max_upload_size_mb should be rejected."""
+        # Default is 5 MB = 5242880 bytes; send 6 MB of data
+        big_content = b"X" * (6 * 1024 * 1024)
+        resp = app_client.post(
+            "/upload",
+            files=[("files", ("big.pdf", io.BytesIO(big_content), "application/pdf"))],
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["uploaded"] == 0
+        assert len(data["errors"]) == 1
+        assert "too large" in data["errors"][0]["error"].lower()
+
     def test_multiple_files_mixed(self, app_client):
         """Mix of valid and invalid files: only valid ones uploaded."""
         resp = app_client.post(

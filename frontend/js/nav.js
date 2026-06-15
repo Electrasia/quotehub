@@ -162,6 +162,7 @@ async function _doShowSettings() {
         document.getElementById('settingsOcrEnabled').checked = cfg.ocr_enabled !== false;
         document.getElementById('settingsOcrLlmFallback').checked = cfg.ocr_fallback_to_llm !== false;
         document.getElementById('settingsExtractionEnabled').checked = cfg.extraction_enabled !== false;
+        document.getElementById('settingsMaxUploadSizeMb').value = cfg.max_upload_size_mb || 5;
         updateIdleTimeoutFromConfig(cfg);
         applyAdminSettingsLock();
     } catch (e) { /* ignore */ }

@@ -66,6 +66,8 @@ async function saveSettings() {
     const extractionEnabled = document.getElementById('settingsExtractionEnabled').checked;
     const ocrEnabled = document.getElementById('settingsOcrEnabled').checked;
     const ocrLlmFallback = document.getElementById('settingsOcrLlmFallback').checked;
+    const maxUploadSizeRaw = parseInt(document.getElementById('settingsMaxUploadSizeMb').value);
+    const maxUploadSizeMb = Number.isFinite(maxUploadSizeRaw) ? maxUploadSizeRaw : 5;
 
     // Numeric safety: Number.isFinite() rejects NaN/Infinity, but allows 0 to pass through
     const timeout           = Number.isFinite(timeoutRaw)         ? timeoutRaw         : 120;
@@ -89,6 +91,7 @@ async function saveSettings() {
                 extraction_enabled: extractionEnabled,
                 ocr_enabled: ocrEnabled,
                 ocr_fallback_to_llm: ocrLlmFallback,
+                max_upload_size_mb: maxUploadSizeMb,
             })
         });
         const result = await resp.json();

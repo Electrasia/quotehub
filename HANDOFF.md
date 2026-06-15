@@ -2,11 +2,17 @@
 
 ## Current Version
 
-**v0.053.4** (dev branch)
+**v0.054.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.054.0 — Configurable upload size limit + SHA verification
+- Feature: Configurable max upload size (1–20 MB, default 5 MB). Rejects oversized files before writing to disk, with clear error message.
+- Feature: SHA256 checksum embedded in export ZIP (`quotations.json.sha256`). Import verifies it if present; backward compatible with older exports.
+- Feature: Frontend settings field for upload limit (master-only, disabled for admin).
+- Test: Added oversized file rejection test (85 total tests).
 
 ### v0.053.4 — Logging hardening + infrastructure
 - Change: Added `logger.exception()`/`logger.warning()` to 41 silent `except Exception` blocks across 9 files — DB errors, PDF/XLSX parse failures, AI call errors, image gen failures, cleanup operations, VACUUM, upload state, and zip downloads now all visible in logs

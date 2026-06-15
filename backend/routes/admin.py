@@ -72,6 +72,12 @@ def _validate_config(config: dict) -> list[str]:
         if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
             errors.append("ai_endpoint must be a URL starting with http:// or https://")
 
+    # max_upload_size_mb: integer 1-20
+    max_size = config.get("max_upload_size_mb")
+    if max_size is not None:
+        if not isinstance(max_size, int) or isinstance(max_size, bool) or max_size < 1 or max_size > 20:
+            errors.append("max_upload_size_mb must be an integer between 1 and 20")
+
     # ocr_enabled, ocr_fallback_to_llm: must be boolean
     for key in ("ocr_enabled", "ocr_fallback_to_llm"):
         val = config.get(key)

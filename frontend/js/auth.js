@@ -96,6 +96,7 @@ function applyAdminSettingsLock() {
         'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
         'settingsOcrEnabled', 'settingsOcrLlmFallback',
+        'settingsMaxUploadSizeMb',
     ];
     inputs.forEach(id => {
         const el = document.getElementById(id);

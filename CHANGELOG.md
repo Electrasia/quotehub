@@ -1,11 +1,13 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.054.0 (2026-06-15)
+- Feature: Configurable max upload size limit (1–20 MB, default 5 MB). Files exceeding the limit are rejected with a clear error message before being written to disk.
+- Feature: SHA256 checksum embedded in export ZIP (`quotations.json.sha256`). On import, checksum is verified if present (backward compatible — older exports without checksum still import successfully).
+- Feature: Frontend settings field for upload limit, visible only to Master role (disabled for Admin).
+- Test: Added oversized file rejection test (85 tests total).
+
 ## v0.053.4 (2026-06-15)
-- Change: Added `logger.exception()`/`logger.warning()` to 41 silent `except Exception` blocks across 9 files (parser, ocr, main, db, files, admin, ai, vision, llm)
-- Change: Switched `deploy.sh` from raw docker commands to `docker compose up -d --build` (healthcheck, container_name)
-- Feature: Added `GET /health` endpoint returning `{"status": "ok"}` for Docker HEALTHCHECK
-- Feature: Added 42 mock-based extraction pipeline tests and 1 health check test (84 total tests)
-- Chore: Added `curl` to Dockerfile, `pytest.ini` with `asyncio_mode = auto`
+- Change: Added `logger.exception()`/`logger.warning()` to 41 silent `except Exception` blocks across 9 files
 
 ## v0.053.3 (2026-06-15)
 - Fix: XLSX extraction — clean cell newlines before pipe-joining (fixes "Unit Price\n(HKD)" splitting across multiple lines)

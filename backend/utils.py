@@ -27,6 +27,7 @@ _CONFIG_DEFAULTS = {
     "idle_timeout_minutes": 15,
     "ocr_enabled": True,
     "ocr_fallback_to_llm": True,
+    "max_upload_size_mb": 5,
 }
 
 

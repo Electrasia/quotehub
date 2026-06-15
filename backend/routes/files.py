@@ -9,6 +9,7 @@ This module handles:
     - Export/import
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -306,20 +307,36 @@ async def upload(files: list[UploadFile] = File(...)):
             errors.append({"filename": file.filename, "error": f"Unsupported file type: {ext}"})
             continue
         
-        # Save file to temp directory
-        filepath = UPLOAD_DIR / file.filename
-        with open(filepath, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
+        # Read file into memory for validation before writing to disk
+        content = await file.read()
+
         # Reject empty files
         if len(content) == 0:
-            filepath.unlink(missing_ok=True)
             logger.warning("Upload rejected: empty file", extra={
                 'category': 'PROCESS', 'file': file.filename, 'error': 'Empty file (0 bytes)'
             })
             errors.append({"filename": file.filename, "error": "Empty file"})
             continue
+
+        # Reject oversized files (configurable, default 5 MB)
+        from ..utils import get_config_data
+        cfg = get_config_data()
+        max_bytes = cfg.get("max_upload_size_mb", 5) * 1024 * 1024
+        if len(content) > max_bytes:
+            limit_mb = cfg.get("max_upload_size_mb", 5)
+            logger.warning("Upload rejected: file too large", extra={
+                'category': 'PROCESS', 'file': file.filename,
+                'size_mb': f"{len(content) / 1024 / 1024:.1f}",
+                'max_mb': limit_mb,
+            })
+            errors.append({"filename": file.filename,
+                           "error": f"File too large ({len(content) / 1024 / 1024:.1f} MB). Maximum: {limit_mb} MB"})
+            continue
+
+        # Save file to temp directory
+        filepath = UPLOAD_DIR / file.filename
+        with open(filepath, "wb") as f:
+            f.write(content)
         
         # Add to uploaded files list
         num_pages = _count_pages(filepath)
@@ -752,7 +769,11 @@ async def export_db():
     os.close(zip_fd)
     try:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("quotations.json", json.dumps({"quotations": data, "count": len(data)}, indent=2))
+            quotations_json = json.dumps({"quotations": data, "count": len(data)}, indent=2)
+            zf.writestr("quotations.json", quotations_json)
+            # Embed SHA256 checksum for integrity verification on import
+            sha = hashlib.sha256(quotations_json.encode()).hexdigest()
+            zf.writestr("quotations.json.sha256", sha)
             if ARCHIVE_DIR.exists():
                 for pdf_file in ARCHIVE_DIR.glob("*.pdf"):
                     zf.write(pdf_file, f"archive/{pdf_file.name}")
@@ -799,6 +820,17 @@ async def import_upload(file: UploadFile = File(...)):
         try:
             with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
                 if "quotations.json" in zf.namelist():
+                    # Verify SHA256 checksum if present (backward compatible)
+                    if "quotations.json.sha256" in zf.namelist():
+                        expected_sha = zf.read("quotations.json.sha256").decode().strip()
+                        actual_sha = hashlib.sha256(zf.read("quotations.json")).hexdigest()
+                        if expected_sha != actual_sha:
+                            logger.warning("Import rejected: checksum mismatch", extra={
+                                'category': 'ADMIN', 'file': file.filename,
+                            })
+                            return JSONResponse(status_code=400, content={
+                                "error": "File integrity check failed — the data has been modified since export"
+                            })
                     data = json.loads(zf.read("quotations.json"))
                     quotations = data.get("quotations", [])
                 from ..main import ARCHIVE_DIR
