@@ -45,8 +45,13 @@ GIT_COMMIT=$(git rev-parse --short HEAD)
 export GIT_COMMIT
 echo ">> Current commit: $GIT_COMMIT"
 
-# Build and start using docker compose (handles image build, container
-# replacement, healthcheck, and volume mounts from docker-compose.yml)
+# Remove any previous container (works whether it was created by old
+# `docker run` or by a previous compose run — needed to avoid port conflicts)
+docker stop quodb 2>/dev/null || true
+docker rm quodb 2>/dev/null || true
+
+# Build and start using docker compose (handles image build, healthcheck,
+# and volume mounts from docker-compose.yml)
 echo ">> Building and starting via docker compose..."
 docker compose up -d --build
 
