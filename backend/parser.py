@@ -17,6 +17,11 @@ from typing import Any
 # the full document in almost all cases.
 MAX_TEXT_CHARS_PER_PAGE = 8000
 
+# Per-sheet text cap for XLSX files. XLSX sheets can have 50-100+ rows
+# of structured tabular data. 24K chars (~6K tokens) handles most
+# quotations while staying well within the model's 32K context.
+MAX_TEXT_CHARS_PER_XLSX_SHEET = 24000
+
 # Per-table row cap for the same reason.
 MAX_TABLE_ROWS = 200
 
@@ -467,13 +472,19 @@ def parse_xlsx(xlsx_path: str) -> dict[str, Any]:
                 # Truncate like pdfplumber
                 if len(rows) > MAX_TABLE_ROWS:
                     rows = rows[:MAX_TABLE_ROWS]
-                # Build the page-text view: a CSV-ish rendering
+                # Build the page-text view: a pipe-delimited rendering.
+                # Clean cell values: newlines break the pipe-delimited
+                # format (e.g. "Unit Price\n(HKD)" splits across lines).
                 text_lines = []
                 for r in rows:
-                    cells = [str(c) if c is not None else "" for c in r]
+                    cells = [
+                        str(c).replace("\n", " ").replace("\r", " ")
+                        if c is not None else ""
+                        for c in r
+                    ]
                     text_lines.append(" | ".join(cells))
                 page_text = "\n".join(text_lines)
-                page_text = _truncate(page_text, MAX_TEXT_CHARS_PER_PAGE)
+                page_text = _truncate(page_text, MAX_TEXT_CHARS_PER_XLSX_SHEET)
                 table_dict = {
                     "table_index": 1,
                     "row_count": len(rows),
