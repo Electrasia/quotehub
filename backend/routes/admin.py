@@ -36,9 +36,6 @@ async def get_config():
     return load_config()
 
 
-VALID_EXTRACTION_MODES = set()  # Deprecated — extraction is now auto
-
-
 def _validate_config(config: dict) -> list[str]:
     """Validate config values. Returns list of error messages (empty = valid)."""
     errors = []

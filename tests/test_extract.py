@@ -1,7 +1,7 @@
-"""tests/test_extract.py — Tests for the rules-based extractor (extract.py)."""
+"""tests/test_extract.py — Tests for the rules-based extractor (local.py)."""
 
 import pytest
-from backend.extract import (
+from backend.extraction.local import (
     _find_header_rows,
     _map_columns_from_headers,
     _match_field,
