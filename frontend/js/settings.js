@@ -159,8 +159,13 @@ async function importDatabase(input) {
         if (data.status === 'imported') {
             let msg = `✓ Imported ${data.count} quotation(s) successfully.`;
             if (data.pdfs_restored > 0) msg += ` ${data.pdfs_restored} PDF file(s) restored.`;
+            if (data.warning) {
+                msg += ` ⚠ ${data.warning}`;
+                result.style.color = '#e67e22';
+            } else {
+                result.style.color = '#27ae60';
+            }
             result.textContent = msg;
-            result.style.color = '#27ae60';
             result.classList.remove('hidden');
             prog.classList.add('hidden');
             // Auto-refresh search if on search page

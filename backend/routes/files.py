@@ -814,6 +814,7 @@ async def import_upload(file: UploadFile = File(...)):
     content = await file.read()
     quotations = []
     pdf_restored = 0
+    integrity_warning = None
     
     if file.filename.endswith(".zip"):
         import io
@@ -835,6 +836,7 @@ async def import_upload(file: UploadFile = File(...)):
                         logger.warning("Import ZIP has no SHA checksum — integrity not verified", extra={
                             'category': 'ADMIN', 'file': file.filename,
                         })
+                        integrity_warning = "No integrity checksum found in ZIP — file not verified"
                     data = json.loads(zf.read("quotations.json"))
                     quotations = data.get("quotations", [])
                 from ..main import ARCHIVE_DIR
@@ -889,4 +891,7 @@ async def import_upload(file: UploadFile = File(...)):
         'pdfs_restored': pdf_restored
     })
     
-    return {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
+    result = {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
+    if integrity_warning:
+        result["warning"] = integrity_warning
+    return result
