@@ -1,12 +1,12 @@
 # QuoteHub
 
-AI-powered quotation document processing system. Upload PDF quotations, extract structured data using AI, and search across all processed documents.
+AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.052.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.053.3 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
-- **AI-Powered Extraction** — Upload PDF quotations and extract supplier, items, prices, dates using a local VLM (Vision Language Model)
+- **AI-Powered Extraction** — Upload PDF or XLSX quotations and extract supplier, items, prices, dates using a local VLM (Vision Language Model)
 - **Multi-Page Processing** — Automatically processes all pages with streaming progress feedback
 - **Search & Filter** — Full-text search with prefix matching across suppliers, items, descriptions
 - **Editable Results** — Review, edit, find & replace before saving
@@ -86,9 +86,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.052.0`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.053.3`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.052.0 (377b4c7)`
+- The app header displays both: `v0.053.3 (377b4c7)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -109,7 +109,7 @@ QuoteHub has a 3-role authentication system (introduced in `0.030.0`). All acces
 A short summary:
 
 - **user** — read-only access. Can search and view PDFs. Cannot upload, edit, or change settings.
-- **admin** — day-to-day operations. Can upload, process, edit, delete, export backup, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify Extraction Mode, import backups, access System Cleanup, or manage users. Those are master-only.
+- **admin** — day-to-day operations. Can upload, process, edit, delete, export backup, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify AI Settings, import backups, access System Cleanup, or manage users. Those are master-only.
 - **master** — full access, including all settings, import, cleanup, and user management.
 
 ### First-Run Master Password
@@ -192,16 +192,18 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 | `max_retries` | Max retry attempts | `2` |
 | `external_url` | QuoteHub URL for image access | `""` (auto localhost) |
 | `popup_duration` | Success popup duration (seconds) | `3` |
-| `extraction_mode` | How to extract data from PDFs | `llm_first` |
+| `ocr_enabled` | Enable OCR for scanned PDFs | `true` |
+| `extraction_enabled` | Enable AI extraction (ON/OFF toggle) | `true` |
 
-### Extraction Modes
+### Extraction Pipeline
 
-| Mode | Description |
-|------|-------------|
-| `llm_first` | **Default** — LLM extraction with local fallback (best quality, slower) |
-| `local_first` | Fast rules-based extraction, falls back to LLM if 0 items found |
-| `llm_only` | LLM extraction only (no local fallback) |
-| `local_only` | Rules-based extraction only (no LLM) |
+| File Type | Method |
+|-----------|--------|
+| Scanned PDF | Vision LLM (page-by-page image analysis, 200 DPI) |
+| Text PDF | Text LLM (all pages combined, max_tokens: 4096) |
+| XLSX | Text LLM (each sheet processed separately, max_tokens: 8192) |
+| Any fail | Local rules fallback |
+| AI disabled | Local rules only |
 
 **Note:** `ai_endpoint` and `model` are intentionally empty in the committed `config.json` and `config.example.json`. Configure them in Settings → Server Connection (recommended) or edit your local `config.json` directly.
 
@@ -218,9 +220,10 @@ quotehub/
 │   ├── ocr.py               # OCR via pytesseract + vision LLM
 │   ├── extraction/           # Pluggable extraction package
 │   │   ├── __init__.py      # Unified interface (extract_items_async)
-│   │   ├── router.py        # Mode selection (local_first/llm_first/llm_only/local_only)
+│   │   ├── router.py        # Auto mode selection (scanned/text/XLSX)
 │   │   ├── local.py         # Rules-based extractor
-│   │   └── llm.py           # LLM extractor
+│   │   ├── llm.py           # Text LLM extractor (per-sheet for XLSX)
+│   │   └── vision.py        # Vision LLM extractor (scanned PDFs)
 │   ├── routes/               # Route modules (split from main.py)
 │   │   ├── __init__.py      # Route registry
 │   │   ├── auth.py          # Login/logout, user management
@@ -317,7 +320,7 @@ docker-compose up -d
 - **Backend:** Python, FastAPI, SQLite (FTS5), httpx
 - **Frontend:** Vanilla HTML/CSS/JavaScript (no frameworks)
 - **AI:** Any OpenAI-compatible VLM API (LM Studio, vLLM, etc.)
-- **Extraction:** Pluggable package (local rules-based + LLM with fallback)
+- **Extraction:** Pluggable package (local rules-based + LLM with fallback, Vision LLM for scanned PDFs)
 - **Container:** Docker with Python 3.11-slim
 
 ## License

@@ -2,11 +2,18 @@
 
 ## Current Version
 
-**v0.053.2** (dev branch)
+**v0.053.3** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.053.3 — XLSX extraction fix
+- Fix: XLSX extraction — clean cell newlines before pipe-joining (fixes "Unit Price\n(HKD)" splitting across multiple lines)
+- Fix: XLSX extraction — increase text limit from 8K to 24K chars per sheet (was truncating large quotations)
+- Fix: XLSX extraction — process each sheet as separate LLM call (avoids token overflow when combining multiple sheets)
+- Fix: XLSX extraction — increase max_tokens to 8192 for XLSX (PDF stays at 4096)
+- Change: Extracted `_call_llm()` helper for single LLM calls
 
 ### v0.053.2 — Vision LLM PDF path + multi-page fix
 - Fix: `pdf_path` was missing from parse result, so Vision LLM was never called for scanned PDFs — extraction silently fell to local rules (returned nothing)
@@ -72,9 +79,10 @@
 ## Files Changed Recently
 
 - `backend/extraction/vision.py` — Vision LLM with single-prompt approach for all pages, fixed 200 DPI, no post-processing
-- `backend/extraction/llm.py` — Text LLM with simplified ~15 line prompt, no field mapping/few-shot
+- `backend/extraction/llm.py` — Text LLM with per-sheet processing for XLSX, 8192 token budget, `_call_llm()` helper
 - `backend/extraction/router.py` — Single auto mode router; auto-detects scanned vs text vs XLSX
 - `backend/extraction/__init__.py` — Updated exports
+- `backend/parser.py` — XLSX cell newline cleaning, 24K char limit per sheet
 - `backend/routes/admin.py` — Removed `extraction_mode`/`llm_dpi` validation; added `extraction_enabled` boolean check
 - `backend/routes/files.py` — Added `pdf_path` to parse result for Vision LLM; removed `extraction_mode` param
 - `backend/utils.py` — Added `normalize_date()`, removed `extraction_mode` defaults
@@ -113,9 +121,9 @@
 
 ## Extraction Pipeline Reference
 
-- **Scanned PDF** (avg text chars < 50/page) → Vision LLM (page-by-page image analysis)
-- **Text PDF** (avg text chars >= 50/page) → Text LLM (extracted page text)
-- **XLSX** → Text LLM (openpyxl text)
+- **Scanned PDF** (avg text chars < 50/page) → Vision LLM (page-by-page image analysis, 200 DPI)
+- **Text PDF** (avg text chars >= 50/page) → Text LLM (all pages combined, max_tokens: 4096)
+- **XLSX** → Text LLM (each sheet processed separately, max_tokens: 8192)
 - **Any fail** → Local rules fallback
 - **AI disabled** (`extraction_enabled: false`) → Local rules only
 

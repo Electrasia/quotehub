@@ -1,5 +1,12 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.053.3 (2026-06-15)
+- Fix: XLSX extraction — clean cell newlines before pipe-joining (fixes "Unit Price\n(HKD)" splitting across multiple lines)
+- Fix: XLSX extraction — increase text limit from 8K to 24K chars per sheet (was truncating large quotations)
+- Fix: XLSX extraction — process each sheet as separate LLM call (avoids token overflow when combining multiple sheets)
+- Fix: XLSX extraction — increase max_tokens to 8192 for XLSX (PDF stays at 4096)
+- Change: Extracted `_call_llm()` helper for single LLM calls
+
 ## v0.053.2 (2026-06-14)
 - Fix: Vision LLM never called for scanned PDFs — `pdf_path` was missing from parser result, so router always fell through to local extraction (returned nothing)
 - Fix: Multi-page Vision LLM confusion — removed separate page 2 prompt; same prompt used for all pages with "leave empty on continuation pages" guidance
