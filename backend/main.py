@@ -308,3 +308,9 @@ async def root():
     if html_path.exists():
         return HTMLResponse(html_path.read_text())
     return HTMLResponse("<h1>QuoteHub</h1><p>Frontend not found.</p>")
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for Docker HEALTHCHECK and monitoring."""
+    return {"status": "ok"}
