@@ -465,6 +465,9 @@ async def process_stream(req: ProcessRequest):
             yield send({"type": "error", "message": parse_result["error"]})
             return
         
+        # Pass pdf_path so extraction router can use Vision LLM for scanned PDFs
+        parse_result["pdf_path"] = str(filepath)
+        
         num_pages = parse_result.get("num_pages", 1)
         
         # Generate page images for the review PDF viewer

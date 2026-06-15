@@ -19,43 +19,22 @@ import fitz
 from ..utils import normalize_date
 
 
-# ─── Simple Prompt (KISS) ─────────────────────────────────────
-# The model sees the image and reads the table directly.
-# No field mapping, no step-by-step rules — just "read this".
+# ─── Simple Prompt (used for every page) ───────────────────────
+# Same prompt for all pages. Metadata fields (supplier, date, etc.)
+# only appear on the first page; the model will leave them empty
+# on continuation pages, which we ignore.
 EXTRACT_PROMPT = """Extract items from this purchase order or quotation.
 
 Return JSON with:
 - document_type: "QUO" for quotation, "PO" for purchase order, "PL" for packing list, or "unknown"
-- supplier: company issuing the document (first page only)
-- date: the date as shown in the document (we will parse it)
-- currency: HKD/USD/etc (first page only)
+- supplier: company issuing the document (only on first page; leave empty on continuation pages)
+- date: the date as shown in the document (only on first page; leave empty on continuation pages)
+- currency: HKD/USD/etc (only on first page; leave empty on continuation pages)
 - items: list of objects
 
 Each item:
 - brand: manufacturer name, or empty string if not listed
 - model: part/model number  
-- description: product name
-- quantity: number only
-- unit: pcs/m/set/etc
-- unit_price: number only, no commas or symbols
-- total: number only, no commas or symbols
-
-Rules:
-- Each row in the table is one item
-- Rows without prices are section headers — SKIP them
-- "Total" or "Subtotal" rows — SKIP them entirely
-- Return ONLY valid JSON, no other text"""
-
-
-# ─── Page 2 prompt (no metadata fields) ──────────────────────
-EXTRACT_PROMPT_PAGE2 = """Read this page from a purchase order or quotation.
-
-Return JSON with:
-- items: list of objects
-
-Each item:
-- brand: manufacturer name, or empty string if not listed
-- model: part/model number
 - description: product name
 - quantity: number only
 - unit: pcs/m/set/etc
@@ -145,14 +124,12 @@ async def extract_with_vision(pdf_path: str, cfg: dict = None) -> dict:
             img_bytes = _render_page_to_image(pdf_path, page_idx)
             b64 = base64.b64encode(img_bytes).decode("utf-8")
 
-            prompt = EXTRACT_PROMPT if page_idx == 0 else EXTRACT_PROMPT_PAGE2
-
             messages = [{
                 "role": "user",
                 "content": [
                     {"type": "image_url",
                      "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    {"type": "text", "text": prompt},
+                     {"type": "text", "text": EXTRACT_PROMPT},
                 ],
             }]
 

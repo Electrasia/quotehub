@@ -1,5 +1,9 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.053.2 (2026-06-14)
+- Fix: Vision LLM never called for scanned PDFs — `pdf_path` was missing from parser result, so router always fell through to local extraction (returned nothing)
+- Fix: Multi-page Vision LLM confusion — removed separate page 2 prompt; same prompt used for all pages with "leave empty on continuation pages" guidance
+
 ## v0.053.1 (2026-06-14)
 - Fix: SSE stream crash after extraction — removed `result.llm_warnings` reference that didn't exist on `ExtractionResult` dataclass (caused "Network error" on frontend)
 - Fix: Added `document_type` to Vision and Text LLM prompts so model identifies QUO/PO/PL instead of defaulting to "unknown"
