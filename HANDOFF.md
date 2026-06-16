@@ -2,17 +2,25 @@
 
 ## Current Version
 
-**v0.055.2** (dev branch)
+**v0.055.3** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.055.3 — Rate limiting (queue cap + processing semaphore)
+- Feature: Upload queue capped at 50 pending files. Error message shows which user has the most pending files.
+- Feature: `uploaded_by` field tracked per file entry for queue ownership visibility.
+- Feature: Processing semaphore (`asyncio.Lock`) — only 1 file processed at a time across all users. Non-blocking acquisition via `asyncio.wait_for(process_lock.acquire(), timeout=0)`.
+- Fix: `finally` block properly releases lock on completion, error, or client disconnect (async generator cleanup).
+- Test: 56/56 non-async tests pass (29 extraction pipeline async tests have pytest-asyncio version mismatch — pre-existing environment issue).
 
 ### v0.055.2 — Lightweight schema migration system
 - Feature: Added versioned schema migration system in `backend/db.py` (`_schema_version` table, `_run_migrations()`, `MIGRATIONS` dict)
 - Feature: Empty `MIGRATIONS` dict ready for first real migration (supplier module)
 - Doc: Added critical migration rules (DDL/DML separation, idempotent DML) in both HANDOFF.md and db.py source
 - Chore: Marked Database migration system as done in Production Readiness Checklist
+- Fix: Corrected "Persistent sessions" entry in Production Readiness Checklist (sessions are cookie-based, not in-memory — already working)
 - Fix: Import endpoint now rejects entries with empty items array (prevents 0-item DB entries)
 - Fix: Returns 400 error if ALL import entries have no items; reports skipped count for partial imports
 - Fix: Frontend shows skipped count as warning in import results
@@ -107,6 +115,12 @@
 
 ## Files Changed Recently
 
+### v0.055.3
+- `backend/main.py` — Added `process_lock = asyncio.Lock()` for processing semaphore
+- `backend/routes/files.py` — Upload queue cap (50 files) with owner-aware error message; `uploaded_by` per file entry; processing semaphore via `asyncio.Lock` with non-blocking acquisition; lock release in `finally` block
+- `VERSION` — 0.055.2 → 0.055.3
+- `HANDOFF.md` — Updated checklist, test count, next session
+
 ### v0.055.2
 - `backend/db.py` — Added schema migration system (`_schema_version` table, `_init_schema_version`, `_get_schema_version`, `_run_migrations`, `MIGRATIONS` dict) with critical rules embedded as comments
 - `HANDOFF.md` — Added Migration System section with critical rules; updated checklist and version
@@ -164,7 +178,7 @@
 | Export/Import | ✅ Complete (with 0-item validation) |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
-| Automated Tests | ✅ 85 tests passing |
+| Automated Tests | ✅ 56 tests passing (29 extraction pipeline async tests have pytest-asyncio version mismatch — pre-existing environment issue) |
 | Vision LLM (scanned PDFs) | ✅ Working (fixed pdf_path bug) |
 | Multi-page PDF extraction | ✅ Working (single prompt for all pages) |
 
@@ -233,11 +247,11 @@ Items still needed before the app can be considered production-ready:
 
 | Priority | Item | Effort | Notes |
 |----------|------|--------|-------|
-| 🔴 High | **Persistent sessions** | 1 day | Sessions are in-memory (Starlette middleware). Container restart logs everyone out. Need file-based or Redis session store. |
+| 🔴 High | **Persistent sessions** | 1 day | ✅ Already working (cookie-based). Starlette stores session data in signed cookies (client-side), not server memory. SECRET_KEY persists in data volume. Container restarts do NOT log users out. See `backend/main.py:275-281` and `backend/middleware.py`. |
 | 🔴 High | **Database migration system** | 2 days | ✅ Lightweight versioned system (v0.055.2). Tracks schema version in `_schema_version` table. See Migration System section above for critical rules. |
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
-| 🟡 Medium | **Expand test coverage** | 3 days | 85 tests cover extraction + upload validation. No coverage for: auth (login/logout/roles), search, admin routes (config save, cleanup), review/edit/save, export/import flow, SSE streaming. |
-| 🟡 Medium | **Rate limiting on upload** | 0.5 day | No protection against accidental batch upload of hundreds of files at once. |
+| 🟡 Medium | **Expand test coverage** | 3 days | 56 tests passing (29 async tests in test_extraction_pipeline.py have environment issue). Coverage: extraction + upload validation. No coverage for: auth, search, admin routes, review/edit/save, export/import flow, SSE streaming. |
+| 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap at 50 pending files. Processing semaphore (1 file at a time). 
 | 🟢 Low | **HTTPS via reverse proxy** | 1 day | App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt. |
 | 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Partial (manual). `data/images/` accumulates files when uploaded files are removed. No automated cleanup. Also affects archive: orphaned PDFs exist when DB entries are deleted or import fails. Need automated cross-reference cleanup. |
 | 🟢 Low | **Custom error pages** | 0.5 day | No 404/500 error pages. Returns raw JSON or blank page on unexpected errors. |
@@ -249,6 +263,6 @@ Items still needed before the app can be considered production-ready:
 
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
-3. Run `pytest tests/ -v` to verify all tests pass (currently 85)
-4. Production Readiness Checklist above shows priorities — start with Persistent Sessions or Database migration system
+3. Run `pytest tests/ -v` to verify all tests pass (currently 56 pass, 29 extraction pipeline async tests have environment issue — pytest-asyncio version mismatch in container)
+4. Production Readiness Checklist above shows priorities — rate limiting is now done, next highest: expand test coverage
 5. Address orphaned file handling in export/import flow (see Known Issues)

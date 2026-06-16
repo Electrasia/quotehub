@@ -14,6 +14,7 @@ Modules:
 import os
 import json
 import secrets
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -52,6 +53,7 @@ CONFIG = load_config()
 
 ai_connected = False
 uploaded_files = []
+process_lock = asyncio.Lock()
 
 # ─── Log Buffer ───────────────────────────────────────────
 

@@ -20,7 +20,7 @@ import asyncio
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -288,14 +288,45 @@ class RemoveFileRequest(BaseModel):
 # ─── Upload ────────────────────────────────────────────────
 
 @router.post("/upload", dependencies=[Depends(require_role("admin", "master"))])
-async def upload(files: list[UploadFile] = File(...)):
+async def upload(files: list[UploadFile] = File(...), request: Request = None):
     """Upload PDF or XLSX files for processing."""
     from ..main import uploaded_files, UPLOAD_DIR
+    from ..auth import get_current_user
+    from collections import Counter
+    
+    user = get_current_user(request)
+    username = user.get("username", "unknown") if user else "unknown"
     
     results = []
     errors = []
+    
+    # Compute queue size once (non-saved files only)
+    pending_count = sum(1 for f in uploaded_files if f.get("status") != "saved")
+    MAX_QUEUED = 50
+    
     for file in files:
         if not file.filename:
+            continue
+
+        # Reject if queue would exceed the limit
+        if pending_count >= MAX_QUEUED:
+            owner_counts = Counter(
+                f.get("uploaded_by", "unknown")
+                for f in uploaded_files
+                if f.get("status") != "saved"
+            )
+            top_user, top_count = owner_counts.most_common(1)[0]
+            logger.warning("Upload rejected: queue full", extra={
+                'category': 'PROCESS', 'file': file.filename,
+                'username': username, 'pending': pending_count
+            })
+            errors.append({
+                "filename": file.filename,
+                "error": (
+                    f"Upload queue full (limit {MAX_QUEUED}). "
+                    f"User '{top_user}' has {top_count} file(s) pending."
+                )
+            })
             continue
         
         # Validate file extension
@@ -348,14 +379,17 @@ async def upload(files: list[UploadFile] = File(...)):
             "status": "uploaded",
             "num_pages": num_pages,
             "pages": [],
+            "uploaded_by": username,
         }
         uploaded_files.append(entry)
+        pending_count += 1  # Track for subsequent files in this batch
         results.append({
             "file_id": file_id,
             "filename": file.filename,
             "status": "uploaded",
             "file_index": len(uploaded_files) - 1,
             "num_pages": num_pages,
+            "uploaded_by": username,
         })
         
         logger.info("File uploaded", extra={
@@ -457,6 +491,7 @@ async def process_stream(req: ProcessRequest):
         """Yield SSE messages as processing progresses."""
         from ..parser import parse_file_with_ocr
         from ..extraction import extract_items_async
+        from ..main import process_lock
         
         import time
         start_time = time.time()
@@ -464,110 +499,121 @@ async def process_stream(req: ProcessRequest):
         def send(msg):
             return f"data: {json.dumps(msg)}\n\n"
         
-        # Signal parsing started
-        yield send({"type": "progress", "percent": 0, "page": 0, "total": 1, "message": "Parsing file..."})
-        
+        # Try to acquire the processing lock (non-blocking)
+        # Only one file can be processed at a time across all users
         try:
-            parse_result = await parse_file_with_ocr(filepath)
-        except Exception as e:
-            logger.error("Parse failed", extra={
+            await asyncio.wait_for(process_lock.acquire(), timeout=0)
+        except asyncio.TimeoutError:
+            yield send({"type": "error", "message": "Another user is currently processing a file. Try again later."})
+            return
+
+        try:
+            # Signal parsing started
+            yield send({"type": "progress", "percent": 0, "page": 0, "total": 1, "message": "Parsing file..."})
+
+            try:
+                parse_result = await parse_file_with_ocr(filepath)
+            except Exception as e:
+                logger.error("Parse failed", extra={
+                    'category': 'PROCESS',
+                    'file': entry["filename"],
+                    'file_id': entry.get("file_id"),
+                    'error': str(e)
+                })
+                yield send({"type": "error", "message": f"Parse failed: {e}"})
+                return
+
+            if parse_result.get("error"):
+                logger.error("Parse failed", extra={
+                    'category': 'PROCESS',
+                    'file': entry["filename"],
+                    'file_id': entry.get("file_id"),
+                    'error': parse_result["error"]
+                })
+                yield send({"type": "error", "message": parse_result["error"]})
+                return
+
+            # Pass pdf_path so extraction router can use Vision LLM for scanned PDFs
+            parse_result["pdf_path"] = str(filepath)
+
+            num_pages = parse_result.get("num_pages", 1)
+
+            # Generate page images for the review PDF viewer
+            try:
+                page_images = _generate_page_images(Path(filepath))
+                entry["pages"] = page_images
+            except Exception:
+                logger.warning("Page image generation failed for %s", entry.get("filename"), exc_info=True)
+                page_images = []
+
+            # Send progress for each page (synthetic since parsing is already done)
+            for page in range(1, num_pages + 1):
+                percent = int((page / num_pages) * 80)
+                yield send({"type": "progress", "percent": percent, "page": page, "total": num_pages, "message": f"Processing page {page}/{num_pages}..."})
+                await asyncio.sleep(0.05)
+
+            # Extraction
+            yield send({"type": "progress", "percent": 80, "page": num_pages, "total": num_pages, "message": "Extracting items..."})
+
+            try:
+                from ..utils import get_config_data
+                cfg = get_config_data()
+                extraction_enabled = cfg.get("extraction_enabled", True)
+
+                result = await extract_items_async(
+                    parse_result,
+                )
+            except Exception as e:
+                logger.error("Extraction failed", extra={
+                    'category': 'PROCESS',
+                    'file': entry["filename"],
+                    'file_id': entry.get("file_id"),
+                    'error': str(e)
+                })
+                yield send({"type": "error", "message": f"Extraction failed: {e}"})
+                return
+
+            # Calculate processing time
+            processing_time = round(time.time() - start_time, 2)
+
+            # Log successful processing
+            logger.info("Processing complete", extra={
                 'category': 'PROCESS',
                 'file': entry["filename"],
                 'file_id': entry.get("file_id"),
-                'error': str(e)
+                'method': result.extraction_method,
+                'items': len(result.items),
+                'time': f"{processing_time}s",
+                'warnings': len(result.warnings)
             })
-            yield send({"type": "error", "message": f"Parse failed: {e}"})
-            return
-        
-        if parse_result.get("error"):
-            logger.error("Parse failed", extra={
-                'category': 'PROCESS',
-                'file': entry["filename"],
-                'file_id': entry.get("file_id"),
-                'error': parse_result["error"]
+
+            # Send page_done for each page with item counts
+            items_per_page = {}
+            for item in result.items:
+                page = item.get("page", 1)
+                items_per_page[page] = items_per_page.get(page, 0) + 1
+
+            for page in range(1, num_pages + 1):
+                items_found = items_per_page.get(page, 0)
+                percent = int((page / num_pages) * 100)
+                yield send({"type": "page_done", "percent": percent, "page": page, "total": num_pages, "items_found": items_found})
+
+            # Send done message with full result
+            yield send({
+                "type": "done",
+                "data": {
+                    "filename": entry["filename"],
+                    "items": result.items,
+                    "supplier": result.supplier,
+                    "date": result.date,
+                    "currency": result.currency,
+                    "document_type": result.document_type,
+                    "extraction_method": result.extraction_method,
+                    "warnings": result.warnings,
+                }
             })
-            yield send({"type": "error", "message": parse_result["error"]})
-            return
-        
-        # Pass pdf_path so extraction router can use Vision LLM for scanned PDFs
-        parse_result["pdf_path"] = str(filepath)
-        
-        num_pages = parse_result.get("num_pages", 1)
-        
-        # Generate page images for the review PDF viewer
-        try:
-            page_images = _generate_page_images(Path(filepath))
-            entry["pages"] = page_images
-        except Exception:
-            logger.warning("Page image generation failed for %s", entry.get("filename"), exc_info=True)
-            page_images = []
-        
-        # Send progress for each page (synthetic since parsing is already done)
-        for page in range(1, num_pages + 1):
-            percent = int((page / num_pages) * 80)
-            yield send({"type": "progress", "percent": percent, "page": page, "total": num_pages, "message": f"Processing page {page}/{num_pages}..."})
-            await asyncio.sleep(0.05)  # Brief pause so frontend can render progress
-        
-        # Extraction
-        yield send({"type": "progress", "percent": 80, "page": num_pages, "total": num_pages, "message": "Extracting items..."})
-        
-        try:
-            from ..utils import get_config_data
-            cfg = get_config_data()
-            extraction_enabled = cfg.get("extraction_enabled", True)
-            
-            result = await extract_items_async(
-                parse_result,
-            )
-        except Exception as e:
-            logger.error("Extraction failed", extra={
-                'category': 'PROCESS',
-                'file': entry["filename"],
-                'file_id': entry.get("file_id"),
-                'error': str(e)
-            })
-            yield send({"type": "error", "message": f"Extraction failed: {e}"})
-            return
-        
-        # Calculate processing time
-        processing_time = round(time.time() - start_time, 2)
-        
-        # Log successful processing
-        logger.info("Processing complete", extra={
-            'category': 'PROCESS',
-            'file': entry["filename"],
-            'file_id': entry.get("file_id"),
-            'method': result.extraction_method,
-            'items': len(result.items),
-            'time': f"{processing_time}s",
-            'warnings': len(result.warnings)
-        })
-        
-        # Send page_done for each page with item counts
-        items_per_page = {}
-        for item in result.items:
-            page = item.get("page", 1)
-            items_per_page[page] = items_per_page.get(page, 0) + 1
-        
-        for page in range(1, num_pages + 1):
-            items_found = items_per_page.get(page, 0)
-            percent = int((page / num_pages) * 100)
-            yield send({"type": "page_done", "percent": percent, "page": page, "total": num_pages, "items_found": items_found})
-        
-        # Send done message with full result
-        yield send({
-            "type": "done",
-            "data": {
-                "filename": entry["filename"],
-                "items": result.items,
-                "supplier": result.supplier,
-                "date": result.date,
-                "currency": result.currency,
-                "document_type": result.document_type,
-                "extraction_method": result.extraction_method,
-                "warnings": result.warnings,
-            }
-        })
+        finally:
+            process_lock.release()
     
     return StreamingResponse(
         generate(),
