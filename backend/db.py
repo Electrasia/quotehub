@@ -71,6 +71,7 @@ def get_db(readonly=False):
     """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
         # Auto-commit on successful exit (for write operations)
