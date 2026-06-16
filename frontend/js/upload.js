@@ -108,7 +108,7 @@ async function handleFiles(files) {
         try {
             const dupResp = await fetch(`/check-duplicate?filename=${encodeURIComponent(file.name)}`);
             const dup = await dupResp.json();
-            if (dup.exists || dup.in_database) {
+            if (dup.in_database) {
                 fileEntry.duplicate = true;
             }
         } catch (e) { /* ignore check errors */ }

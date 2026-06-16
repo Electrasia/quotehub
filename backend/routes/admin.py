@@ -457,20 +457,16 @@ async def get_brand_by_model(model: str = ""):
 
 @router.get("/check-duplicate", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def check_duplicate(filename: str = ""):
-    """Check if a file already exists."""
+    """Check if a file is already in the database."""
     if not filename:
-        return {"exists": False}
-    
-    from ..main import ARCHIVE_DIR
-    archive_path = ARCHIVE_DIR / filename
-    exists = archive_path.exists()
+        return {"in_database": False}
     
     with get_db(readonly=True) as db:
         db_count = db.execute(
             "SELECT COUNT(*) FROM quotations WHERE filename = ?", (filename,)
         ).fetchone()[0]
     
-    return {"exists": exists, "in_database": db_count > 0, "filename": filename}
+    return {"in_database": db_count > 0, "filename": filename}
 
 
 # ─── View archived file ──────────────────────────────────
