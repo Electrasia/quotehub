@@ -2,11 +2,21 @@
 
 ## Current Version
 
-**v0.054.0** (dev branch)
+**v0.055.1** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.055.1 — Import validation + orphan cleanup
+- Fix: Import endpoint now rejects entries with empty items array (prevents 0-item DB entries)
+- Fix: Returns 400 error if ALL import entries have no items; reports skipped count for partial imports
+- Fix: Frontend shows skipped count as warning in import results
+- Fix: Cleaned 8 orphaned 0-item entries from database
+- Fix: Deleted orphaned PDF from archive (`Electrasia211017-Commscope.pdf`)
+
+### v0.055.0 — SQLite WAL mode
+- Fix: Enabled WAL mode for concurrent reads without blocking
 
 ### v0.054.0 — Configurable upload size limit + SHA verification
 - Feature: Configurable max upload size (1–20 MB, default 5 MB). Rejects oversized files before writing to disk, with clear error message.
@@ -93,6 +103,10 @@
 
 ## Files Changed Recently
 
+### v0.055.1
+- `backend/routes/files.py` — Import validation: skip 0-item entries, return error if all invalid, report skipped count
+- `frontend/js/settings.js` — Display skipped count in import results
+
 ### v0.054.0
 - `backend/routes/files.py` — Upload size limit check (reject oversized files before write); SHA256 checksum on export; SHA verification on import; integrity warning in response
 - `backend/utils.py` — Added `max_upload_size_mb: 5` to `_CONFIG_DEFAULTS`
@@ -139,7 +153,7 @@
 | Search | ✅ Complete |
 | Settings | ✅ Complete (simplified AI ON/OFF toggle) |
 | Authentication & Roles | ✅ Complete |
-| Export/Import | ✅ Complete |
+| Export/Import | ✅ Complete (with 0-item validation) |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
 | Automated Tests | ✅ 85 tests passing |
@@ -152,6 +166,7 @@
 
 - `data/images/` directory may have orphaned files (permission issues with Docker-owned files)
 - **XLSX viewer column resizing** — SheetJS renders a read-only HTML table; user cannot manually resize columns. Columns are auto-sized to fit content. To revisit: consider a library with built-in column resize support (e.g., ReoGrid, Luckysheet/Univer, or custom drag handlers with better event handling)
+- **Database export/import orphan handling** — Export includes all archive PDFs; import restores them even if quotation entries are invalid (0 items) or missing. This creates orphaned files in archive. Need: validate import data completeness, cross-reference archive files with DB entries, offer cleanup of orphaned files on import
 
 ---
 
@@ -173,11 +188,11 @@ Items still needed before the app can be considered production-ready:
 |----------|------|--------|-------|
 | 🔴 High | **Persistent sessions** | 1 day | Sessions are in-memory (Starlette middleware). Container restart logs everyone out. Need file-based or Redis session store. |
 | 🔴 High | **Database migration system** | 2 days | Schema changes rely on `CREATE TABLE IF NOT EXISTS`. Adding columns requires manual SQL. Need Alembic or simple versioned migration. |
-| 🟡 Medium | **SQLite WAL mode** | 1 line | Enables concurrent reads without blocking. `PRAGMA journal_mode=WAL` on startup. Simple win. |
+| 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
 | 🟡 Medium | **Expand test coverage** | 3 days | 85 tests cover extraction + upload validation. No coverage for: auth (login/logout/roles), search, admin routes (config save, cleanup), review/edit/save, export/import flow, SSE streaming. |
 | 🟡 Medium | **Rate limiting on upload** | 0.5 day | No protection against accidental batch upload of hundreds of files at once. |
 | 🟢 Low | **HTTPS via reverse proxy** | 1 day | App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt. |
-| 🟢 Low | **Orphaned file cleanup** | 0.5 day | `data/images/` accumulates files when uploaded files are removed. No automated cleanup. |
+| 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Partial (manual). `data/images/` accumulates files when uploaded files are removed. No automated cleanup. Also affects archive: orphaned PDFs exist when DB entries are deleted or import fails. Need automated cross-reference cleanup. |
 | 🟢 Low | **Custom error pages** | 0.5 day | No 404/500 error pages. Returns raw JSON or blank page on unexpected errors. |
 | 🟢 Low | **XLSX column resizing** | 2 days | Documented in Known Issues. SheetJS renders read-only table; users cannot resize columns. |
 
@@ -188,4 +203,5 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (currently 85)
-4. Production Readiness Checklist above shows priorities — start with Persistent Sessions or SQLite WAL mode
+4. Production Readiness Checklist above shows priorities — start with Persistent Sessions or Database migration system
+5. Address orphaned file handling in export/import flow (see Known Issues)
