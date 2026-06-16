@@ -174,6 +174,9 @@ def init_db():
             END
         """)
 
+        # Run any pending schema migrations (empty until a migration is defined)
+        _run_migrations(db)
+
 
 def _migrate_db(db):
     """Migrate existing databases to the latest schema.
@@ -212,3 +215,105 @@ def _migrate_users_db(db):
     # if "email" not in columns:
     #     db.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
     #     print("Migration: Added 'email' column to users table")
+
+
+# ─── Schema Migration System ──────────────────────────────────────────────────
+#
+# CRITICAL RULES — every new migration MUST follow these:
+#
+# Rule 1: DDL and DML in SEPARATE migration functions
+#   DDL (CREATE/ALTER TABLE) auto-commits in SQLite. If a single function
+#   mixes DDL and DML and the DML fails, the DDL is already committed but
+#   the version is not updated. On retry, DDL is a no-op but DML may
+#   duplicate data.
+#
+#   ✅ Correct — split into two versions:
+#      1: _v1_supplier_ddl       (DDL only)
+#      2: _v2_supplier_data      (DML only)
+#   ❌ Wrong — mixed together:
+#      v1: DDL + DML              ← data corruption risk
+#
+# Rule 2: DML must be IDEMPOTENT
+#   Every INSERT/UPDATE in a migration must be safe to run multiple times.
+#   Use INSERT OR IGNORE, SELECT before INSERT, or WHERE existence checks.
+#   Never use plain INSERT that would create duplicates on retry.
+#
+#   ✅ Correct:  db.execute("INSERT OR IGNORE INTO suppliers VALUES (?)", ...)
+#   ❌ Wrong:    db.execute("INSERT INTO suppliers VALUES (?)", ...)
+
+# Migration registry: version_number -> callable(db_connection)
+# Starts empty. First migration will be version 1.
+MIGRATIONS: dict[int, callable] = {}
+
+
+def _init_schema_version(db):
+    """Create the _schema_version table and seed with version 0 if empty.
+
+    The table uses a CHECK(id=1) constraint to guarantee a single row.
+    INSERT OR IGNORE ensures idempotent seeding on first run.
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS _schema_version (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    db.execute(
+        "INSERT OR IGNORE INTO _schema_version (id, version) VALUES (1, 0)"
+    )
+
+
+def _get_schema_version(db) -> int:
+    """Read the current schema version from the database.
+
+    Returns 0 if the table doesn't exist yet, or if no row is found.
+    """
+    cursor = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'"
+    )
+    if not cursor.fetchone():
+        return 0
+    row = db.execute(
+        "SELECT version FROM _schema_version WHERE id = 1"
+    ).fetchone()
+    return row["version"] if row else 0
+
+
+def _run_migrations(db):
+    """Run pending schema migrations in version order.
+
+    Reads the current schema version, validates no version numbers
+    are missing in the MIGRATIONS dict, then runs each pending
+    migration in order. The version is updated after each migration
+    succeeds (UPDATE is DML, committed at connection close by get_db()).
+
+    If any migration raises, the version update is rolled back and
+    the error propagates up through init_db().
+    """
+    _init_schema_version(db)
+    current = _get_schema_version(db)
+
+    if not MIGRATIONS:
+        return
+
+    max_version = max(MIGRATIONS.keys())
+
+    # Validate no version gaps between current+1 and max
+    for v in range(current + 1, max_version + 1):
+        if v not in MIGRATIONS:
+            raise RuntimeError(
+                f"Missing migration version {v}. "
+                "All versions between current ({current}) and target ({max_version}) "
+                "must be registered in MIGRATIONS dict."
+            )
+
+    # Run pending migrations in order
+    for v in range(current + 1, max_version + 1):
+        fn = MIGRATIONS[v]
+        logger.info("Running schema migration v%d: %s", v, fn.__name__)
+        fn(db)
+        db.execute(
+            "UPDATE _schema_version SET version = ? WHERE id = 1",
+            (v,)
+        )
+        logger.info("Schema migration v%d complete", v)

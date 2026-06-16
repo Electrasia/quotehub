@@ -2,13 +2,17 @@
 
 ## Current Version
 
-**v0.055.1** (dev branch)
+**v0.055.2** (dev branch)
 
 ---
 
 ## Last Completed Work
 
-### v0.055.1 — Import validation + orphan cleanup
+### v0.055.2 — Lightweight schema migration system
+- Feature: Added versioned schema migration system in `backend/db.py` (`_schema_version` table, `_run_migrations()`, `MIGRATIONS` dict)
+- Feature: Empty `MIGRATIONS` dict ready for first real migration (supplier module)
+- Doc: Added critical migration rules (DDL/DML separation, idempotent DML) in both HANDOFF.md and db.py source
+- Chore: Marked Database migration system as done in Production Readiness Checklist
 - Fix: Import endpoint now rejects entries with empty items array (prevents 0-item DB entries)
 - Fix: Returns 400 error if ALL import entries have no items; reports skipped count for partial imports
 - Fix: Frontend shows skipped count as warning in import results
@@ -103,6 +107,10 @@
 
 ## Files Changed Recently
 
+### v0.055.2
+- `backend/db.py` — Added schema migration system (`_schema_version` table, `_init_schema_version`, `_get_schema_version`, `_run_migrations`, `MIGRATIONS` dict) with critical rules embedded as comments
+- `HANDOFF.md` — Added Migration System section with critical rules; updated checklist and version
+
 ### v0.055.1
 - `backend/routes/files.py` — Import validation: skip 0-item entries, return error if all invalid, report skipped count
 - `frontend/js/settings.js` — Display skipped count in import results
@@ -162,6 +170,45 @@
 
 ---
 
+## Migration System
+
+A lightweight versioned migration system lives in `backend/db.py`. It tracks schema version in a `_schema_version` table (single row, one integer). On startup, `init_db()` creates base tables, then runs any pending migrations in version order.
+
+### ⚠️ CRITICAL RULES (do not ignore)
+
+**Rule 1: DDL and DML in separate migration functions**
+
+DDL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) auto-commits in SQLite. If a single migration function mixes DDL and DML, and the DML fails partway, the DDL is already committed but the version is not updated. On retry, DDL is a no-op but DML may duplicate data.
+
+✅ Correct — split into two versioned functions:
+```python
+# v1a: DDL only
+# v1b: DML only
+```
+
+❌ Wrong — mixed in one:
+```python
+# v1: DDL + DML together  ← BAD
+```
+
+**Rule 2: DML must be idempotent**
+
+Every DML operation (`INSERT`, `UPDATE`) in a migration must be safe to run multiple times. Use `INSERT OR IGNORE`, `SELECT ... WHERE NOT EXISTS`, or `UPDATE ... WHERE` with existence checks. Never use plain `INSERT` that would create duplicates on retry.
+
+✅ Correct:
+```python
+db.execute("INSERT OR IGNORE INTO suppliers (name) VALUES (?)", (name,))
+```
+
+❌ Wrong:
+```python
+db.execute("INSERT INTO suppliers (name) VALUES (?)", (name,))  ← duplicates on retry
+```
+
+These rules are MANDATORY for every new migration. They prevent data corruption during startup failures or container restarts.
+
+---
+
 ## Known Issues
 
 - `data/images/` directory may have orphaned files (permission issues with Docker-owned files)
@@ -187,7 +234,7 @@ Items still needed before the app can be considered production-ready:
 | Priority | Item | Effort | Notes |
 |----------|------|--------|-------|
 | 🔴 High | **Persistent sessions** | 1 day | Sessions are in-memory (Starlette middleware). Container restart logs everyone out. Need file-based or Redis session store. |
-| 🔴 High | **Database migration system** | 2 days | Schema changes rely on `CREATE TABLE IF NOT EXISTS`. Adding columns requires manual SQL. Need Alembic or simple versioned migration. |
+| 🔴 High | **Database migration system** | 2 days | ✅ Lightweight versioned system (v0.055.2). Tracks schema version in `_schema_version` table. See Migration System section above for critical rules. |
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
 | 🟡 Medium | **Expand test coverage** | 3 days | 85 tests cover extraction + upload validation. No coverage for: auth (login/logout/roles), search, admin routes (config save, cleanup), review/edit/save, export/import flow, SSE streaming. |
 | 🟡 Medium | **Rate limiting on upload** | 0.5 day | No protection against accidental batch upload of hundreds of files at once. |
