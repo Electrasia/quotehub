@@ -228,6 +228,7 @@ These rules are MANDATORY for every new migration. They prevent data corruption 
 - `data/images/` directory may have orphaned files (permission issues with Docker-owned files)
 - **XLSX viewer column resizing** — SheetJS renders a read-only HTML table; user cannot manually resize columns. Columns are auto-sized to fit content. To revisit: consider a library with built-in column resize support (e.g., ReoGrid, Luckysheet/Univer, or custom drag handlers with better event handling)
 - **Database export/import orphan handling** — Export includes all archive PDFs; import restores them even if quotation entries are invalid (0 items) or missing. This creates orphaned files in archive. Need: validate import data completeness, cross-reference archive files with DB entries, offer cleanup of orphaned files on import
+- **uploaded_by field not displayed in UI** — Each file entry stores `uploaded_by` (username) for queue ownership tracking, but the queue view (`upload.js:renderFileList()`) only shows filename/pages/status. If multi-user visibility is needed later, add an "Uploaded by" column to `renderFileList()` — the data is already there in `f.uploaded_by`.
 
 ---
 
