@@ -864,6 +864,7 @@ async def import_upload(file: UploadFile = File(...)):
         return JSONResponse(status_code=400, content={"error": "No quotations found"})
     
     imported = 0
+    skipped = 0
     with get_db() as db:
         for q in quotations:
             supplier = q.get("supplier", "")
@@ -875,7 +876,10 @@ async def import_upload(file: UploadFile = File(...)):
                     items = json.loads(items)
                 except (json.JSONDecodeError, TypeError):
                     items = []
-            if not quotation_date and items:
+            if not items:
+                skipped += 1
+                continue
+            if not quotation_date:
                 quotation_date = items[0].get("date", "")
             db.execute(
                 "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
@@ -884,14 +888,22 @@ async def import_upload(file: UploadFile = File(...)):
             )
             imported += 1
     
+    if imported == 0 and skipped > 0:
+        return JSONResponse(status_code=400, content={
+            "error": f"Import failed: {skipped} quotation(s) found but all had no items"
+        })
+    
     logger.info("Database imported", extra={
         'category': 'ADMIN',
         'file': file.filename,
         'imported': imported,
+        'skipped': skipped,
         'pdfs_restored': pdf_restored
     })
     
     result = {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
+    if skipped > 0:
+        result["skipped"] = skipped
     if integrity_warning:
         result["warning"] = integrity_warning
     return result

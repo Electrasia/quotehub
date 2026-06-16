@@ -159,7 +159,10 @@ async function importDatabase(input) {
         if (data.status === 'imported') {
             let msg = `✓ Imported ${data.count} quotation(s) successfully.`;
             if (data.pdfs_restored > 0) msg += ` ${data.pdfs_restored} PDF file(s) restored.`;
-            if (data.warning) {
+            if (data.skipped > 0) {
+                msg += ` ⚠ ${data.skipped} entry/entries skipped (no items).`;
+                result.style.color = '#e67e22';
+            } else if (data.warning) {
                 msg += ` ⚠ ${data.warning}`;
                 result.style.color = '#e67e22';
             } else {
