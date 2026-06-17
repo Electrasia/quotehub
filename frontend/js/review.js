@@ -38,8 +38,8 @@ function showReview(filename) {
     updateItemCount();
     updateDocumentTypeWarning();
     reviewAutoFit = true;
-    updateReviewPdf();
     goToStep(4);
+    updateReviewPdf();
 }
 
 /**
