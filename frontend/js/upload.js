@@ -162,8 +162,10 @@ function renderFileList() {
         const removeHtml = canRemove
             ? `<button class="btn btn-sm btn-danger" onclick="removeFile(${i})" title="Remove" style="padding:2px 6px;font-size:11px">✕</button>`
             : '';
+        const isClickable = f.status === 'done';
+        const clickAttr = isClickable ? `onclick="reviewDoneFile('${f.file_id}')" style="cursor:pointer" title="Click to review"` : '';
         return `
-            <div class="file-item">
+            <div class="file-item" ${clickAttr}>
                 <span class="file-name">${moveHtml}${dupBadge}${escapeHtml(f.filename)} (${escapeHtml(String(f.pages))} page${f.pages !== 1 ? 's' : ''})</span>
                 <span style="display:flex;align-items:center;gap:8px">${statusHtml} ${removeHtml}</span>
             </div>
@@ -240,6 +242,35 @@ async function clearFiles() {
     renderFileList();
     updateStepClickability();
     goToStep(1);
+}
+
+// ─── Re-enter review for done files ───────────────────────────
+
+/**
+ * Called when user clicks a "✓ Ready to review" file in the queue.
+ * Restores extracted data saved on the file entry and re-opens review.
+ */
+async function reviewDoneFile(fileId) {
+    const fileIdx = uploadedFiles.findIndex(f => f.file_id === fileId);
+    if (fileIdx === -1) return;
+    const file = uploadedFiles[fileIdx];
+    if (file.status !== 'done') return;
+    if (!file.extractedData) {
+        showBriefPopup('Processed data is no longer available. Please re-process the file.');
+        return;
+    }
+    currentFileIndex = fileId;
+    extractedData = file.extractedData;
+    try {
+        const resp = await fetch(`/next-file?file_id=${encodeURIComponent(fileId)}`);
+        const data = await resp.json();
+        reviewPages = data.pages || [];
+        reviewCurrentPage = 0;
+    } catch (e) {
+        showBriefPopup('Could not load page images. Please re-process the file.');
+        return;
+    }
+    showReview(file.filename);
 }
 
 // ─── Step navigation state ───────────────────────────────────
