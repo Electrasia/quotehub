@@ -504,7 +504,7 @@ async def process_stream(req: ProcessRequest):
         """Yield SSE messages as processing progresses."""
         from ..parser import parse_file_with_ocr
         from ..extraction import extract_items_async
-        from ..main import process_lock
+        from ..main import process_lock, IMAGES_DIR
         
         import time
         start_time = time.time()
@@ -550,6 +550,11 @@ async def process_stream(req: ProcessRequest):
             parse_result["pdf_path"] = str(filepath)
 
             num_pages = parse_result.get("num_pages", 1)
+
+            # Clean up stale page images from a previous (cancelled) run
+            img_dir = IMAGES_DIR / Path(filepath).stem
+            if img_dir.is_dir():
+                shutil.rmtree(img_dir)
 
             # Generate page images for the review PDF viewer
             try:
