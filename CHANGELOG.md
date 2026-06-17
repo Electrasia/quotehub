@@ -1,5 +1,9 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.057.1 (2026-06-17)
+- UX: SPA catch-all route — navigating to any unmatched URL now serves the app instead of raw JSON `{"detail":"Not Found"}`
+- No new files, no frontend changes, no API changes
+
 ## v0.057.0 (2026-06-17)
 - **Orphaned file cleanup** — 3 fixes covering all orphan sources:
   - `POST /remove-file` now deletes generated page images from `IMAGES_DIR/<stem>/` when removing a queue entry

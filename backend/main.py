@@ -319,3 +319,9 @@ async def root():
 async def health():
     """Health check endpoint for Docker HEALTHCHECK and monitoring."""
     return {"status": "ok"}
+
+
+@app.get("/{path:path}")
+async def catch_all(path: str):
+    """SPA fallback: serve index.html for any unmatched route."""
+    return await root()

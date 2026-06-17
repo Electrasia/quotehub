@@ -2,11 +2,16 @@
 
 ## Current Version
 
-**v0.057.0** (dev branch)
+**v0.057.1** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.057.1 — SPA catch-all route
+- UX: Navigating to any unmatched URL now serves the app (index.html) instead of raw JSON `{"detail":"Not Found"}`
+- Chore: Added `GET /{path:path}` catch-all route in `backend/main.py` — no new files, no frontend changes
+- Chore: Marked custom error pages done in Production Readiness Checklist
 
 ### v0.057.0 — Orphaned file cleanup
 - Fix: `POST /remove-file` now deletes generated page images from `IMAGES_DIR/<stem>/` when removing a queue entry (orphan prevention)
@@ -131,6 +136,12 @@
 ---
 
 ## Files Changed Recently
+
+### v0.057.1
+- `backend/main.py` — Added `GET /{path:path}` catch-all route serving index.html for unmatched URLs
+- `VERSION` — 0.057.0 → 0.057.1
+- `CHANGELOG.md` — Added v0.057.1 release notes
+- `HANDOFF.md` — Marked custom error pages done; updated version
 
 ### v0.057.0
 - `backend/routes/files.py` — `remove-file`: image cleanup after source deletion; `clear`: file + image cleanup before list clear; `import/upload`: track restored PDFs, clean up on failure (orphan prevention for all 3 paths)
@@ -308,7 +319,7 @@ Items still needed before the app can be considered production-ready:
 | 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap at 50 pending files. Processing semaphore (1 file at a time). 
 | 🟢 Low | **HTTPS via reverse proxy** | 1 day | App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt. |
 | 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Done (v0.057.0). Three fixes: `remove-file` cleans images, `clear` cleans files+images, `import/upload` cleans restored PDFs on failure. No more orphans created in normal use. |
-| 🟢 Low | **Custom error pages** | 0.5 day | No 404/500 error pages. Returns raw JSON or blank page on unexpected errors. |
+| 🟢 Low | **Custom error pages** | 0.5 day | ✅ Done (v0.057.1). SPA catch-all route serves the app UI for any unmatched URL instead of raw JSON 404. |
 | 🟢 Low | **XLSX column resizing** | 2 days | Documented in Known Issues. SheetJS renders read-only table; users cannot resize columns. |
 
 ---
@@ -319,6 +330,5 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (189 expected)
 4. Remaining Production Readiness items (🟢 Low priority):
-   - **Custom error pages** — No 404/500 error pages. Returns raw JSON or blank page on unexpected errors.
    - **HTTPS via reverse proxy** — App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt.
    - **XLSX column resizing** — SheetJS renders read-only table; users cannot resize columns.
