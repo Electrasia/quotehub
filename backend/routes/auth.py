@@ -10,6 +10,7 @@ This module handles:
 """
 
 import logging
+import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth import (
@@ -34,13 +35,72 @@ users_router = APIRouter(prefix="/users", tags=["users"])
 init_password_router = APIRouter(prefix="/init-password", tags=["init-password"])
 
 
+# ─── Login Rate Limiter ────────────────────────────────────────────
+# In-memory IP-based. Lost on container restart — acceptable.
+# Without a reverse proxy in Docker, all users share one IP
+# (Docker gateway), making this effectively a global bucket.
+# Deploy behind nginx/Caddy with X-Forwarded-For for per-IP limiting.
+_FAILED_LOGINS: dict[str, list[float]] = {}
+_MAX_FAILED_ATTEMPTS = 5
+_WINDOW_SECONDS = 900       # 15 min sliding window
+_BLOCK_SECONDS = 900         # 15 min block after hitting limit
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract client IP from request, respecting proxy headers."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    if request.client:
+        return request.client.host
+    return "127.0.0.1"
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Check if IP is rate-limited. Returns True if allowed, False if blocked."""
+    now = time.time()
+    timestamps = _FAILED_LOGINS.get(ip, [])
+
+    # Prune: keep only entries within the sliding window.
+    # Includes a clock-jump guard: reject timestamps > 5 min in the future.
+    cutoff = now - _WINDOW_SECONDS
+    valid_until = now + 300  # 5 min clock-drift tolerance
+    timestamps = [t for t in timestamps if cutoff < t < valid_until]
+
+    if len(timestamps) >= _MAX_FAILED_ATTEMPTS:
+        oldest = timestamps[0]
+        block_end = oldest + _BLOCK_SECONDS
+        if now < block_end:
+            return False  # still blocked
+        # Block expired — reset
+        timestamps = []
+
+    _FAILED_LOGINS[ip] = timestamps
+    return True
+
+
 # ─── Authentication ────────────────────────────────────────
 
 @router.post("/login")
 async def login(req: LoginRequest, request: Request):
     """Authenticate user and create session."""
+    # ── Rate limit check ──────────────────────────────
+    client_ip = _get_client_ip(request)
+    if not _check_rate_limit(client_ip):
+        logger.warning("Login rate limit triggered", extra={
+            'category': 'AUTH', 'ip': client_ip
+        })
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Try again in 15 minutes."
+        )
+
     user = get_user_by_username(req.username)
     if not user or not verify_password(req.password, user["password_hash"]):
+        _FAILED_LOGINS.setdefault(client_ip, []).append(time.time())
         logger.warning("Login failed - invalid credentials", extra={
             'category': 'AUTH',
             'user': req.username
@@ -53,6 +113,9 @@ async def login(req: LoginRequest, request: Request):
         })
         raise HTTPException(status_code=403, detail="Account is disabled")
     
+    # Clear failed login counter on success
+    _FAILED_LOGINS.pop(client_ip, None)
+
     # Clear any existing session data (prevents session fixation)
     request.session.clear()
     

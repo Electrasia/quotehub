@@ -1,5 +1,20 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.057.0 (2026-06-17)
+- **Orphaned file cleanup** — 3 fixes covering all orphan sources:
+  - `POST /remove-file` now deletes generated page images from `IMAGES_DIR/<stem>/` when removing a queue entry
+  - `POST /clear` now deletes all source files + page images from disk before clearing the in-memory list
+  - `POST /import/upload` now cleans up restored archive PDFs on failure (empty quotations or all items empty)
+- Test: 189 tests total (185 + 4 new for orphan cleanup). All endpoint categories covered: auth, search, admin, files CRUD, export/import, SSE streaming, health, extraction pipeline, upload validation.
+
+## v0.056.0 (2026-06-16)
+- Feature: IP-based in-memory rate limiter on `/auth/login` — 5 failed attempts per 15-min sliding window returns HTTP 429, blocks for 15 min.
+- Feature: `_get_client_ip()` helper respects X-Forwarded-For, X-Real-IP, and falls back to client.host / 127.0.0.1.
+- Feature: `_check_rate_limit()` includes clock-jump guard (rejects timestamps >5 min in the future).
+- Fix: Disabled-account logins (correct password + disabled user) do NOT count against the rate limit.
+- Logging: Rate limit triggers logged with category AUTH and client IP.
+- Doc: Noted that without a reverse proxy, Docker NAT makes this a global bucket.
+
 ## v0.054.0 (2026-06-15)
 - Feature: Configurable max upload size limit (1–20 MB, default 5 MB). Files exceeding the limit are rejected with a clear error message before being written to disk.
 - Feature: SHA256 checksum embedded in export ZIP (`quotations.json.sha256`). On import, checksum is verified if present (backward compatible — older exports without checksum still import successfully).

@@ -13,6 +13,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 # =============================================================================
 
 
+@pytest.mark.asyncio
 class TestRouterRouting:
     """Test that extract_items_async routes to the correct extraction method
     based on parse_result content."""
@@ -346,6 +347,7 @@ class TestExtractionResult:
 # =============================================================================
 
 
+@pytest.mark.asyncio
 class TestLlmCallLlm:
     """Test the _call_llm function in llm.py."""
 
@@ -601,6 +603,7 @@ class TestLlmCallLlm:
         assert result["document_type"] == "QUO"
 
 
+@pytest.mark.asyncio
 class TestLlmNormalizePages:
     """Test normalize_pages_with_llm."""
 
@@ -837,6 +840,7 @@ class TestVisionCleanItem:
 # =============================================================================
 
 
+@pytest.mark.asyncio
 class TestLlmIntegration:
     """End-to-end tests of llm module with mocked httpx."""
 
@@ -931,6 +935,7 @@ class TestLlmIntegration:
 # =============================================================================
 
 
+@pytest.mark.asyncio
 class TestRouterIntegration:
     """Test the router's integration with llm.py and local.py.
 

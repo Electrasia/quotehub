@@ -404,8 +404,17 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
 
 @router.post("/clear", dependencies=[Depends(require_role("admin", "master"))])
 async def clear_files():
-    """Clear all uploaded files."""
-    from ..main import uploaded_files
+    """Clear all uploaded files and clean up files on disk."""
+    from ..main import uploaded_files, IMAGES_DIR
+    from pathlib import Path
+
+    for entry in uploaded_files:
+        filepath = Path(entry.get("filepath", ""))
+        if filepath.is_file():
+            filepath.unlink()
+            img_dir = IMAGES_DIR / filepath.stem
+            if img_dir.exists():
+                shutil.rmtree(str(img_dir), ignore_errors=True)
     uploaded_files.clear()
     logger.info("All files cleared", extra={
         'category': 'PROCESS'
@@ -416,7 +425,7 @@ async def clear_files():
 @router.post("/remove-file", dependencies=[Depends(require_role("admin", "master"))])
 async def remove_file(req: RemoveFileRequest):
     """Remove a single uploaded file by its stable file_id."""
-    from ..main import uploaded_files
+    from ..main import uploaded_files, IMAGES_DIR
     result = _find_file_by_id(req.file_id)
     if result is None:
         raise HTTPException(status_code=404, detail="File not found")
@@ -428,6 +437,10 @@ async def remove_file(req: RemoveFileRequest):
             filepath.unlink()
         except OSError:
             pass
+        # Also clean up generated page images
+        img_dir = IMAGES_DIR / filepath.stem
+        if img_dir.exists():
+            shutil.rmtree(str(img_dir), ignore_errors=True)
     uploaded_files.pop(idx)
     logger.info("File removed", extra={
         'category': 'PROCESS',
@@ -501,11 +514,11 @@ async def process_stream(req: ProcessRequest):
         
         # Try to acquire the processing lock (non-blocking)
         # Only one file can be processed at a time across all users
-        try:
-            await asyncio.wait_for(process_lock.acquire(), timeout=0)
-        except asyncio.TimeoutError:
+        if process_lock.locked():
             yield send({"type": "error", "message": "Another user is currently processing a file. Try again later."})
             return
+        
+        await process_lock.acquire()
 
         try:
             # Signal parsing started
@@ -860,6 +873,7 @@ async def import_upload(file: UploadFile = File(...)):
     content = await file.read()
     quotations = []
     pdf_restored = 0
+    pdf_restored_paths = []  # Track restored PDFs for orphan cleanup on failure
     integrity_warning = None
     
     if file.filename.endswith(".zip"):
@@ -895,6 +909,7 @@ async def import_upload(file: UploadFile = File(...)):
                         with open(pdf_path, "wb") as f:
                             f.write(pdf_data)
                         pdf_restored += 1
+                        pdf_restored_paths.append(pdf_path)
         except zipfile.BadZipFile:
             return JSONResponse(status_code=400, content={"error": "Invalid zip file"})
     elif file.filename.endswith(".json"):
@@ -907,6 +922,10 @@ async def import_upload(file: UploadFile = File(...)):
         return JSONResponse(status_code=400, content={"error": "Use .zip or .json"})
     
     if not quotations:
+        # Clean up any PDFs restored before the failure (orphan prevention)
+        for p in pdf_restored_paths:
+            if p.exists():
+                p.unlink()
         return JSONResponse(status_code=400, content={"error": "No quotations found"})
     
     imported = 0
@@ -935,6 +954,10 @@ async def import_upload(file: UploadFile = File(...)):
             imported += 1
     
     if imported == 0 and skipped > 0:
+        # Clean up any PDFs restored before the failure (orphan prevention)
+        for p in pdf_restored_paths:
+            if p.exists():
+                p.unlink()
         return JSONResponse(status_code=400, content={
             "error": f"Import failed: {skipped} quotation(s) found but all had no items"
         })

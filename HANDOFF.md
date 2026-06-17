@@ -2,17 +2,34 @@
 
 ## Current Version
 
-**v0.055.3** (dev branch)
+**v0.057.0** (dev branch)
 
 ---
 
 ## Last Completed Work
 
-### v0.055.3 — Rate limiting (queue cap + processing semaphore)
+### v0.057.0 — Orphaned file cleanup
+- Fix: `POST /remove-file` now deletes generated page images from `IMAGES_DIR/<stem>/` when removing a queue entry (orphan prevention)
+- Fix: `POST /clear` now deletes all source files + page images from disk before clearing the in-memory list (orphan prevention)
+- Fix: `POST /import/upload` now cleans up restored archive PDFs on failure — both empty quotations and all-items-empty paths (orphan prevention)
+- Test: 189 tests total (185 + 4 new: remove-file image cleanup, clear disk cleanup, import orphan cleanup for both failure paths)
+- Chore: Marked orphaned file cleanup done in Production Readiness Checklist; removed from Known Issues
+
+### v0.056.0 — Login brute-force protection
+- Feature: IP-based in-memory rate limiter on `/auth/login` — 5 failed attempts per 15-min sliding window returns HTTP 429, blocks for 15 min.
+- Feature: `_get_client_ip()` helper respects X-Forwarded-For, X-Real-IP, and falls back to client.host / 127.0.0.1.
+- Feature: `_check_rate_limit()` includes clock-jump guard (rejects timestamps >5 min in the future).
+- Fix: Disabled-account logins (correct password + disabled user) do NOT count against the rate limit.
+- Logging: Rate limit triggers logged with category AUTH and client IP.
+- Doc: Noted that without a reverse proxy, Docker NAT makes this a global bucket.
+
+### v0.055.3 — Rate limiting + bug fixes
 - Feature: Upload queue capped at 50 pending files. Error message shows which user has the most pending files.
 - Feature: `uploaded_by` field tracked per file entry for queue ownership visibility.
-- Feature: Processing semaphore (`asyncio.Lock`) — only 1 file processed at a time across all users. Non-blocking acquisition via `asyncio.wait_for(process_lock.acquire(), timeout=0)`.
-- Fix: `finally` block properly releases lock on completion, error, or client disconnect (async generator cleanup).
+- Feature: Processing semaphore (`asyncio.Lock`) — only 1 file processed at a time across all users.
+- Fix: `asyncio.wait_for(lock.acquire(), timeout=0)` **always raises TimeoutError** even when lock is free — Python cancels the coroutine before it runs. Replaced with `lock.locked()` check + direct `await lock.acquire()`.
+- Fix: Lock try/finally indentation was wrong — `finally` at wrong level would have caused SyntaxError on startup.
+- Fix: Double-click on search results not working when "Showing 10 most recent" message overwrites innerHTML (destroyed per-row `ondblclick` handlers). Replaced with event delegation on `#searchResults` container.
 - Test: 56/56 non-async tests pass (29 extraction pipeline async tests have pytest-asyncio version mismatch — pre-existing environment issue).
 
 ### v0.055.2 — Lightweight schema migration system
@@ -115,6 +132,19 @@
 
 ## Files Changed Recently
 
+### v0.057.0
+- `backend/routes/files.py` — `remove-file`: image cleanup after source deletion; `clear`: file + image cleanup before list clear; `import/upload`: track restored PDFs, clean up on failure (orphan prevention for all 3 paths)
+- `VERSION` — 0.056.0 → 0.057.0
+- `CHANGELOG.md` — Added v0.057.0 release notes
+- `HANDOFF.md` — Marked orphaned file cleanup done; updated test count to 189; removed orphan issues from Known Issues
+- `tests/test_files_crud.py` — Added `TestRemoveFileCleanup` (image cleanup test) and `TestClearCleanup` (disk cleanup test)
+- `tests/test_export_import.py` — Added `test_import_orphan_cleanup_empty_quotations` and `test_import_orphan_cleanup_all_skipped`
+
+### v0.056.0
+- `backend/routes/auth.py` — Added IP-based rate limiter: `_FAILED_LOGINS` dict, `_get_client_ip()`, `_check_rate_limit()`, guard in login route, failure recording, success clearing, clock-jump guard
+- `VERSION` — 0.055.3 → 0.056.0
+- `HANDOFF.md` — Marked brute-force protection done; added v0.056.0 changelog
+
 ### v0.055.3
 - `backend/main.py` — Added `process_lock = asyncio.Lock()` for processing semaphore
 - `backend/routes/files.py` — Upload queue cap (50 files) with owner-aware error message; `uploaded_by` per file entry; processing semaphore via `asyncio.Lock` with non-blocking acquisition; lock release in `finally` block
@@ -178,7 +208,7 @@
 | Export/Import | ✅ Complete (with 0-item validation) |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
-| Automated Tests | ✅ 56 tests passing (29 extraction pipeline async tests have pytest-asyncio version mismatch — pre-existing environment issue) |
+| Automated Tests | ✅ **189 tests passing**. All endpoint categories covered: auth (35), search (12), admin (21), files CRUD (18), export/import (14), SSE error paths (4), health (1), extraction pipeline (44), upload validation (6). Full coverage across auth gates, CRUD operations, error paths, and disk cleanup. |
 | Vision LLM (scanned PDFs) | ✅ Working (fixed pdf_path bug) |
 | Multi-page PDF extraction | ✅ Working (single prompt for all pages) |
 
@@ -225,10 +255,32 @@ These rules are MANDATORY for every new migration. They prevent data corruption 
 
 ## Known Issues
 
-- `data/images/` directory may have orphaned files (permission issues with Docker-owned files)
 - **XLSX viewer column resizing** — SheetJS renders a read-only HTML table; user cannot manually resize columns. Columns are auto-sized to fit content. To revisit: consider a library with built-in column resize support (e.g., ReoGrid, Luckysheet/Univer, or custom drag handlers with better event handling)
-- **Database export/import orphan handling** — Export includes all archive PDFs; import restores them even if quotation entries are invalid (0 items) or missing. This creates orphaned files in archive. Need: validate import data completeness, cross-reference archive files with DB entries, offer cleanup of orphaned files on import
 - **uploaded_by field not displayed in UI** — Each file entry stores `uploaded_by` (username) for queue ownership tracking, but the queue view (`upload.js:renderFileList()`) only shows filename/pages/status. If multi-user visibility is needed later, add an "Uploaded by" column to `renderFileList()` — the data is already there in `f.uploaded_by`.
+- **Login brute-force protection** — ✅ Done (v0.056.0). IP-based rate limiter on `/auth/login`. See Security Gaps section for details and known limitations.
+- **Orphaned file cleanup** — ✅ Done (v0.057.0). All three orphan sources fixed: remove-file images, clear files+images, import archive PDFs on failure.
+
+---
+
+## Security Gaps & Planned Fixes
+
+### 🔴 Login brute-force protection (v0.056.0) ✅ DONE
+
+**Current state:** `/auth/login` is protected by an IP-based in-memory rate limiter. After 5 failed attempts within a 15-minute sliding window, the IP is blocked for 15 minutes (HTTP 429). Successful login resets the counter. Rate limit triggers are logged.
+
+**Key design:**
+- Module-level dict in `backend/routes/auth.py`
+- `_get_client_ip()` — respects X-Forwarded-For → X-Real-IP → client.host → 127.0.0.1 fallback
+- `_check_rate_limit()` — prunes expired entries, includes clock-jump guard (5 min tolerance)
+- Disabled-account logins (correct password) do NOT count as failed attempts
+- In-memory only — state is lost on container restart (accepted tradeoff)
+- No new dependencies, no DB writes, no frontend changes
+
+**Known limitations (documented in source):**
+- Without a reverse proxy in Docker, all clients share the Docker gateway IP, making this a global bucket
+- Multi-worker uvicorn would fragment state across processes (current config uses 1 worker)
+- IP rotation by attacker is not prevented (each IP gets independent budget)
+- Malformed requests return 422 before the rate limiter runs (negligible CPU cost)
 
 ---
 
@@ -250,11 +302,12 @@ Items still needed before the app can be considered production-ready:
 |----------|------|--------|-------|
 | 🔴 High | **Persistent sessions** | 1 day | ✅ Already working (cookie-based). Starlette stores session data in signed cookies (client-side), not server memory. SECRET_KEY persists in data volume. Container restarts do NOT log users out. See `backend/main.py:275-281` and `backend/middleware.py`. |
 | 🔴 High | **Database migration system** | 2 days | ✅ Lightweight versioned system (v0.055.2). Tracks schema version in `_schema_version` table. See Migration System section above for critical rules. |
+| 🔴 High | **Login brute-force protection** | 1 hour | ✅ Done (v0.056.0). IP-based in-memory rate limiter. See Security Gaps section for details.
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
-| 🟡 Medium | **Expand test coverage** | 3 days | 56 tests passing (29 async tests in test_extraction_pipeline.py have environment issue). Coverage: extraction + upload validation. No coverage for: auth, search, admin routes, review/edit/save, export/import flow, SSE streaming. |
+| 🟡 Medium | **Expand test coverage** | 3 days | ✅ **189 tests across all endpoints** — auth (35), search (12), admin (21), files CRUD (18), export/import (14), SSE (4), health (1), extraction pipeline (44), upload validation (6). All auth gates, error paths, CRUD operations, and disk cleanup scenarios covered. |
 | 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap at 50 pending files. Processing semaphore (1 file at a time). 
 | 🟢 Low | **HTTPS via reverse proxy** | 1 day | App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt. |
-| 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Partial (manual). `data/images/` accumulates files when uploaded files are removed. No automated cleanup. Also affects archive: orphaned PDFs exist when DB entries are deleted or import fails. Need automated cross-reference cleanup. |
+| 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Done (v0.057.0). Three fixes: `remove-file` cleans images, `clear` cleans files+images, `import/upload` cleans restored PDFs on failure. No more orphans created in normal use. |
 | 🟢 Low | **Custom error pages** | 0.5 day | No 404/500 error pages. Returns raw JSON or blank page on unexpected errors. |
 | 🟢 Low | **XLSX column resizing** | 2 days | Documented in Known Issues. SheetJS renders read-only table; users cannot resize columns. |
 
@@ -264,6 +317,8 @@ Items still needed before the app can be considered production-ready:
 
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
-3. Run `pytest tests/ -v` to verify all tests pass (currently 56 pass, 29 extraction pipeline async tests have environment issue — pytest-asyncio version mismatch in container)
-4. Production Readiness Checklist above shows priorities — rate limiting is now done, next highest: expand test coverage
-5. Address orphaned file handling in export/import flow (see Known Issues)
+3. Run `pytest tests/ -v` to verify all tests pass (189 expected)
+4. Remaining Production Readiness items (🟢 Low priority):
+   - **Custom error pages** — No 404/500 error pages. Returns raw JSON or blank page on unexpected errors.
+   - **HTTPS via reverse proxy** — App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt.
+   - **XLSX column resizing** — SheetJS renders read-only table; users cannot resize columns.
