@@ -105,7 +105,7 @@ function confirmNavStop() {
 
 function showUpload() {
     showProcessView();
-    goToStep(1);
+    goToStep(uploadedFiles.length > 0 ? 2 : 1);
 }
 
 // Function declarations (not const) so they attach to window and remain
