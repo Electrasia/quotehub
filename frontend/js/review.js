@@ -629,7 +629,7 @@ function backToUpload() {
     extractedData = null;
     reviewPages = [];
     showProcessView();
-    goToStep(1);
+    goToStep(uploadedFiles.length > 0 ? 2 : 1);
     renderFileList();
 }
 
