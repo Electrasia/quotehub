@@ -2,11 +2,19 @@
 
 ## Current Version
 
-**v0.057.1** (dev branch)
+**v0.057.2** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.057.2 — UX polish: queue navigation, blank preview fix, clickable done files
+- UX: "✓ Ready to review" files in the queue are now clickable — tapping re-opens the review screen with all extracted data intact (page images must still be on disk)
+- UX: After cancelling or saving from review, the app now routes to the file queue if files remain, instead of always jumping back to the upload page
+- UX: Returning to the Process view from Search/Settings now lands on the queue if files exist, not the upload page
+- Fix: Page preview images no longer go blank after cancelling and re-processing a file (stale page image directory from cancelled run is cleaned up before regeneration)
+- Fix: Preview no longer shows blank on cached images when re-entering review — step-4 panel now becomes visible before the image source is set, so autofit computes against the real container width instead of 0
+- Fix: Page preview shows a fallback message ("Use ↗ New Window to view the original file") instead of a blank white box when images are genuinely unavailable
 
 ### v0.057.1 — SPA catch-all route
 - UX: Navigating to any unmatched URL now serves the app (index.html) instead of raw JSON `{"detail":"Not Found"}`
@@ -111,7 +119,7 @@
 - Fix: text wraps within cells instead of spilling into adjacent columns
 - Fix: archive endpoint serves correct MIME type per file extension
 - Fix: New Window button uses original filename (works for PDF, XLSX, etc.)
-- Fix: after cancelling review, always returns to step 1 (upload page)
+- Change: after cancelling review, returns to step 1 (upload page) — **behavior changed in v0.057.2**: now routes to queue if files remain, upload only when queue is empty
 
 ### v0.052.0 — Search Enhancements + Validation
 - Feature: document type filter dropdown (ALL/PO/QUO/PL) on search page
@@ -137,11 +145,17 @@
 
 ## Files Changed Recently
 
-### v0.057.1
-- `backend/main.py` — Added `GET /{path:path}` catch-all route serving index.html for unmatched URLs
-- `VERSION` — 0.057.0 → 0.057.1
-- `CHANGELOG.md` — Added v0.057.1 release notes
-- `HANDOFF.md` — Marked custom error pages done; updated version
+### v0.057.2
+- `frontend/js/progress.js` — Store `extractedData` per file entry (`uploadedFiles[fileIdx].extractedData`) for review re-entry
+- `frontend/js/upload.js` — `done` files render with clickable cursor + `onclick="reviewDoneFile()"`; new `reviewDoneFile()` async function restores extracted data, fetches page images, and opens review
+- `frontend/js/review.js` — `backToUpload()` routes to step 2 (queue) if files remain, step 1 (upload) if empty; `showReview()` shows step-4 panel before setting img src
+- `frontend/js/review.js` — `updateReviewPdf()` toggles fallback message when `reviewPages` is empty
+- `frontend/js/nav.js` — `showUpload()` routes to step 2 if files exist, step 1 if empty
+- `frontend/index.html` — Added `#reviewPdfFallback` element for blank-preview fallback message
+- `backend/routes/files.py` — Clean stale image dir before `_generate_page_images()` on re-process
+- `VERSION` — 0.057.1 → 0.057.2
+- `CHANGELOG.md` — Added v0.057.2 release notes
+- `HANDOFF.md` — Updated version, work log, known issues, checklist
 
 ### v0.057.0
 - `backend/routes/files.py` — `remove-file`: image cleanup after source deletion; `clear`: file + image cleanup before list clear; `import/upload`: track restored PDFs, clean up on failure (orphan prevention for all 3 paths)
@@ -309,18 +323,28 @@ These rules are MANDATORY for every new migration. They prevent data corruption 
 
 Items still needed before the app can be considered production-ready:
 
-| Priority | Item | Effort | Notes |
-|----------|------|--------|-------|
-| 🔴 High | **Persistent sessions** | 1 day | ✅ Already working (cookie-based). Starlette stores session data in signed cookies (client-side), not server memory. SECRET_KEY persists in data volume. Container restarts do NOT log users out. See `backend/main.py:275-281` and `backend/middleware.py`. |
-| 🔴 High | **Database migration system** | 2 days | ✅ Lightweight versioned system (v0.055.2). Tracks schema version in `_schema_version` table. See Migration System section above for critical rules. |
-| 🔴 High | **Login brute-force protection** | 1 hour | ✅ Done (v0.056.0). IP-based in-memory rate limiter. See Security Gaps section for details.
+| Priority | Item | Effort | Status |
+|----------|------|--------|--------|
+| 🔴 High | **Persistent sessions** | 1 day | ✅ Done. Starlette signed cookies (client-side), SECRET_KEY in data volume. Container restarts do NOT log users out. |
+| 🔴 High | **Database migration system** | 2 days | ✅ Done (v0.055.2). Versioned schema migration in `backend/db.py` with DDL/DML rules. |
+| 🔴 High | **Login brute-force protection** | 1 hour | ⚠️ Done (v0.056.0) but **broken in Docker** — IP-based, but without reverse proxy, all clients share Docker gateway IP, making it a global bucket. Needs reverse proxy to fix. |
+| 🔴 High | **HTTPS via reverse proxy** | 1 day | ❌ App runs HTTP only. Sessions + credentials sent in plaintext. Add Caddy/Nginx with Let's Encrypt in Docker Compose. |
+| 🟡 Medium | **Queue persistence** | 0.5 day | ❌ In-memory `uploaded_files` list lost on container restart. Persist to SQLite so queued files survive deploys. |
+| 🟡 Medium | **Graceful shutdown** | 0.5 day | ❌ No SIGTERM handler. Processing may be interrupted without cleanup. Add shutdown handler to mark processing files as `error`. |
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
-| 🟡 Medium | **Expand test coverage** | 3 days | ✅ **189 tests across all endpoints** — auth (35), search (12), admin (21), files CRUD (18), export/import (14), SSE (4), health (1), extraction pipeline (44), upload validation (6). All auth gates, error paths, CRUD operations, and disk cleanup scenarios covered. |
-| 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap at 50 pending files. Processing semaphore (1 file at a time). 
-| 🟢 Low | **HTTPS via reverse proxy** | 1 day | App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt. |
-| 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Done (v0.057.0). Three fixes: `remove-file` cleans images, `clear` cleans files+images, `import/upload` cleans restored PDFs on failure. No more orphans created in normal use. |
-| 🟢 Low | **Custom error pages** | 0.5 day | ✅ Done (v0.057.1). SPA catch-all route serves the app UI for any unmatched URL instead of raw JSON 404. |
-| 🟢 Low | **XLSX column resizing** | 2 days | Documented in Known Issues. SheetJS renders read-only table; users cannot resize columns. |
+| 🟡 Medium | **Expand test coverage** | 3 days | ✅ **189 tests** across all endpoint categories. |
+| 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap (50), processing semaphore (1 file at a time). |
+| 🟡 Medium | **Rate limiter X-Forwarded-For support** | 0.5 day | ❌ `_get_client_ip()` already reads X-Forwarded-For, but Docker deploy has no reverse proxy. Add Caddy + read from proxy header. Tied to HTTPS item above. |
+| 🟡 Medium | **Static file serving via reverse proxy** | 0.5 day | ❌ FastAPI `StaticFiles` serves frontend assets. No caching headers, no compression. Proxy can handle `/static/` and `/images/` directly. Tied to HTTPS item. |
+| 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Done (v0.057.0). All three orphan sources fixed. |
+| 🟢 Low | **Custom error pages** | 0.5 day | ✅ Done (v0.057.1). SPA catch-all route. |
+| 🟢 Low | **Done files clickable in queue** | 0.5 day | ✅ Done (v0.057.2). Click re-opens review with extracted data. |
+| 🟢 Low | **Blank preview after cancel/reprocess** | 0.5 day | ✅ Done (v0.057.2). Stale image cleanup + panel visibility order + fallback message. |
+| 🟢 Low | **Queue routing after cancel/save** | 0.5 day | ✅ Done (v0.057.2). Routes to queue if files remain, upload if empty. |
+| 🟢 Low | **Uploaded_by display in queue UI** | 0.5 day | ❌ `uploaded_by` field tracked per file entry but not shown in UI. |
+| 🟢 Low | **XLSX column resizing** | 2 days | ❌ SheetJS renders read-only table; users cannot resize columns. |
+| 🟢 Low | **Database + file backup** | 0.5 day | ❌ No built-in backup. SQLite dump + archive tarball via cron. |
+| 🟢 Low | **Unbounded disk growth** | 0.5 day | ❌ No cleanup of old temp/images. Periodic cleanup of files older than N days. |
 
 ---
 
@@ -329,6 +353,8 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (189 expected)
-4. Remaining Production Readiness items (🟢 Low priority):
-   - **HTTPS via reverse proxy** — App runs HTTP only. For production, put behind nginx/Caddy with Let's Encrypt.
-   - **XLSX column resizing** — SheetJS renders read-only table; users cannot resize columns.
+4. Remaining Production Readiness items — see checklist above. Recommended order:
+   - **🔴 HTTPS + reverse proxy** (Caddy/Nginx + Docker Compose) — unlocks rate limiter fix and static file serving
+   - **🟡 Queue persistence** (SQLite-backed uploaded_files list)
+   - **🟡 Graceful shutdown** (SIGTERM handler for processing cleanup)
+   - **🟢 Rest** (backup, disk growth, XLSX resize, uploaded_by display)

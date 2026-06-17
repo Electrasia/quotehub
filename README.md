@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.053.3 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.057.2 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -14,6 +14,8 @@ AI-powered quotation document processing system. Upload PDF or XLSX quotations, 
 - **Sortable Columns** — Click any column header to sort ascending/descending
 - **PDF Viewer** — Double-click any item to view the original document
 - **Duplicate Detection** — Warns when uploading a file that already exists
+- **Review Re-entry** — Click any "✓ Ready to review" file in the queue to re-open the review screen
+- **Smart Navigation** — Cancel/save routes to the file queue, not the upload page, when files remain
 - **Configurable Popups** — Adjust success popup duration in settings
 - **Version + Commit Display** — App header shows current version and commit hash for traceability
 

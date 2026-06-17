@@ -1,5 +1,19 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.057.2 (2026-06-17)
+- UX: "✓ Ready to review" files in the queue are now clickable — tapping re-opens the review screen with all extracted data intact
+- UX: After cancelling or saving from review, the app now routes to the file queue if files remain, instead of always jumping back to the upload page
+- UX: Returning to the Process view from Search/Settings now lands on the queue if files exist
+- Fix: Page preview images no longer go blank after cancelling and re-processing a file (stale page image directory cleaned up before regeneration)
+- Fix: Preview no longer shows blank on cached images when re-entering review — step-4 panel now becomes visible before the image source is set, so autofit computes against the real container width
+- Fix: Page preview shows a fallback message instead of a blank white box when images are genuinely unavailable
+- Chore: `backend/routes/files.py` — clean stale image dir before `_generate_page_images()` on re-process
+- Chore: `frontend/js/review.js` — moved `goToStep(4)` before `updateReviewPdf()` in `showReview()`
+- Chore: `frontend/js/review.js` — conditional routing in `backToUpload()`
+- Chore: `frontend/js/nav.js` — conditional routing in `showUpload()`
+- Chore: `frontend/js/upload.js` — `done` files are clickable; `reviewDoneFile()` restores extracted data + page images
+- Chore: `frontend/js/progress.js` — store `extractedData` per file entry for review re-entry
+
 ## v0.057.1 (2026-06-17)
 - UX: SPA catch-all route — navigating to any unmatched URL now serves the app instead of raw JSON `{"detail":"Not Found"}`
 - No new files, no frontend changes, no API changes
