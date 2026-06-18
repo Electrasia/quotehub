@@ -166,7 +166,7 @@ function renderFileList() {
         const clickAttr = isClickable ? `onclick="reviewDoneFile('${f.file_id}')" style="cursor:pointer" title="Click to review"` : '';
         return `
             <div class="file-item" ${clickAttr}>
-                <span class="file-name">${moveHtml}${dupBadge}${escapeHtml(f.filename)} (${escapeHtml(String(f.pages))} page${f.pages !== 1 ? 's' : ''})</span>
+                <span class="file-name">${moveHtml}${dupBadge}${escapeHtml(f.filename)} (${escapeHtml(String(f.pages))} page${f.pages !== 1 ? 's' : ''}) <span style="color:#999;font-size:11px">by ${escapeHtml(f.uploaded_by || 'unknown')}</span></span>
                 <span style="display:flex;align-items:center;gap:8px">${statusHtml} ${removeHtml}</span>
             </div>
         `;

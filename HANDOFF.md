@@ -2,11 +2,45 @@
 
 ## Current Version
 
-**v0.057.2** (dev branch)
+**v0.060.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.060.0 — Encrypted AES-256-GCM export/import
+- **Security**: Removed unencrypted `GET /export` — the only export path is now encrypted
+- **Security**: Removed `POST /import/upload` — all imports go through the encrypted `.quodb` flow
+- **Feature**: `backend/export_import.py` — AES-256-GCM encrypted package format, PBKDF2-600K key derivation, streaming I/O
+- **Feature**: `POST /export-password` — set/change/forgot-recovery for export password (master-only, bcrypt stored)
+- **Feature**: `GET /export-password/status` — check if export password is set (admin+)
+- **Feature**: `POST /export/run` — encrypted `.quodb` export with integrity check (admin+)
+- **Feature**: `POST /import/run` — encrypted `.quodb` import with dry-run, dedup, system-ID check, transactional apply (admin+)
+- **Feature**: Frontend — Export Password modal, encrypted export/import UI, `.quodb`-only picker
+- **Chore**: 4 new endpoints in `backend/routes/export_import.py`
+- **Chore**: Removed ~170 lines of dead export/import code from `backend/routes/files.py`
+- **Chore**: Migration v1 creates `export_registry` table
+- **Chore**: Added `cryptography>=41.0.0` to requirements
+- **Chore**: 57 new tests (31 unit + 26 integration)
+- **Fix**: `cryptography>=49` GCM API — `encryptor.finalize()` no longer returns tag, use `encryptor.tag`
+- **Fix**: PBKDF2 iterations read at call time so tests can monkeypatch
+- **Chore**: VERSION → 0.060.0
+
+### v0.058.1 — Queue persistence fix
+- Fix: `save_upload_state()` was defined but never called — dead code since v0.039
+- Fix: `save_upload_state()` now saves `uploaded_by` field so uploader survives restart
+- Fix: Frontend now restores queue from backend on page load via `GET /queue` — restored files no longer disappear on page refresh
+- Feature: `GET /queue` endpoint returns the current upload queue
+- Chore: `backend/routes/files.py` — calls `save_upload_state()` after upload, clear, remove-file, confirm, and skip
+- Chore: `frontend/js/app.js` — `loadQueueState()` fetches and normalizes queue on init
+- Chore: VERSION → 0.058.1
+
+### v0.058.0 — Nginx Proxy Manager preparation
+- Feature: `trust_proxy_headers` config flag (default `false`) — guarded `_get_client_ip()` only trusts proxy headers when explicitly enabled
+- Feature: `SecureCookieMiddleware` adds `Secure` flag to session cookie when `trust_proxy_headers` is `true` — browser only sends cookie over HTTPS
+- Fix: `_get_client_ip()` previously trusted `X-Forwarded-For` unconditionally, allowing rate-limiter bypass via header spoofing in dev
+- Doc: `NPM-DEPLOY.md` — step-by-step deploy guide for IT team (gitignored, never pushed)
+- Chore: VERSION → 0.058.0
 
 ### v0.057.2 — UX polish: queue navigation, blank preview fix, clickable done files
 - UX: "✓ Ready to review" files in the queue are now clickable — tapping re-opens the review screen with all extracted data intact (page images must still be on disk)
@@ -144,6 +178,26 @@
 ---
 
 ## Files Changed Recently
+
+### v0.058.1
+- `backend/main.py` — Added `uploaded_by` to `save_upload_state()` save payload
+- `backend/routes/files.py` — Added `GET /queue` endpoint; calls `save_upload_state()` after upload, clear, remove-file, confirm, skip
+- `frontend/js/app.js` — Added `loadQueueState()`; `initApp()` now restores queue and routes to Process view
+- `VERSION` — 0.058.0 → 0.058.1
+- `CHANGELOG.md` — Added v0.058.1 release notes
+- `HANDOFF.md` — Updated version, work log, checklist
+
+### v0.058.0
+- `backend/utils.py` — Added `trust_proxy_headers: False` to `_CONFIG_DEFAULTS`
+- `backend/routes/auth.py` — `_get_client_ip()` guarded behind `trust_proxy_headers` config flag
+- `backend/middleware.py` — Added `SecureCookieMiddleware` (adds `Secure` flag when behind HTTPS proxy)
+- `backend/main.py` — Imported and registered `SecureCookieMiddleware`
+- `config.example.json` — Added `trust_proxy_headers: false` placeholder
+- `VERSION` — 0.057.2 → 0.058.0
+- `CHANGELOG.md` — Added v0.058.0 release notes
+- `HANDOFF.md` — Updated version, work log, checklist, next session
+- `.gitignore` — Added `/NPM-DEPLOY.md`
+- `NPM-DEPLOY.md` — New file (gitignored, not pushed)
 
 ### v0.057.2
 - `frontend/js/progress.js` — Store `extractedData` per file entry (`uploadedFiles[fileIdx].extractedData`) for review re-entry
@@ -327,24 +381,24 @@ Items still needed before the app can be considered production-ready:
 |----------|------|--------|--------|
 | 🔴 High | **Persistent sessions** | 1 day | ✅ Done. Starlette signed cookies (client-side), SECRET_KEY in data volume. Container restarts do NOT log users out. |
 | 🔴 High | **Database migration system** | 2 days | ✅ Done (v0.055.2). Versioned schema migration in `backend/db.py` with DDL/DML rules. |
-| 🔴 High | **Login brute-force protection** | 1 hour | ⚠️ Done (v0.056.0) but **broken in Docker** — IP-based, but without reverse proxy, all clients share Docker gateway IP, making it a global bucket. Needs reverse proxy to fix. |
-| 🔴 High | **HTTPS via reverse proxy** | 1 day | ❌ App runs HTTP only. Sessions + credentials sent in plaintext. Add Caddy/Nginx with Let's Encrypt in Docker Compose. |
-| 🟡 Medium | **Queue persistence** | 0.5 day | ❌ In-memory `uploaded_files` list lost on container restart. Persist to SQLite so queued files survive deploys. |
-| 🟡 Medium | **Graceful shutdown** | 0.5 day | ❌ No SIGTERM handler. Processing may be interrupted without cleanup. Add shutdown handler to mark processing files as `error`. |
+| 🔴 High | **Login brute-force protection** | 1 hour | ✅ **Resolved by NPM** (v0.058.0). `trust_proxy_headers` + `_get_client_ip()` guard forwards real client IPs from Nginx Proxy Manager, fixing the Docker gateway IP issue. See `NPM-DEPLOY.md`. |
+| 🔴 High | **HTTPS via reverse proxy** | 1 day | ✅ **Handled externally via NPM** (v0.058.0). App prepared with `trust_proxy_headers` flag + `SecureCookieMiddleware`. See `NPM-DEPLOY.md` for IT team steps. |
+| 🟡 Medium | **Queue persistence** | 0.5 day | ✅ Done (v0.058.1). Backend persists queue on every mutation; frontend restores via `GET /queue` on page load. Queue survives container restart and browser refresh. |
+| 🟡 Medium | **Graceful shutdown** | 0.5 day | ✅ Done (v0.058.1). Analysis showed no functional gap — lock released by `finally` on cancellation, DB not touched during streaming, temp files cleaned on re-process. Shutdown log added to confirm clean stop in container logs. |
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
 | 🟡 Medium | **Expand test coverage** | 3 days | ✅ **189 tests** across all endpoint categories. |
 | 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap (50), processing semaphore (1 file at a time). |
-| 🟡 Medium | **Rate limiter X-Forwarded-For support** | 0.5 day | ❌ `_get_client_ip()` already reads X-Forwarded-For, but Docker deploy has no reverse proxy. Add Caddy + read from proxy header. Tied to HTTPS item above. |
-| 🟡 Medium | **Static file serving via reverse proxy** | 0.5 day | ❌ FastAPI `StaticFiles` serves frontend assets. No caching headers, no compression. Proxy can handle `/static/` and `/images/` directly. Tied to HTTPS item. |
+| 🟡 Medium | **Rate limiter X-Forwarded-For support** | 0.5 day | ✅ **Resolved by NPM** (v0.058.0). `trust_proxy_headers` flag + `_get_client_ip()` guard. NPM sets real client IP in `X-Forwarded-For`. |
+| 🟡 Medium | **Static file serving via reverse proxy** | 0.5 day | ✅ **Handled externally via NPM** (v0.058.0). NPM can serve `/static/` and `/images/` directly; caching headers configurable in NPM UI. |
 | 🟢 Low | **Orphaned file cleanup** | 0.5 day | ✅ Done (v0.057.0). All three orphan sources fixed. |
 | 🟢 Low | **Custom error pages** | 0.5 day | ✅ Done (v0.057.1). SPA catch-all route. |
 | 🟢 Low | **Done files clickable in queue** | 0.5 day | ✅ Done (v0.057.2). Click re-opens review with extracted data. |
 | 🟢 Low | **Blank preview after cancel/reprocess** | 0.5 day | ✅ Done (v0.057.2). Stale image cleanup + panel visibility order + fallback message. |
 | 🟢 Low | **Queue routing after cancel/save** | 0.5 day | ✅ Done (v0.057.2). Routes to queue if files remain, upload if empty. |
-| 🟢 Low | **Uploaded_by display in queue UI** | 0.5 day | ❌ `uploaded_by` field tracked per file entry but not shown in UI. |
+| 🟢 Low | **Uploaded_by display in queue UI** | 0.5 day | ✅ Done (v0.059.1). `renderFileList()` now shows `by username` next to filename. |
 | 🟢 Low | **XLSX column resizing** | 2 days | ❌ SheetJS renders read-only table; users cannot resize columns. |
 | 🟢 Low | **Database + file backup** | 0.5 day | ❌ No built-in backup. SQLite dump + archive tarball via cron. |
-| 🟢 Low | **Unbounded disk growth** | 0.5 day | ❌ No cleanup of old temp/images. Periodic cleanup of files older than N days. |
+| 🟢 Low | **Unbounded disk growth** | 0.5 day | ✅ Done (v0.059.0). `POST /cleanup/purge-orphans` deletes temp files with no queue entry and image dirs with no reference in queue, archive, or DB. `GET /cleanup/stats` reports orphan counts and estimated bytes. |
 
 ---
 
@@ -354,7 +408,5 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (189 expected)
 4. Remaining Production Readiness items — see checklist above. Recommended order:
-   - **🔴 HTTPS + reverse proxy** (Caddy/Nginx + Docker Compose) — unlocks rate limiter fix and static file serving
-   - **🟡 Queue persistence** (SQLite-backed uploaded_files list)
-   - **🟡 Graceful shutdown** (SIGTERM handler for processing cleanup)
-   - **🟢 Rest** (backup, disk growth, XLSX resize, uploaded_by display)
+    - **🟢 XLSX column resizing** (2 days, SheetJS limitation)
+    - **🟢 Database + file backup** (0.5 day, external cron, no app code)

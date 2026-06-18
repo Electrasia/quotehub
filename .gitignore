@@ -11,6 +11,9 @@ data/quotations_fts*
 data/archive/
 data/secret.key
 data/init_password.txt
+data/machine_id
+data/export_password.hash
+data/export_registry.json
 
 # Local config (may contain private network IPs / secrets).
 # Copy config.example.json → config.json and edit locally.
@@ -48,6 +51,9 @@ Thumbs.db
 # Temp files
 *.tmp
 *.log
+
+# NPM deploy guide — internal IT document, never commit
+/NPM-DEPLOY.md
 
 # Confidential documents — never commit
 /CH-PO-1906-019.pdf

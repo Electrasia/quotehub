@@ -29,6 +29,36 @@ logger = logging.getLogger(__name__)
 # Single source of truth for the database location.
 # All modules should import DB_PATH from here, not define their own.
 DB_PATH = Path(__file__).parent.parent / "data" / "quotations.db"
+DATA_DIR = DB_PATH.parent
+
+
+# ─── Machine ID ──────────────────────────────────────────────────────────────
+# Stable server identifier for export/import systemId enforcement.
+# Generated once, stored in the data volume. Survives container rebuilds.
+# Only regenerated if the file is manually deleted.
+
+_MACHINE_ID: str | None = None
+
+
+def get_machine_id() -> str:
+    """Get or create the stable machine identifier.
+
+    The machine ID is a UUID generated once and stored in the data volume.
+    It identifies this specific installation for export/import systemId checks.
+    The master can override the check during import (force_system_id flag).
+    """
+    global _MACHINE_ID
+    if _MACHINE_ID is not None:
+        return _MACHINE_ID
+
+    path = DATA_DIR / "machine_id"
+    if path.exists():
+        _MACHINE_ID = path.read_text().strip()
+    else:
+        import uuid
+        _MACHINE_ID = str(uuid.uuid4())
+        path.write_text(_MACHINE_ID)
+    return _MACHINE_ID
 
 
 @contextmanager
@@ -244,6 +274,38 @@ def _migrate_users_db(db):
 # Migration registry: version_number -> callable(db_connection)
 # Starts empty. First migration will be version 1.
 MIGRATIONS: dict[int, callable] = {}
+
+
+# ─── Migration v1: export_registry table ─────────────────────────────────────
+
+def _v1_export_registry(db):
+    """Create the export_registry table for tracking export/import operations.
+
+    DDL only — safe to run multiple times (CREATE TABLE IF NOT EXISTS).
+    Stores one row per export attempt with status tracking (STARTED/FAILED/CANCELED/SUCCESS).
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS export_registry (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            export_id          TEXT UNIQUE NOT NULL,
+            system_id          TEXT NOT NULL,
+            sequence_number    INTEGER NOT NULL,
+            status             TEXT NOT NULL CHECK(status IN ('STARTED','FAILED','CANCELED','SUCCESS')),
+            manifest_path      TEXT,
+            package_path       TEXT,
+            error_detail       TEXT,
+            record_count       INTEGER,
+            file_count         INTEGER,
+            package_size_bytes INTEGER,
+            started_at         TEXT DEFAULT (datetime('now')),
+            completed_at       TEXT,
+            checksum_algorithm TEXT DEFAULT 'sha-256'
+        )
+    """)
+    logger.info("Migration v1 complete: export_registry table created")
+
+
+MIGRATIONS[1] = _v1_export_registry
 
 
 def _init_schema_version(db):

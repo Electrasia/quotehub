@@ -391,19 +391,48 @@
             <!-- Backup / Restore Section -->
             <div class="settings-card backup-restore-section ai-admin-master">
                 <h3>💾 Backup / Restore</h3>
+
+                <!-- Export Password Status (master-only set/change; display for all admin+) -->
+                <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
+                    <h4 style="margin-bottom:8px;font-size:14px">🔐 Export Password</h4>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px" id="exportPasswordStatus">Loading...</p>
+                    <div id="exportPasswordActions" style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn btn-primary btn-sm ai-master-only hidden" id="exportPasswordSetBtn" onclick="showExportPasswordModal('set')">Set Password</button>
+                        <button class="btn btn-primary btn-sm ai-master-only hidden" id="exportPasswordChangeBtn" onclick="showExportPasswordModal('change')">Change Password</button>
+                        <button class="btn btn-secondary btn-sm ai-master-only hidden" id="exportPasswordForgotBtn" onclick="showExportPasswordModal('forgot')">Forgot Password?</button>
+                    </div>
+                </div>
+
                 <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📤 Export (Backup)</h4>
-                    <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as a ZIP archive.</p>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as an encrypted <code>.quodb</code> package.</p>
                     <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Export Backup</button>
                     <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
                 </div>
                 <div class="ai-master-hidden" style="padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
-                    <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px">Upload an encrypted <code>.quodb</code> backup package to restore quotations and files.</p>
                     <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
-                    <input type="file" id="importFile" accept=".zip,.json" style="display:none" onchange="importDatabase(this)">
+                    <input type="file" id="importFile" accept=".quodb" style="display:none" onchange="importDatabase(this)">
                     <span id="importProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Importing...</span>
                     <div id="importResult" class="hidden" style="margin-top:8px;font-size:13px;color:#27ae60"></div>
+                    <!-- .quodb-specific import form (shown when a .quodb file is selected) -->
+                    <div id="quodbImportForm" class="hidden" style="margin-top:12px;padding:12px;background:#fff;border:1px solid #ddd;border-radius:6px">
+                        <div style="margin-bottom:10px">
+                            <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Export Password</label>
+                            <input type="password" id="quodbImportPassword" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="off">
+                        </div>
+                        <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px">
+                            <input type="checkbox" id="quodbImportDryRun" checked>
+                            <label for="quodbImportDryRun" style="font-size:13px;color:#666">Dry-run (preview only, no changes)</label>
+                        </div>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn-primary btn-sm" id="quodbImportBtn" onclick="runQuodbImport()">Import</button>
+                            <button class="btn btn-secondary btn-sm" onclick="resetQuodbImport()">Cancel</button>
+                        </div>
+                        <div id="quodbImportError" class="hidden" style="margin-top:8px;font-size:13px;color:#e74c3c"></div>
+                        <div id="quodbImportReport" class="hidden" style="margin-top:8px;font-size:12px;color:#333;background:#f8f9fa;padding:8px;border-radius:4px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:monospace"></div>
+                    </div>
                 </div>
             </div>
 
@@ -815,6 +844,32 @@
             <div class="actions" style="justify-content:center">
                 <button class="btn btn-primary" onclick="showSettings(); closeModal('backupModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('backupModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Password Modal (set, change, forgot-recovery, export prompt) -->
+    <div class="modal-overlay" id="exportPasswordModal">
+        <div class="modal" style="max-width:450px;text-align:left">
+            <h3 id="exportPasswordModalTitle" style="margin-bottom:12px">Export Password</h3>
+            <p id="exportPasswordModalDesc" style="font-size:13px;color:#666;margin-bottom:16px"></p>
+            <div id="exportPasswordCurrentField" class="hidden" style="margin-bottom:12px">
+                <label id="exportPasswordCurrentLabel" style="font-size:13px;color:#666;display:block;margin-bottom:4px">Current Export Password</label>
+                <input type="password" id="exportPasswordCurrent" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="off">
+            </div>
+            <div style="margin-bottom:12px">
+                <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">New Export Password</label>
+                <input type="password" id="exportPasswordNew" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="new-password">
+            </div>
+            <div style="margin-bottom:12px">
+                <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Confirm New Password</label>
+                <input type="password" id="exportPasswordConfirm" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="new-password">
+            </div>
+            <div id="exportPasswordError" class="hidden" style="font-size:13px;color:#e74c3c;margin-bottom:8px"></div>
+            <div id="exportPasswordStrength" class="hidden" style="font-size:12px;color:#666;margin-bottom:8px"></div>
+            <div class="actions" style="justify-content:flex-end;gap:8px">
+                <button class="btn btn-secondary" onclick="closeModal('exportPasswordModal')">Cancel</button>
+                <button class="btn btn-primary" id="exportPasswordSubmitBtn" onclick="submitExportPassword()">Save</button>
             </div>
         </div>
     </div>

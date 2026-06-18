@@ -1,5 +1,58 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.060.0 (2026-06-19)
+- **Security**: Removed unencrypted `GET /export` (plain ZIP) — the only export path is now encrypted AES-256-GCM
+- **Security**: Removed `POST /import/upload` (plain ZIP/JSON) — all imports go through the encrypted `.quodb` flow
+- **Feature**: New `backend/export_import.py` — AES-256-GCM encrypted package format, PBKDF2-600K key derivation, streaming I/O for large files
+- **Feature**: `POST /export-password` — set/change/forgot-recovery for export password (master-only, bcrypt stored)
+- **Feature**: `GET /export-password/status` — check if export password is set (admin+)
+- **Feature**: `POST /export/run` — encrypted `.quodb` export with DB snapshot, file verification, integrity check (admin+)
+- **Feature**: `POST /import/run` — encrypted `.quodb` import with dry-run, dedup, system-ID check, file conflict detection, transactional apply (admin+)
+- **Feature**: Frontend — Export Password modal, encrypted export/import UI, .quodb file picker (frontend/index.html, frontend/js/settings.js, frontend/js/nav.js)
+- **Chore**: `backend/routes/export_import.py` — 4 new endpoints delegating to `export_import.py`
+- **Chore**: `backend/routes/files.py` — removed 170 lines of dead export/import code + cleaned up dead imports (`hashlib`, `zipfile`, `tempfile`)
+- **Chore**: `backend/main.py` — registered export/import router + 10 structured log keys
+- **Chore**: `backend/db.py` — migration v1 creates `export_registry` table (already present)
+- **Chore**: `backend/requirements.txt` — added `cryptography>=41.0.0`
+- **Chore**: `tests/test_export_import_unit.py` — 31 new unit tests (password validation, crypto, record_hash, password management)
+- **Chore**: `tests/test_export_import_api.py` — 26 new integration tests (auth gates, endpoints, round-trip)
+- **Chore**: `tests/conftest.py` — added `export_password_set`, `with_archive_files` fixtures + `TEST_EXPORT_PASSWORD` constant
+- **Fix**: `cryptography>=49` compatibility — `encryptor.finalize()` no longer returns GCM tag, use `encryptor.tag` instead
+- **Fix**: PBKDF2 iterations now read at call time so monkeypatch/patch can override for fast tests
+- **Chore**: VERSION → 0.060.0
+
+## v0.059.1 (2026-06-18)
+- UX: Queue now shows who uploaded each file — `by username` next to filename in `renderFileList()`
+- Chore: `frontend/js/upload.js` — added `uploaded_by` display to file-item template
+- Chore: VERSION → 0.059.1
+
+## v0.059.0 (2026-06-18)
+- Feature: `POST /cleanup/purge-orphans` endpoint — deletes orphan temp files (no queue entry) and orphan image directories (no reference in queue, archive, or DB)
+- Feature: `GET /cleanup/stats` now reports `temp_file_count`, `temp_orphan_count`, `image_orphan_count`, and estimated bytes for orphan cleanup
+- Chore: `backend/routes/admin.py` — added purge-orphans endpoint + extended stats with orphan reporting
+- Chore: VERSION → 0.059.0
+
+## v0.058.1 (2026-06-18)
+- Fix: `save_upload_state()` was never called — queue persistence was dead code
+- Fix: `save_upload_state()` now saves `uploaded_by` so uploader survives restart
+- Fix: Frontend now restores queue from backend on page load via `GET /queue` — restored files no longer disappear on page refresh
+- Feature: `GET /queue` endpoint returns the current upload queue
+- Chore: `backend/routes/files.py` — calls `save_upload_state()` after upload, clear, remove-file, confirm, and skip
+- Chore: `frontend/js/app.js` — `loadQueueState()` fetches and normalizes queue on init
+- Chore: VERSION → 0.058.1
+
+## v0.058.0 (2026-06-18)
+- Feature: `trust_proxy_headers` config flag for Nginx Proxy Manager deployment
+- Feature: `_get_client_ip()` no longer trusts proxy headers by default — fixes IP-spoofing vulnerability in dev
+- Feature: `SecureCookieMiddleware` adds `Secure` flag to session cookie when behind HTTPS proxy
+- Chore: `backend/utils.py` — added `trust_proxy_headers: False` to `_CONFIG_DEFAULTS`
+- Chore: `backend/routes/auth.py` — guarded `_get_client_ip()` with config check
+- Chore: `backend/middleware.py` — added `SecureCookieMiddleware` class
+- Chore: `backend/main.py` — registered `SecureCookieMiddleware` in middleware stack
+- Chore: `config.example.json` — added `trust_proxy_headers` placeholder
+- Chore: `NPM-DEPLOY.md` — deployment guide for IT team (gitignored)
+- Chore: VERSION → 0.058.0
+
 ## v0.057.2 (2026-06-17)
 - UX: "✓ Ready to review" files in the queue are now clickable — tapping re-opens the review screen with all extracted data intact
 - UX: After cancelling or saving from review, the app now routes to the file queue if files remain, instead of always jumping back to the upload page

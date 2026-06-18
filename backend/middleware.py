@@ -60,3 +60,27 @@ class SessionCookieMiddleware(BaseHTTPMiddleware):
     def _remove_max_age(self, cookie_header: str) -> str:
         """Remove Max-Age from the Set-Cookie header."""
         return re.sub(r';\s*Max-Age=\d+', '', cookie_header)
+
+
+class SecureCookieMiddleware(BaseHTTPMiddleware):
+    """Add Secure flag to session cookie when behind an HTTPS proxy.
+
+    Reads trust_proxy_headers from config. When enabled (deploy behind NPM),
+    ensures the quotahub_session cookie has the Secure flag so the browser
+    only sends it over HTTPS. Has no effect in dev (default: disabled).
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+
+        from .utils import get_config_data
+        cfg = get_config_data()
+        if not cfg.get("trust_proxy_headers", False):
+            return response
+
+        cookie_header = response.headers.get("set-cookie", "")
+        if "quotahub_session=" not in cookie_header:
+            return response
+        if "; Secure" not in cookie_header:
+            response.headers["set-cookie"] = cookie_header + "; Secure"
+        return response

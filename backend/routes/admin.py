@@ -259,11 +259,11 @@ async def cleanup_execute(req: CleanupExecuteRequest):
 @router.get("/cleanup/stats", dependencies=[Depends(require_role("master"))])
 async def cleanup_stats():
     """Get current database and file statistics for cleanup overview."""
-    from ..main import ARCHIVE_DIR, IMAGES_DIR
+    from ..main import ARCHIVE_DIR, IMAGES_DIR, UPLOAD_DIR, uploaded_files
     
     stats = {}
     
-    # Database stats
+    # ── Database stats ──
     with get_db(readonly=True) as db:
         # Total entries
         row = db.execute("SELECT COUNT(*) as total FROM quotations").fetchone()
@@ -281,29 +281,150 @@ async def cleanup_stats():
         ).fetchone()
         stats["oldest_date"] = row["oldest"]
         stats["newest_date"] = row["newest"]
+        
+        # DB stems for orphan detection
+        db_stems = set()
+        for r in db.execute("SELECT filename FROM quotations WHERE filename IS NOT NULL AND filename != ''").fetchall():
+            db_stems.add(Path(r["filename"]).stem)
     
-    # File stats
+    # ── Archive file stats ──
     pdf_count = 0
     total_size = 0
+    archive_stems = set()
     if ARCHIVE_DIR.exists():
-        for pdf_file in ARCHIVE_DIR.glob("*.pdf"):
-            pdf_count += 1
-            try:
-                total_size += pdf_file.stat().st_size
-            except OSError:
-                pass
+        for f in ARCHIVE_DIR.iterdir():
+            if f.is_file():
+                pdf_count += 1
+                archive_stems.add(f.stem)
+                try:
+                    total_size += f.stat().st_size
+                except OSError:
+                    pass
     
+    # ── Queue reference set ──
+    queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
+    queue_stems = {Path(fname).stem for fname in queue_filenames}
+    
+    # ── Active stems (anything referenced by queue, archive, or DB) ──
+    all_active_stems = queue_stems | archive_stems | db_stems
+    
+    # ── Image dir stats ──
     img_count = 0
+    image_orphan_count = 0
+    image_orphan_bytes = 0
     if IMAGES_DIR.exists():
         for item in IMAGES_DIR.iterdir():
             if item.is_dir():
                 img_count += 1
+                if item.name not in all_active_stems:
+                    image_orphan_count += 1
+                    for p in item.rglob("*"):
+                        if p.is_file():
+                            try:
+                                image_orphan_bytes += p.stat().st_size
+                            except OSError:
+                                pass
+    
+    # ── Temp file stats ──
+    temp_file_count = 0
+    temp_orphan_count = 0
+    temp_orphan_bytes = 0
+    if UPLOAD_DIR.exists():
+        for f in UPLOAD_DIR.iterdir():
+            if f.is_file():
+                temp_file_count += 1
+                if f.name not in queue_filenames:
+                    temp_orphan_count += 1
+                    try:
+                        temp_orphan_bytes += f.stat().st_size
+                    except OSError:
+                        pass
     
     stats["pdf_files"] = pdf_count
     stats["image_dirs"] = img_count
     stats["total_size"] = total_size
+    stats["temp_file_count"] = temp_file_count
+    stats["temp_orphan_count"] = temp_orphan_count
+    stats["image_orphan_count"] = image_orphan_count
+    stats["temp_orphan_bytes"] = temp_orphan_bytes
+    stats["image_orphan_bytes"] = image_orphan_bytes
     
     return stats
+
+
+@router.post("/cleanup/purge-orphans", dependencies=[Depends(require_role("master"))])
+async def cleanup_purge_orphans():
+    """Delete orphan files with no reference in queue, archive, or database.
+    
+    Orphan temp files exist in data/temp/ but have no matching queue entry.
+    Orphan image directories exist in data/images/ whose stem matches no
+    file in the queue, archive, or database.
+    
+    Returns counts and bytes freed.
+    """
+    import shutil
+    from ..main import uploaded_files, UPLOAD_DIR, ARCHIVE_DIR, IMAGES_DIR
+    
+    # ── Build reference sets ──
+    queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
+    queue_stems = {Path(fname).stem for fname in queue_filenames}
+    
+    archive_stems = set()
+    if ARCHIVE_DIR.exists():
+        for f in ARCHIVE_DIR.iterdir():
+            if f.is_file():
+                archive_stems.add(f.stem)
+    
+    db_stems = set()
+    with get_db(readonly=True) as db:
+        for row in db.execute("SELECT filename FROM quotations WHERE filename IS NOT NULL AND filename != ''").fetchall():
+            db_stems.add(Path(row["filename"]).stem)
+    
+    all_active_stems = queue_stems | archive_stems | db_stems
+    
+    temp_deleted = 0
+    image_dirs_deleted = 0
+    bytes_freed = 0
+    
+    # ── Delete orphan temp files ──
+    if UPLOAD_DIR.exists():
+        for f in UPLOAD_DIR.iterdir():
+            if f.is_file() and f.name not in queue_filenames:
+                try:
+                    bytes_freed += f.stat().st_size
+                    f.unlink()
+                    temp_deleted += 1
+                except OSError:
+                    pass
+    
+    # ── Delete orphan image directories ──
+    if IMAGES_DIR.exists():
+        for item in IMAGES_DIR.iterdir():
+            if item.is_dir() and item.name not in all_active_stems:
+                try:
+                    for p in item.rglob("*"):
+                        if p.is_file():
+                            try:
+                                bytes_freed += p.stat().st_size
+                            except OSError:
+                                pass
+                    shutil.rmtree(item, ignore_errors=True)
+                    image_dirs_deleted += 1
+                except OSError:
+                    pass
+    
+    logger.info("Orphan files purged", extra={
+        'category': 'ADMIN',
+        'temp_deleted': temp_deleted,
+        'image_dirs_deleted': image_dirs_deleted,
+        'bytes_freed': bytes_freed
+    })
+    
+    return {
+        "temp_deleted": temp_deleted,
+        "image_dirs_deleted": image_dirs_deleted,
+        "bytes_freed": bytes_freed,
+    }
 
 
 # ─── Search ────────────────────────────────────────────────

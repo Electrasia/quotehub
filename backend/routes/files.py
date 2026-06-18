@@ -6,16 +6,12 @@ This module handles:
     - PDF processing (streaming)
     - Confirmation/saving
     - Skip/delete operations
-    - Export/import
 """
 
-import hashlib
 import json
 import logging
 import os
 import shutil
-import zipfile
-import tempfile
 import asyncio
 import uuid
 from pathlib import Path
@@ -399,6 +395,8 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
             'pages': num_pages
         })
     
+    from ..main import save_upload_state
+    save_upload_state()
     return {"uploaded": len(results), "files": results, "errors": errors}
 
 
@@ -416,6 +414,8 @@ async def clear_files():
             if img_dir.exists():
                 shutil.rmtree(str(img_dir), ignore_errors=True)
     uploaded_files.clear()
+    from ..main import save_upload_state
+    save_upload_state()
     logger.info("All files cleared", extra={
         'category': 'PROCESS'
     })
@@ -442,11 +442,20 @@ async def remove_file(req: RemoveFileRequest):
         if img_dir.exists():
             shutil.rmtree(str(img_dir), ignore_errors=True)
     uploaded_files.pop(idx)
+    from ..main import save_upload_state
+    save_upload_state()
     logger.info("File removed", extra={
         'category': 'PROCESS',
         'file_id': req.file_id
     })
     return {"status": "removed", "file_id": req.file_id}
+
+
+@router.get("/queue", dependencies=[Depends(require_role("admin", "master"))])
+async def get_queue():
+    """Return the current upload queue (persisted across restarts)."""
+    from ..main import uploaded_files
+    return {"files": uploaded_files}
 
 
 @router.get("/next-file", dependencies=[Depends(require_role("admin", "master"))])
@@ -689,6 +698,8 @@ async def confirm(req: ConfirmRequest):
         shutil.rmtree(str(img_dir))
     
     entry["status"] = "saved"
+    from ..main import save_upload_state
+    save_upload_state()
     
     logger.info("Quotation saved", extra={
         'category': 'PROCESS',
@@ -712,6 +723,8 @@ async def skip(req: ProcessRequest):
         raise HTTPException(status_code=404, detail="File not found")
     idx, entry = resolved
     entry["status"] = "skipped"
+    from ..main import save_upload_state
+    save_upload_state()
     logger.info("File skipped", extra={
         'category': 'PROCESS',
         'file': entry["filename"],
@@ -807,177 +820,3 @@ async def update(req: UpdateRequest):
     
     return {"status": "updated"}
 
-
-# ─── Export / Import ──────────────────────────────────────
-
-@router.get("/export", dependencies=[Depends(require_role("admin", "master"))])
-async def export_db():
-    """Export all quotations as a zip file."""
-    from ..main import ARCHIVE_DIR
-    
-    with get_db(readonly=True) as db:
-        rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
-    
-    data = []
-    for r in rows:
-        d = dict(r)
-        if isinstance(d.get("items"), str):
-            try:
-                d["items"] = json.loads(d["items"])
-            except (json.JSONDecodeError, TypeError):
-                d["items"] = []
-        data.append(d)
-    
-    # Create zip file
-    zip_fd, zip_path = tempfile.mkstemp(suffix='.zip')
-    os.close(zip_fd)
-    try:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            quotations_json = json.dumps({"quotations": data, "count": len(data)}, indent=2)
-            zf.writestr("quotations.json", quotations_json)
-            # Embed SHA256 checksum for integrity verification on import
-            sha = hashlib.sha256(quotations_json.encode()).hexdigest()
-            zf.writestr("quotations.json.sha256", sha)
-            if ARCHIVE_DIR.exists():
-                for pdf_file in ARCHIVE_DIR.glob("*.pdf"):
-                    zf.write(pdf_file, f"archive/{pdf_file.name}")
-        
-        zip_size = os.path.getsize(zip_path)
-        filename = f"quodb_backup_{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}.zip"
-        
-        logger.info("Database exported", extra={
-            'category': 'ADMIN',
-            'row_count': len(data),
-            'zip_size': f"{zip_size / 1024:.1f}KB"
-        })
-        
-        def stream_file():
-            with open(zip_path, "rb") as f:
-                while chunk := f.read(65536):
-                    yield chunk
-            os.unlink(zip_path)
-        
-        return StreamingResponse(
-            stream_file(),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Length": str(zip_size)
-            }
-        )
-    except Exception:
-        logger.warning("Zip download stream failed", exc_info=True)
-        if os.path.exists(zip_path):
-            os.unlink(zip_path)
-        raise
-
-
-@router.post("/import/upload", dependencies=[Depends(require_role("admin", "master"))])
-async def import_upload(file: UploadFile = File(...)):
-    """Import quotations from a JSON or ZIP file."""
-    content = await file.read()
-    quotations = []
-    pdf_restored = 0
-    pdf_restored_paths = []  # Track restored PDFs for orphan cleanup on failure
-    integrity_warning = None
-    
-    if file.filename.endswith(".zip"):
-        import io
-        try:
-            with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
-                if "quotations.json" in zf.namelist():
-                    # Verify SHA256 checksum if present (backward compatible)
-                    if "quotations.json.sha256" in zf.namelist():
-                        expected_sha = zf.read("quotations.json.sha256").decode().strip()
-                        actual_sha = hashlib.sha256(zf.read("quotations.json")).hexdigest()
-                        if expected_sha != actual_sha:
-                            logger.warning("Import rejected: checksum mismatch", extra={
-                                'category': 'ADMIN', 'file': file.filename,
-                            })
-                            return JSONResponse(status_code=400, content={
-                                "error": "File integrity check failed — the data has been modified since export"
-                            })
-                    else:
-                        logger.warning("Import ZIP has no SHA checksum — integrity not verified", extra={
-                            'category': 'ADMIN', 'file': file.filename,
-                        })
-                        integrity_warning = "No integrity checksum found in ZIP — file not verified"
-                    data = json.loads(zf.read("quotations.json"))
-                    quotations = data.get("quotations", [])
-                from ..main import ARCHIVE_DIR
-                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-                for name in zf.namelist():
-                    if name.startswith("archive/") and name.endswith(".pdf"):
-                        pdf_name = Path(name.split("/", 1)[1]).name
-                        pdf_data = zf.read(name)
-                        pdf_path = ARCHIVE_DIR / pdf_name
-                        with open(pdf_path, "wb") as f:
-                            f.write(pdf_data)
-                        pdf_restored += 1
-                        pdf_restored_paths.append(pdf_path)
-        except zipfile.BadZipFile:
-            return JSONResponse(status_code=400, content={"error": "Invalid zip file"})
-    elif file.filename.endswith(".json"):
-        try:
-            data = json.loads(content)
-            quotations = data.get("quotations", [])
-        except json.JSONDecodeError:
-            return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
-    else:
-        return JSONResponse(status_code=400, content={"error": "Use .zip or .json"})
-    
-    if not quotations:
-        # Clean up any PDFs restored before the failure (orphan prevention)
-        for p in pdf_restored_paths:
-            if p.exists():
-                p.unlink()
-        return JSONResponse(status_code=400, content={"error": "No quotations found"})
-    
-    imported = 0
-    skipped = 0
-    with get_db() as db:
-        for q in quotations:
-            supplier = q.get("supplier", "")
-            quotation_date = q.get("quotation_date", "")
-            document_type = q.get("document_type", "unknown")
-            items = q.get("items", [])
-            if isinstance(items, str):
-                try:
-                    items = json.loads(items)
-                except (json.JSONDecodeError, TypeError):
-                    items = []
-            if not items:
-                skipped += 1
-                continue
-            if not quotation_date:
-                quotation_date = items[0].get("date", "")
-            db.execute(
-                "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
-                (q.get("filename", "imported.pdf"), supplier, quotation_date,
-                 json.dumps(items), document_type)
-            )
-            imported += 1
-    
-    if imported == 0 and skipped > 0:
-        # Clean up any PDFs restored before the failure (orphan prevention)
-        for p in pdf_restored_paths:
-            if p.exists():
-                p.unlink()
-        return JSONResponse(status_code=400, content={
-            "error": f"Import failed: {skipped} quotation(s) found but all had no items"
-        })
-    
-    logger.info("Database imported", extra={
-        'category': 'ADMIN',
-        'file': file.filename,
-        'imported': imported,
-        'skipped': skipped,
-        'pdfs_restored': pdf_restored
-    })
-    
-    result = {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}
-    if skipped > 0:
-        result["skipped"] = skipped
-    if integrity_warning:
-        result["warning"] = integrity_warning
-    return result

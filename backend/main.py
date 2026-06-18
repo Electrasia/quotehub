@@ -87,7 +87,11 @@ class StructuredFormatter(logging.Formatter):
         'db_id', 'supplier', 'document_type', 'ids', 'count',
         'quotation_id', 'months', 'entries_deleted', 'files_deleted',
         'bytes_freed', 'row_count', 'zip_size', 'imported', 'pdfs_restored',
-        'mode', 'fallback', 'keys_changed'
+        'mode', 'fallback', 'keys_changed',
+        # Export/import
+        'export_id', 'records', 'files', 'package_bytes',
+        'importId', 'record_count', 'file_count',
+        'sequence_number', 'package_size_bytes', 'package_path',
     ]
     
     def formatTime(self, record, datefmt=None):
@@ -223,7 +227,8 @@ def save_upload_state():
                 "status": entry["status"],
                 "pages": entry.get("pages", []),
                 "num_pages": entry.get("num_pages", 0),
-                "progress": entry.get("progress", "")
+                "progress": entry.get("progress", ""),
+                "uploaded_by": entry.get("uploaded_by", "unknown"),
             })
         with open(UPLOAD_STATE_PATH, "w") as f:
             json.dump(to_save, f, indent=2)
@@ -271,6 +276,8 @@ async def lifespan(app: FastAPI):
     auth.bootstrap_master()
     load_upload_state()
     yield
+    logger.info("QuoDB shutting down", extra={'category': 'SYSTEM'})
+    print("QuoDB stopped.")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -282,14 +289,16 @@ app.add_middleware(
     https_only=False,
     max_age=14 * 24 * 60 * 60,  # 14 days for signature validation
 )
-from .middleware import SessionCookieMiddleware
+from .middleware import SessionCookieMiddleware, SecureCookieMiddleware
 app.add_middleware(SessionCookieMiddleware)
+app.add_middleware(SecureCookieMiddleware)
 
 # ─── Register Routes ──────────────────────────────────────
 
 from .routes import (
     auth_router, users_router, init_password_router,
     files_router, ai_router, admin_router,
+    export_import_router,
 )
 
 app.include_router(auth_router)
@@ -298,6 +307,7 @@ app.include_router(init_password_router)
 app.include_router(files_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+app.include_router(export_import_router)
 
 # ─── Static Files ─────────────────────────────────────────
 

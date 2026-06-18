@@ -8,5 +8,6 @@
   "ocr_enabled": true,
   "ocr_fallback_to_llm": true,
   "extraction_enabled": true,
-  "max_upload_size_mb": 5
+  "max_upload_size_mb": 5,
+  "trust_proxy_headers": false
 }

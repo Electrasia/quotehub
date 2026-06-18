@@ -47,13 +47,21 @@ _BLOCK_SECONDS = 900         # 15 min block after hitting limit
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from request, respecting proxy headers."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
+    """Extract client IP from request.
+
+    When trust_proxy_headers is enabled (deploy behind Nginx Proxy Manager),
+    respects X-Forwarded-For and X-Real-IP set by the proxy.
+    Otherwise returns the direct connection IP to prevent spoofing.
+    """
+    from ..utils import get_config_data
+    cfg = get_config_data()
+    if cfg.get("trust_proxy_headers", False):
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
     if request.client:
         return request.client.host
     return "127.0.0.1"

@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.057.2 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.060.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -10,7 +10,7 @@ AI-powered quotation document processing system. Upload PDF or XLSX quotations, 
 - **Multi-Page Processing** — Automatically processes all pages with streaming progress feedback
 - **Search & Filter** — Full-text search with prefix matching across suppliers, items, descriptions
 - **Editable Results** — Review, edit, find & replace before saving
-- **Backup/Restore** — Export/import quotations and PDFs as ZIP archives
+- **Encrypted Backup/Restore** — Export/import quotations and PDFs as AES-256-GCM encrypted `.quodb` packages
 - **Sortable Columns** — Click any column header to sort ascending/descending
 - **PDF Viewer** — Double-click any item to view the original document
 - **Duplicate Detection** — Warns when uploading a file that already exists
@@ -90,7 +90,7 @@ This will:
 
 - `VERSION` file in the repo root defines the current release (e.g. `0.053.3`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.053.3 (377b4c7)`
+- The app header displays both: `v0.060.0 (377b4c7)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -220,6 +220,7 @@ quotehub/
 │   ├── auth.py              # Authentication (password hashing, user CRUD, sessions)
 │   ├── parser.py            # PDF/XLSX parsing with OCR support
 │   ├── ocr.py               # OCR via pytesseract + vision LLM
+│   ├── export_import.py     # AES-256-GCM encrypted export/import core
 │   ├── extraction/           # Pluggable extraction package
 │   │   ├── __init__.py      # Unified interface (extract_items_async)
 │   │   ├── router.py        # Auto mode selection (scanned/text/XLSX)
@@ -231,6 +232,7 @@ quotehub/
 │   │   ├── auth.py          # Login/logout, user management
 │   │   ├── files.py         # Upload, processing, confirm, delete, export/import
 │   │   ├── ai.py            # AI server connection testing
+│   │   ├── export_import.py # Encrypted export/import endpoints
 │   │   └── admin.py         # Config, cleanup, search, brand suggestions
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
@@ -297,9 +299,12 @@ docker-compose up -d
 
 ## Backup & Restore
 
+> **Security:** Starting in v0.060.0, all exports and imports use AES-256-GCM encrypted `.quodb` packages. Plain ZIP/JSON imports are no longer supported.
+
 1. Go to **Settings** (top nav bar)
-2. **Export**: Click **Download Backup** to download a ZIP file with all quotations and PDFs
-3. **Import**: Click **Choose File to Import** to upload a ZIP or JSON file to restore data
+2. **Set an export password** (one-time, master-only) — this password is used for all future exports. Store it safely; it cannot be recovered, only reset by a master user.
+3. **Export**: Click **Download Encrypted Backup** to download a `.quodb` file with all quotations and PDFs. You will be prompted for the export password.
+4. **Import**: Click **Choose .quodb File** and select a previously exported `.quodb` backup. Optionally check **Dry Run** to preview changes without applying them.
 
 ## Troubleshooting
 

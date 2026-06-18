@@ -36,6 +36,29 @@ async function loadVersion() {
     } catch (e) { /* keep default */ }
 }
 
+// ─── Queue State Restoration ─────────────────────────────────
+
+async function loadQueueState() {
+    try {
+        const resp = await fetch('/queue');
+        const data = await resp.json();
+        if (!data.files || data.files.length === 0) return;
+        uploadedFiles = data.files.map(f => ({
+            file_id: f.file_id,
+            filename: f.filename,
+            status: f.status === 'uploaded' ? 'pending' : f.status,
+            num_pages: f.num_pages || 0,
+            pages: Array.isArray(f.pages) ? f.pages.length : (f.num_pages || 0),
+            uploaded_by: f.uploaded_by || 'unknown',
+            progress: f.progress || '',
+        }));
+        renderFileList();
+        updateStepClickability();
+    } catch (e) {
+        /* queue restoration is best-effort */
+    }
+}
+
 // ─── Init & Boot ─────────────────────────────────────────────
 
 async function initApp() {
@@ -43,7 +66,8 @@ async function initApp() {
     try { await loadPopupDuration(); } catch (e) { /* offline / not auth */ }
     try { await loadVersion();       } catch (e) { /* offline / not auth */ }
     try { await loadExtractionModeBadge(); } catch (e) { /* ignore */ }
-    showSearch();
+    await loadQueueState();
+    showUpload();
     appInitialized = true;
 }
 

@@ -1,0 +1,848 @@
+"""
+backend/export_import.py — Secure export/import for QuoteHub.
+
+Provides:
+    - Password management (set, change, forgot recovery)
+    - AES-256-GCM encrypted package creation (export)
+    - Package decryption, validation, and MERGE import
+    - Streaming I/O for large packages (>5 GB)
+
+All operations are master-only. Endpoints in routes/files.py delegate here.
+"""
+
+import hashlib
+import json
+import logging
+import os
+import shutil
+import sqlite3
+import struct
+import tempfile
+import uuid
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import HTTPException
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+
+logger = logging.getLogger(__name__)
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+#
+# Paths are NOT defined here — they are imported lazily at function call time
+# from their canonical sources (backend.auth.DATA_DIR, backend.main.ARCHIVE_DIR)
+# so the test framework can patch them via the standard conftest.py mocks.
+
+# Crypto
+AES_KEY_SIZE = 32                     # AES-256
+GCM_NONCE_SIZE = 16                    # 128-bit nonce
+GCM_TAG_SIZE = 16                     # 128-bit auth tag
+SALT_SIZE = 16                        # PBKDF2 salt
+KEY_VERSION = 1                       # Current key derivation scheme
+PBKDF2_ITERATIONS = 600_000           # OWASP 2023 recommendation
+CHUNK_SIZE = 64 * 1024 * 1024         # 64 MB streaming chunks
+
+# Package binary header: salt(16) + nonce(16) + keyVersion(1) + iterations(8)
+HEADER_FORMAT = struct.Struct(f'<{SALT_SIZE}s{GCM_NONCE_SIZE}sBQ')
+HEADER_SIZE = HEADER_FORMAT.size       # 41 bytes
+
+
+# ─── Password validation ─────────────────────────────────────────────────────
+
+_COMMON_PATTERNS = ['password', '1234', 'admin', 'export', 'quodb', 'quote', 'abc123', 'qwerty', 'letmein']
+
+
+def validate_export_password(password: str) -> list[str]:
+    """Validate export password strength. Returns list of error messages (empty = valid)."""
+    errors = []
+    if len(password) < 12:
+        errors.append("Password must be at least 12 characters long")
+    if not any(c.isupper() for c in password):
+        errors.append("Password must contain at least one uppercase letter")
+    if not any(c.islower() for c in password):
+        errors.append("Password must contain at least one lowercase letter")
+    if not any(c.isdigit() for c in password):
+        errors.append("Password must contain at least one digit")
+    if not any(not c.isalnum() for c in password):
+        errors.append("Password must contain at least one special character")
+    lower = password.lower()
+    for pattern in _COMMON_PATTERNS:
+        if pattern in lower:
+            errors.append("Password contains a common pattern and is too guessable")
+            break
+    return errors
+
+
+# ─── Password management ─────────────────────────────────────────────────────
+
+def export_password_exists() -> bool:
+    """Return True if an export password has been set."""
+    from .auth import DATA_DIR
+    return (DATA_DIR / "export_password.hash").exists()
+
+
+def _read_password_hash() -> str | None:
+    """Read the stored bcrypt hash, or None if not set."""
+    from .auth import DATA_DIR
+    path = DATA_DIR / "export_password.hash"
+    if not path.exists():
+        return None
+    return path.read_text().strip()
+
+
+def _write_password_hash(password: str):
+    """Hash password with bcrypt and write to disk."""
+    from .auth import DATA_DIR, hash_password
+    path = DATA_DIR / "export_password.hash"
+    hashed = hash_password(password)
+    path.write_text(hashed)
+    os.chmod(path, 0o600)
+
+
+def verify_export_password(password: str) -> bool:
+    """Verify password against stored bcrypt hash. Returns False if no hash file."""
+    stored = _read_password_hash()
+    if stored is None:
+        return False
+    from .auth import verify_password as bcrypt_verify
+    return bcrypt_verify(password, stored)
+
+
+def set_export_password(new_password: str, current_password: str | None = None, login_password: str | None = None) -> dict:
+    """Set, change, or reset the export password.
+
+    Args:
+        new_password: The new export password.
+        current_password: Required for normal change (verify old password).
+        login_password: Required for forgot recovery (verify master login).
+
+    Returns:
+        dict with status and warning.
+
+    Raises:
+        HTTPException on validation failure or wrong credentials.
+    """
+    # Validate new password strength
+    errors = validate_export_password(new_password)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    from .auth import DATA_DIR
+    hash_exists = (DATA_DIR / "export_password.hash").exists()
+
+    if not hash_exists:
+        # First-time setup — no current password needed
+        _write_password_hash(new_password)
+        logger.info("Export password set", extra={'category': 'ADMIN'})
+        return {"status": "set"}
+
+    if current_password:
+        # Normal change — verify old password
+        if not verify_export_password(current_password):
+            raise HTTPException(status_code=401, detail="Current export password is incorrect")
+        if current_password == new_password:
+            raise HTTPException(status_code=422, detail="New password must differ from current password")
+        _write_password_hash(new_password)
+        logger.info("Export password changed", extra={'category': 'ADMIN'})
+        return {"status": "changed"}
+
+    if login_password:
+        # Forgot recovery — verify master login password
+        from .auth import verify_password as verify_login, get_master_user
+        master = get_master_user()
+        if master is None:
+            raise HTTPException(status_code=500, detail="No master user found")
+        if not verify_login(login_password, master["password_hash"]):
+            raise HTTPException(status_code=401, detail="Login password is incorrect")
+        _write_password_hash(new_password)
+        logger.info("Export password reset via login recovery", extra={'category': 'ADMIN'})
+        return {
+            "status": "reset",
+            "warning": "Export password has been reset. Existing backup files (.quodb) encrypted "
+                       "with the previous password are permanently unrecoverable unless you remember "
+                       "the previous password."
+        }
+
+    raise HTTPException(status_code=422, detail="Provide current_password or login_password")
+
+
+# ─── Crypto helpers ──────────────────────────────────────────────────────────
+
+def _derive_key(password: str, salt: bytes, iterations: int = PBKDF2_ITERATIONS) -> bytes:
+    """Derive an AES-256 key from a password using PBKDF2-HMAC-SHA256."""
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=AES_KEY_SIZE, salt=salt, iterations=iterations)
+    return kdf.derive(password.encode("utf-8"))
+
+
+def _file_sha256(path: Path) -> str:
+    """Streaming SHA-256 of a file. Handles large files without loading into memory."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(CHUNK_SIZE):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _copy_with_sha256(src: Path, dst: Path) -> str:
+    """Copy a file with streaming SHA-256 hashing. Returns hex digest."""
+    h = hashlib.sha256()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with open(src, "rb") as s, open(dst, "wb") as d:
+        while chunk := s.read(CHUNK_SIZE):
+            h.update(chunk)
+            d.write(chunk)
+    return h.hexdigest()
+
+
+def encrypt_package(zip_path: Path, output_path: Path, password: str) -> dict:
+    """Encrypt a ZIP64 file with AES-256-GCM. Streaming, handles any file size.
+
+    Output format:
+        [41-byte header: salt(16) + nonce(16) + keyVersion(1) + iterations(8)]
+        [ciphertext (variable)]
+        [16-byte GCM authentication tag]
+
+    Returns encryption metadata dict.
+    """
+    salt = os.urandom(SALT_SIZE)
+    nonce = os.urandom(GCM_NONCE_SIZE)
+    key = _derive_key(password, salt, PBKDF2_ITERATIONS)
+
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce))
+    encryptor = cipher.encryptor()
+
+    zip_size = os.path.getsize(zip_path)
+    with open(output_path, "wb") as out:
+        out.write(HEADER_FORMAT.pack(salt, nonce, KEY_VERSION, PBKDF2_ITERATIONS))
+        with open(zip_path, "rb") as f:
+            while chunk := f.read(CHUNK_SIZE):
+                out.write(encryptor.update(chunk))
+        encryptor.finalize()
+        out.write(encryptor.tag)  # GCM auth tag (16 bytes)
+
+    return {
+        "algorithm": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "kdfIterations": PBKDF2_ITERATIONS,
+        "salt": salt.hex(),
+        "nonce": nonce.hex(),
+        "keyVersion": KEY_VERSION,
+    }
+
+
+def decrypt_package(package_path: Path, output_path: Path, password: str) -> dict:
+    """Decrypt a .quodb file. Streaming, handles any file size.
+
+    Reads the 41-byte header, then streams the ciphertext through AES-256-GCM.
+    The 16-byte auth tag is read from the end of the file and verified during finalize().
+
+    Returns encryption metadata from the header.
+
+    Raises:
+        HTTPException 401 if auth tag verification fails (wrong password or corruption).
+    """
+    file_size = os.path.getsize(package_path)
+    ciphertext_size = file_size - HEADER_SIZE - GCM_TAG_SIZE
+    if ciphertext_size <= 0:
+        raise HTTPException(status_code=400, detail="Invalid or corrupted package file")
+
+    with open(package_path, "rb") as f:
+        header_data = f.read(HEADER_SIZE)
+        salt, nonce, key_version, iterations = HEADER_FORMAT.unpack(header_data)
+
+        # Read GCM auth tag from end of file
+        f.seek(-GCM_TAG_SIZE, os.SEEK_END)
+        tag = f.read(GCM_TAG_SIZE)
+
+        # Derive key and decrypt
+        key = _derive_key(password, salt, iterations)
+        cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
+        decryptor = cipher.decryptor()
+
+        f.seek(HEADER_SIZE)
+        with open(output_path, "wb") as out:
+            remaining = ciphertext_size
+            while remaining > 0:
+                chunk_size = min(CHUNK_SIZE, remaining)
+                chunk = f.read(chunk_size)
+                remaining -= len(chunk)
+                out.write(decryptor.update(chunk))
+            try:
+                decryptor.finalize()  # verifies GCM auth tag
+            except Exception:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Wrong export password or corrupted package (authentication failed)"
+                )
+
+    return {
+        "algorithm": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "kdfIterations": iterations,
+        "salt": salt.hex(),
+        "nonce": nonce.hex(),
+        "keyVersion": key_version,
+    }
+
+
+# ─── Record hash (deterministic dedup key) ───────────────────────────────────
+
+def record_hash(record: dict) -> str:
+    """Compute a deterministic SHA-256 hash from stable business fields.
+
+    The hash covers supplier, quotation_date, document_type, and a
+    canonical JSON serialization of items (sorted keys, no whitespace).
+    Two records with identical business data produce the same hash.
+    """
+    items = record.get("items") or record.get("items") or []
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except (json.JSONDecodeError, TypeError):
+            items = []
+    if not isinstance(items, list):
+        items = []
+
+    canonical_items = json.dumps(items, sort_keys=True, separators=(",", ":"))
+    hash_input = "|".join([
+        str(record.get("supplier", "") or ""),
+        str(record.get("quotation_date", "") or ""),
+        str(record.get("document_type", "") or ""),
+        canonical_items,
+    ])
+    return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+
+
+# ─── Registry helpers ────────────────────────────────────────────────────────
+
+from .db import get_db, get_machine_id, DB_PATH
+
+
+def _create_registry_entry(export_id: str, system_id: str) -> int:
+    """Create a STARTED registry entry. Returns the sequence number."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM export_registry WHERE system_id = ?",
+            (system_id,)
+        ).fetchone()
+        seq = row[0]
+        db.execute(
+            "INSERT INTO export_registry (export_id, system_id, sequence_number, status) VALUES (?, ?, ?, 'STARTED')",
+            (export_id, system_id, seq)
+        )
+    return seq
+
+
+def _fail_export(export_id: str, error_detail: str):
+    """Mark an export attempt as FAILED."""
+    with get_db() as db:
+        db.execute(
+            "UPDATE export_registry SET status='FAILED', error_detail=?, completed_at=datetime('now') WHERE export_id=?",
+            (error_detail, export_id)
+        )
+
+
+def _succeed_export(export_id: str, package_path: str, record_count: int, file_count: int, package_size: int):
+    """Mark an export attempt as SUCCESS."""
+    with get_db() as db:
+        db.execute(
+            """UPDATE export_registry SET status='SUCCESS', package_path=?, record_count=?,
+               file_count=?, package_size_bytes=?, completed_at=datetime('now') WHERE export_id=?""",
+            (package_path, record_count, file_count, package_size, export_id)
+        )
+
+
+def _get_latest_success_sequence(system_id: str) -> int | None:
+    """Get the highest sequenceNumber among SUCCESS records for this system_id."""
+    with get_db(readonly=True) as db:
+        row = db.execute(
+            "SELECT MAX(sequence_number) FROM export_registry WHERE system_id=? AND status='SUCCESS'",
+            (system_id,)
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+
+# ─── Export workflow ─────────────────────────────────────────────────────────
+
+def run_export(password: str) -> dict:
+    """Execute the full export workflow.
+
+    1. Verify export password
+    2. PRAGMA integrity_check
+    3. Read all records, verify files exist
+    4. Snapshot DB via backup() API
+    5. Copy files with streaming SHA-256
+    6. Build manifest + validation report
+    7. Build ZIP64 archive
+    8. AES-256-GCM encrypt
+
+    Returns report dict with exportId, packagePath, and summary.
+    """
+    from .main import APP_VERSION, ARCHIVE_DIR
+
+    # ── 1. Password check ──
+    if not export_password_exists():
+        raise HTTPException(status_code=400, detail="Export password not set. Set one in Settings first.")
+    if not verify_export_password(password):
+        raise HTTPException(status_code=401, detail="Wrong export password")
+
+    # ── 2. Generate identifiers ──
+    export_id = str(uuid.uuid4())
+    system_id = get_machine_id()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    seq = _create_registry_entry(export_id, system_id)
+
+    # ── 3. Integrity check ──
+    with get_db(readonly=True) as db:
+        rows = db.execute("PRAGMA integrity_check").fetchall()
+        errors = [str(r[0]) for r in rows if r[0] != "ok"]
+        if errors:
+            _fail_export(export_id, "integrity_check failed: " + "; ".join(errors))
+            raise HTTPException(status_code=500, detail="Database integrity check failed")
+
+    # ── 4. Read records ──
+    with get_db(readonly=True) as db:
+        records = [dict(r) for r in db.execute("SELECT * FROM quotations ORDER BY id").fetchall()]
+
+    # ── 5. Verify files ──
+    missing_files = []
+    file_entries = []
+    for r in records:
+        fn = r.get("filename", "")
+        if not fn:
+            continue
+        fpath = ARCHIVE_DIR / fn
+        if not fpath.exists():
+            missing_files.append(fn)
+        else:
+            file_entries.append({"filename": fn, "path": fpath})
+
+    if missing_files:
+        _fail_export(export_id, "Missing required files: " + ", ".join(missing_files))
+        raise HTTPException(status_code=500, detail="Missing required files: " + ", ".join(missing_files))
+
+    # ── 6. Orphan check (WARNING only) ──
+    archived_files = set(f.name for f in ARCHIVE_DIR.iterdir() if f.is_file())
+    referenced_files = set(r["filename"] for r in records if r.get("filename"))
+    orphan_files = sorted(archived_files - referenced_files)
+
+    # ── 7. Build workspace ──
+    workspace = Path(tempfile.mkdtemp(prefix=f"quodb_export_{export_id}_"))
+    try:
+        # ── 7a. Snapshot DB ──
+        db_backup = workspace / "db" / "app-backup.db"
+        db_backup.parent.mkdir(parents=True)
+        with get_db(readonly=True) as src:
+            dst_conn = sqlite3.connect(str(db_backup))
+            with dst_conn:
+                src.backup(dst_conn)
+            dst_conn.close()
+        db_checksum = _file_sha256(db_backup)
+
+        # ── 7b. Copy and hash files ──
+        files_meta = []
+        for fe in file_entries:
+            rel = "archive/" + fe["filename"]
+            dst = workspace / "files" / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            sha = _copy_with_sha256(fe["path"], dst)
+            files_meta.append({
+                "path": "files/" + rel,
+                "size": dst.stat().st_size,
+                "sha256": sha,
+                "targetPath": rel,
+            })
+
+        # ── 7c. Checksums file (internal diagnostics) ──
+        checksums_dir = workspace / "checksums"
+        checksums_dir.mkdir(parents=True)
+        sha_lines = [f"{db_checksum}  db/app-backup.db"]
+        for fm in files_meta:
+            sha_lines.append(f"{fm['sha256']}  {fm['path']}")
+        (checksums_dir / "sha256sums.txt").write_text("\n".join(sha_lines) + "\n")
+
+        # ── 7d. Encryption metadata (for reference — binary header is source of truth) ──
+        encryption_meta = {
+            "algorithm": "AES-256-GCM",
+            "kdf": "PBKDF2-HMAC-SHA256",
+            "kdfIterations": PBKDF2_ITERATIONS,
+            "keyVersion": KEY_VERSION,
+        }
+
+        # ── 7e. Manifest ──
+        manifest = {
+            "formatVersion": "1",
+            "exportId": export_id,
+            "systemId": system_id,
+            "sequenceNumber": seq,
+            "exportedAtUtc": timestamp,
+            "appVersion": APP_VERSION,
+            "schemaVersion": 0,
+            "exportStatus": "SUCCESS",
+            "dbChecksum": db_checksum,
+            "encryption": encryption_meta,
+            "files": files_meta,
+            "recordCount": len(records),
+            "fileCount": len(files_meta),
+        }
+        (workspace / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+        # ── 7f. Validation report ──
+        report = {
+            "operation": "export",
+            "exportId": export_id,
+            "status": "SUCCESS",
+            "severity": "INFO",
+            "systemId": system_id,
+            "summary": {
+                "total_records": len(records),
+                "total_files": len(files_meta),
+                "errors": [],
+                "warnings": [f"Orphan file on disk: {o}" for o in orphan_files],
+            },
+            "detail": {
+                "integrity_check": {"passed": True, "errors": []},
+                "missing_files": [],
+                "orphan_files": orphan_files,
+            },
+            "timestamps": {"started_at": timestamp, "completed_at": timestamp},
+        }
+        (workspace / "validation-report.json").write_text(json.dumps(report, indent=2))
+
+        # ── 8. Build ZIP64 archive ──
+        zip_path = Path(tempfile.mkstemp(suffix=".zip")[1])
+        try:
+            with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+                for f in sorted(workspace.rglob("*")):
+                    if f.is_file():
+                        arcname = str(f.relative_to(workspace))
+                        zf.write(str(f), arcname)
+
+            # ── 9. Encrypt ──
+            package_path = Path(tempfile.mkstemp(suffix=".quodb")[1])
+            encrypt_package(zip_path, package_path, password)
+            package_size = package_path.stat().st_size
+
+            # ── 10. Registry SUCCESS ──
+            _succeed_export(export_id, str(package_path), len(records), len(files_meta), package_size)
+
+            logger.info("Export completed", extra={
+                'category': 'ADMIN',
+                'export_id': export_id,
+                'records': len(records),
+                'files': len(files_meta),
+                'package_bytes': package_size,
+            })
+
+            return {
+                "exportId": export_id,
+                "sequenceNumber": seq,
+                "status": "SUCCESS",
+                "recordCount": len(records),
+                "fileCount": len(files_meta),
+                "packageSizeBytes": package_size,
+                "packagePath": str(package_path),
+                "warnings": [f"Orphan file on disk: {o}" for o in orphan_files] if orphan_files else [],
+            }
+
+        finally:
+            zip_path.unlink(missing_ok=True)
+
+    except HTTPException:
+        _fail_export(export_id, "Export failed")
+        shutil.rmtree(workspace, ignore_errors=True)
+        raise
+    except Exception as e:
+        _fail_export(export_id, str(e))
+        shutil.rmtree(workspace, ignore_errors=True)
+        logger.exception("Export failed", extra={'category': 'ADMIN', 'export_id': export_id})
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+# ─── Import workflow ─────────────────────────────────────────────────────────
+
+def run_import(package: Path, password: str, *, dry_run: bool = False, force_system_id: bool = False) -> dict:
+    """Execute the import workflow.
+
+    Phase 1: Verify incoming package (decrypt, check checksums, systemId, sequence)
+    Phase 2: Self-check live system (integrity_check, file refs)
+    Phase 3: Compare incoming vs live (record hash, file SHA-256)
+    Phase 4: Apply or dry-run report
+
+    Args:
+        package: Path to the .quodb file.
+        password: Export password for decryption.
+        dry_run: If True, only analyze and report — no changes applied.
+        force_system_id: If True, proceed even if systemId doesn't match.
+
+    Returns report dict with all counts and warnings.
+    """
+    from .main import ARCHIVE_DIR
+
+    quarantine = Path(tempfile.mkdtemp(prefix="quodb_import_"))
+    try:
+        # ── Phase 1: Verify incoming package ──
+
+        # 1a. Decrypt
+        zip_path = quarantine / "package.zip"
+        decrypt_package(package, zip_path, password)
+
+        # 1b. Extract ZIP
+        extract_dir = quarantine / "extracted"
+        extract_dir.mkdir()
+        with zipfile.ZipFile(str(zip_path), "r") as zf:
+            zf.extractall(str(extract_dir))
+
+        # 1c. Read manifest
+        manifest_path = extract_dir / "manifest.json"
+        if not manifest_path.exists():
+            raise HTTPException(status_code=400, detail="Missing manifest.json in package")
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        import_id = str(uuid.uuid4())
+        system_id = get_machine_id()
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # 1d. Verify checksums
+        checksum_errors = []
+        for fm in manifest.get("files", []):
+            fpath = extract_dir / fm["path"]
+            if not fpath.exists():
+                checksum_errors.append(f"Missing file in package: {fm['path']}")
+                continue
+            actual = _file_sha256(fpath)
+            if actual != fm["sha256"]:
+                checksum_errors.append(f"Checksum mismatch: {fm['path']}")
+        # Check DB snapshot checksum
+        db_backup_path = extract_dir / "db" / "app-backup.db"
+        if db_backup_path.exists():
+            actual_db = _file_sha256(db_backup_path)
+            if actual_db != manifest.get("dbChecksum", ""):
+                checksum_errors.append("Database snapshot checksum mismatch")
+
+        if checksum_errors:
+            return {
+                "operation": "import",
+                "importId": import_id,
+                "status": "FAILED",
+                "severity": "FATAL",
+                "detail": "Package integrity check failed: " + "; ".join(checksum_errors),
+            }
+
+        # 1e. Check systemId
+        manifest_system_id = manifest.get("systemId", "")
+        system_id_match = manifest_system_id == system_id
+        if not system_id_match and not force_system_id:
+            return {
+                "operation": "import",
+                "importId": import_id,
+                "status": "FAILED",
+                "severity": "FATAL",
+                "detail": f"System ID mismatch. Package was exported from '{manifest_system_id}', "
+                         f"but this machine is '{system_id}'. Use force_system_id=true to override.",
+            }
+
+        # 1f. Check sequence number
+        latest_seq = _get_latest_success_sequence(manifest_system_id)
+        incoming_seq = manifest.get("sequenceNumber", 0)
+        seq_warning = None
+        if latest_seq is not None and incoming_seq < latest_seq:
+            seq_warning = (
+                f"This export (sequence {incoming_seq}) is older than the latest successful export "
+                f"(sequence {latest_seq}) for system '{manifest_system_id}'."
+            )
+
+        # ── Phase 2: Self-check live system ──
+
+        # 2a. integrity_check
+        live_issues = []
+        with get_db(readonly=True) as db:
+            rows = db.execute("PRAGMA integrity_check").fetchall()
+            integrity_errors = [str(r[0]) for r in rows if r[0] != "ok"]
+            if integrity_errors:
+                live_issues.append("Database integrity check failed: " + "; ".join(integrity_errors))
+
+        # 2b. Check live file refs
+        with get_db(readonly=True) as db:
+            live_records = [dict(r) for r in db.execute("SELECT * FROM quotations ORDER BY id").fetchall()]
+        live_file_refs = set()
+        for r in live_records:
+            fn = r.get("filename", "")
+            if fn:
+                live_file_refs.add(fn)
+                if not (ARCHIVE_DIR / fn).exists():
+                    live_issues.append(f"Live DB references file but it's missing from archive: {fn}")
+
+        if live_issues:
+            if dry_run:
+                # Report but don't block dry-run
+                pass
+            else:
+                return {
+                    "operation": "import",
+                    "importId": import_id,
+                    "status": "FAILED",
+                    "severity": "FATAL",
+                    "detail": "Current system has issues: " + "; ".join(live_issues),
+                }
+
+        # ── Phase 3: Compare ──
+
+        # 3a. Compute hashes for live records
+        live_hashes = {record_hash(r): r for r in live_records}
+
+        # 3b. Compute hashes for incoming records (from manifest — we need to read from DB snapshot)
+        incoming_records = []
+        if db_backup_path.exists():
+            backup_conn = sqlite3.connect(str(db_backup_path))
+            backup_conn.row_factory = sqlite3.Row
+            try:
+                incoming_records = [dict(r) for r in backup_conn.execute("SELECT * FROM quotations ORDER BY id").fetchall()]
+            finally:
+                backup_conn.close()
+
+        # 3c. Compare records
+        records_imported = 0
+        records_skipped = 0
+        staged_records = []
+        for r in incoming_records:
+            rh = record_hash(r)
+            if rh in live_hashes:
+                records_skipped += 1
+            else:
+                records_imported += 1
+                staged_records.append(r)
+
+        # 3d. Compare files
+        files_imported = 0
+        files_skipped = 0
+        file_conflicts = []
+        incoming_files_map = {}
+        for fm in manifest.get("files", []):
+            fpath = extract_dir / fm["path"]
+            if fpath.exists():
+                incoming_files_map[fm["targetPath"]] = {"path": fpath, "sha256": fm["sha256"], "size": fm["size"]}
+
+        staged_files = []
+        for target_path, finfo in incoming_files_map.items():
+            target_full = ARCHIVE_DIR / Path(target_path).name  # just the filename part
+            if not target_full.exists():
+                files_imported += 1
+                staged_files.append((finfo["path"], target_full))
+            else:
+                existing_sha = _file_sha256(target_full)
+                if existing_sha == finfo["sha256"]:
+                    files_skipped += 1
+                else:
+                    file_conflicts.append({
+                        "path": target_path,
+                        "existingSha256": existing_sha,
+                        "incomingSha256": finfo["sha256"],
+                    })
+
+        # ── Build report ──
+        incoming_count = len(incoming_records)
+        report = {
+            "operation": "import",
+            "importId": import_id,
+            "status": "SUCCESS" if not dry_run else "PREFLIGHT",
+            "severity": "INFO",
+            "systemId": system_id,
+            "manifestSystemId": manifest_system_id,
+            "systemIdMatch": system_id_match,
+            "sequenceNumber": incoming_seq,
+            "latestSequence": latest_seq,
+            "summary": {
+                "total_incoming_records": incoming_count,
+                "total_incoming_files": len(incoming_files_map),
+                "records_imported": records_imported,
+                "records_skipped_duplicate": records_skipped,
+                "files_imported": files_imported,
+                "files_skipped_duplicate": files_skipped,
+                "file_conflicts": len(file_conflicts),
+                "errors": [],
+                "warnings": [],
+            },
+            "detail": {
+                "integrity_check": {"passed": not integrity_errors, "errors": integrity_errors},
+                "checksum_errors": checksum_errors,
+                "file_conflicts": file_conflicts,
+                "live_issues": live_issues,
+            },
+            "timestamps": {"started_at": timestamp, "completed_at": timestamp},
+        }
+
+        if seq_warning:
+            report["summary"]["warnings"].append(seq_warning)
+            report["detail"]["older_export_warning"] = seq_warning
+        if not system_id_match:
+            report["summary"]["warnings"].append("System ID mismatch — import forced by user")
+        if orphan_files := manifest.get("orphan_files", []):
+            report["summary"]["warnings"].append(f"Source export had orphan files: {orphan_files}")
+
+        # ── Phase 4: Apply (if not dry_run) ──
+        if not dry_run and records_imported > 0:
+            try:
+                # Copy files to archive first (if file copy fails, no DB changes attempted)
+                for src, dst in staged_files:
+                    shutil.copy2(str(src), str(dst))
+
+                # Insert records in transaction
+                with get_db() as db:
+                    for r in staged_records:
+                        items_str = r.get("items")
+                        if isinstance(items_str, (dict, list)):
+                            items_str = json.dumps(items_str)
+                        db.execute(
+                            """INSERT INTO quotations (filename, supplier, quotation_date, currency, items, document_type, extraction_method)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                r.get("filename", ""),
+                                r.get("supplier", ""),
+                                r.get("quotation_date", ""),
+                                r.get("currency", ""),
+                                items_str or "[]",
+                                r.get("document_type", "unknown"),
+                                r.get("extraction_method", "local"),
+                            )
+                        )
+                    # Auto-committed on context exit
+
+                logger.info("Import applied", extra={
+                    'category': 'ADMIN',
+                    'importId': import_id,
+                    'records': records_imported,
+                    'files': files_imported,
+                })
+
+                report["status"] = "SUCCESS"
+
+            except Exception as e:
+                # Rollback is automatic (get_db() rolls back on exception)
+                # Clean up any files we copied before the error
+                for _, dst in staged_files:
+                    try:
+                        dst.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                logger.exception("Import apply failed", extra={'category': 'ADMIN', 'importId': import_id})
+                report["status"] = "FAILED"
+                report["severity"] = "FATAL"
+                report["summary"]["errors"].append(str(e))
+
+        elif not dry_run and records_imported == 0:
+            report["summary"]["warnings"].append("No new records to import — all are duplicates")
+
+        return report
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Import failed", extra={'category': 'ADMIN'})
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+    finally:
+        shutil.rmtree(quarantine, ignore_errors=True)

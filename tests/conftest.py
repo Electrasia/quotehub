@@ -200,3 +200,41 @@ def seed_quotations(seeded_db):
                  q["extraction_method"]),
             )
     return seeded_db
+
+
+# ─── Export/import test constants ─────────────────────────
+
+TEST_EXPORT_PASSWORD = "Str0ng!P@ss42"
+
+
+@pytest.fixture
+def export_password_set(master_client, monkeypatch):
+    """Set export password to TEST_EXPORT_PASSWORD with low KDF iterations.
+
+    Patches PBKDF2_ITERATIONS to 1 so crypto operations in subsequent
+    test calls are fast. Returns the authenticated TestClient.
+    """
+    monkeypatch.setattr("backend.export_import.PBKDF2_ITERATIONS", 1)
+    resp = master_client.post("/export-password", json={
+        "new_password": TEST_EXPORT_PASSWORD,
+    })
+    assert resp.status_code == 200, f"set export password failed: {resp.json()}"
+    return master_client
+
+
+@pytest.fixture
+def with_archive_files(seeded_db):
+    """Create archive files matching seed_quotations filenames in ARCHIVE_DIR.
+
+    Creates 3 files that match the filenames used by the seed_quotations
+    fixture (acme_quote.pdf, beta_quote.xlsx, gamma_estimate.pdf) plus an
+    extra orphan file for export tests.
+    """
+    from backend.main import ARCHIVE_DIR
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    filenames = ["acme_quote.pdf", "beta_quote.xlsx", "gamma_estimate.pdf"]
+    for name in filenames:
+        (ARCHIVE_DIR / name).write_text(f"fake content for {name}")
+    # Extra orphan file (not referenced by any record) for export warnings
+    (ARCHIVE_DIR / "orphan_old.pdf").write_text("old backup content")
+    return seeded_db
