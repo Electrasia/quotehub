@@ -52,7 +52,7 @@ class ExportRunRequest(BaseModel):
 # ─── Export ───────────────────────────────────────────────
 
 
-@router.post("/export/run", dependencies=[Depends(require_role("admin", "master"))])
+@router.post("/export/run", dependencies=[Depends(require_role("master"))])
 async def run_export_endpoint(req: ExportRunRequest, request: Request):
     """Run encrypted export and download the .quodb package.
 
@@ -96,7 +96,7 @@ async def run_export_endpoint(req: ExportRunRequest, request: Request):
 # ─── Import ───────────────────────────────────────────────
 
 
-@router.post("/import/run", dependencies=[Depends(require_role("admin", "master"))])
+@router.post("/import/run", dependencies=[Depends(require_role("master"))])
 async def run_import_endpoint(
     file: UploadFile = File(...),
     password: str = Form(...),

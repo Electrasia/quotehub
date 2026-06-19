@@ -111,7 +111,7 @@ QuoteHub has a 3-role authentication system (introduced in `0.030.0`). All acces
 A short summary:
 
 - **user** — read-only access. Can search and view PDFs. Cannot upload, edit, or change settings.
-- **admin** — day-to-day operations. Can upload, process, edit, delete, export backup, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify AI Settings, import backups, access System Cleanup, or manage users. Those are master-only.
+- **admin** — day-to-day operations. Can upload, process, edit, delete, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify AI Settings, export/import backups, access System Cleanup, or manage users. Those are master-only.
 - **master** — full access, including all settings, import, cleanup, and user management.
 
 ### First-Run Master Password

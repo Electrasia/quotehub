@@ -35,11 +35,10 @@ class TestAuthGates:
         resp = user_client.post("/export/run", json={"password": "x"})
         assert resp.status_code == 403
 
-    def test_export_allows_admin(self, admin_client, fast_crypto):
-        """Admin role on POST /export/run passes auth gate (may fail later due to DB)."""
-        resp = admin_client.post("/export/run", json={"password": TEST_PASSWORD})
-        # Response is not 401/403 — the auth gate passed
-        assert resp.status_code not in (401, 403)
+    def test_export_denied_for_admin(self, admin_client):
+        """Admin role on POST /export/run returns 403 (master-only)."""
+        resp = admin_client.post("/export/run", json={"password": "x"})
+        assert resp.status_code == 403
 
     # ── POST /import/run (admin+) ──
 
