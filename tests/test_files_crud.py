@@ -39,7 +39,7 @@ def master_with_quotations(seed_quotations):
     """Authenticated as 'master01' on a DB with 3 seeded quotations."""
     resp = seed_quotations.post("/auth/login", json={
         "username": "master01",
-        "password": "masterpass",
+        "password": "Mast3r!Pass12",
         "remember_me": False,
     })
     assert resp.status_code == 200

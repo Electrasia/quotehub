@@ -19,7 +19,7 @@ def user_with_quotations(seed_quotations):
     """
     resp = seed_quotations.post("/auth/login", json={
         "username": "user",
-        "password": "userpass",
+        "password": "Us3r!Pass123",
         "remember_me": False,
     })
     assert resp.status_code == 200

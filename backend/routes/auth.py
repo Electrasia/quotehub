@@ -21,6 +21,7 @@ from ..auth import (
     hard_delete_user, list_users,
     read_init_password, acknowledge_init_password,
     clear_must_change_password, verify_password, record_login,
+    validate_user_password,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,13 @@ async def change_password(req: ChangePasswordRequest, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # Verify old password
+    if not verify_password(req.old_password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    # Validate new password strength
+    pw_errors = validate_user_password(req.new_password)
+    if pw_errors:
+        raise HTTPException(status_code=422, detail={"errors": pw_errors})
     update_user_password(user["id"], req.new_password)
     clear_must_change_password(user["id"])
     logger.info("Password changed", extra={
@@ -202,6 +210,9 @@ async def add_user(req: UserCreate):
     existing = get_user_by_username(req.username)
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
+    pw_errors = validate_user_password(req.password)
+    if pw_errors:
+        raise HTTPException(status_code=422, detail={"errors": pw_errors})
     user_id = create_user(req.username, req.password, req.role)
     logger.info("User created", extra={
         'category': 'AUTH',
@@ -213,15 +224,27 @@ async def add_user(req: UserCreate):
 
 @users_router.patch("/{user_id}", dependencies=[Depends(require_role("master"))])
 async def update_user(user_id: int, req: UserUpdate):
-    """Update user role."""
+    """Update user role, password (optional), and active status."""
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    update_user_role(user_id, req.role)
-    logger.info("User role updated", extra={
+    # Validate new password if provided
+    if req.new_password:
+        pw_errors = validate_user_password(req.new_password)
+        if pw_errors:
+            raise HTTPException(status_code=422, detail={"errors": pw_errors})
+        update_user_password(user_id, req.new_password)
+    # Update role (required field in model)
+    if req.role:
+        update_user_role(user_id, req.role)
+    # Update active status if provided
+    if req.active is not None:
+        from ..auth import set_user_active
+        set_user_active(user_id, req.active)
+    logger.info("User updated", extra={
         'category': 'AUTH',
         'target_user_id': user_id,
-        'new_role': req.role
+        'updated_fields': [k for k, v in {'role': req.role, 'password': req.new_password, 'active': req.active}.items() if v is not None and v != (False if k == 'active' else None)]
     })
     return {"status": "updated"}
 

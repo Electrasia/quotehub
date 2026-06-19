@@ -20,7 +20,10 @@
                 </div>
                 <div class="form-group">
                     <label for="loginPassword">Password</label>
-                    <input type="password" id="loginPassword" autocomplete="current-password" required>
+                    <div style="position:relative">
+                        <input type="password" id="loginPassword" autocomplete="current-password" required style="width:100%;padding-right:36px">
+                        <span class="password-toggle" onclick="togglePassword('loginPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                 </div>
                 <div id="loginError" class="login-error hidden"></div>
                 <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;font-size:13px;cursor:pointer">
@@ -44,11 +47,21 @@
                 </div>
                 <div class="form-group">
                     <label for="cpNew">New Password</label>
-                    <input type="password" id="cpNew" autocomplete="new-password" minlength="6" required>
+                    <div style="position:relative">
+                        <input type="password" id="cpNew" autocomplete="new-password" minlength="12" required style="width:100%;padding-right:36px" oninput="updateChangePassword()">
+                        <span class="password-toggle" onclick="togglePassword('cpNew', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
+                    <div id="cpStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                        <div id="cpStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                    </div>
+                    <div id="cpStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
                 </div>
                 <div class="form-group">
                     <label for="cpConfirm">Confirm New Password</label>
-                    <input type="password" id="cpConfirm" autocomplete="new-password" minlength="6" required>
+                    <div style="position:relative">
+                        <input type="password" id="cpConfirm" autocomplete="new-password" minlength="12" required style="width:100%;padding-right:36px" oninput="updateChangePassword()">
+                        <span class="password-toggle" onclick="togglePassword('cpConfirm', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                 </div>
                 <div id="changePasswordError" class="login-error hidden"></div>
                 <button type="submit" class="btn btn-primary login-btn" id="changePasswordBtn">Change Password</button>
@@ -691,7 +704,10 @@
                 <h4 style="margin-bottom:8px;font-size:14px">Add new user</h4>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                     <input type="text" id="newUsername" placeholder="Username" style="flex:1;min-width:140px;padding:8px;border:1px solid #ddd;border-radius:6px">
-                    <input type="password" id="newPassword" placeholder="Password (min 6 chars)" style="flex:1;min-width:160px;padding:8px;border:1px solid #ddd;border-radius:6px">
+                    <div style="position:relative;flex:1;min-width:160px">
+                        <input type="password" id="newPassword" placeholder="Password (min 12 chars)" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateNewUserPassword()">
+                        <span class="password-toggle" onclick="togglePassword('newPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                     <select id="newRole" style="padding:8px;border:1px solid #ddd;border-radius:6px">
                         <option value="user">user</option>
                         <option value="admin" selected>admin</option>
@@ -700,6 +716,10 @@
                     <button class="btn btn-success btn-sm" onclick="submitAddUser()">Create</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideAddUserForm()">Cancel</button>
                 </div>
+                <div id="newPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                    <div id="newPasswordStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                </div>
+                <div id="newPasswordStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
             </div>
 
             <!-- Edit User sub-form (hidden by default) -->
@@ -722,10 +742,17 @@
                         <option value="master">master</option>
                     </select>
                     <label style="font-size:13px;margin-left:8px">New Password (optional):</label>
-                    <input type="password" id="editPassword" placeholder="leave blank to keep" style="flex:1;min-width:160px;padding:8px;border:1px solid #ddd;border-radius:6px">
+                    <div style="position:relative;flex:1;min-width:160px">
+                        <input type="password" id="editPassword" placeholder="leave blank to keep" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateEditUserPassword()">
+                        <span class="password-toggle" onclick="togglePassword('editPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                     <button class="btn btn-success btn-sm" onclick="submitEditUser()">Save</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideEditUserForm()">Cancel</button>
                 </div>
+                <div id="editPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                    <div id="editPasswordStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                </div>
+                <div id="editPasswordStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
             </div>
 
             <!-- Hard Delete confirmation sub-form (hidden by default) -->

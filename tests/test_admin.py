@@ -15,7 +15,7 @@ import pytest
 def user_with_quotations(seed_quotations):
     """Authenticated as 'user' on a DB with 3 seeded quotations."""
     resp = seed_quotations.post("/auth/login", json={
-        "username": "user", "password": "userpass", "remember_me": False,
+        "username": "user", "password": "Us3r!Pass123", "remember_me": False,
     })
     assert resp.status_code == 200
     return seed_quotations
@@ -25,7 +25,7 @@ def user_with_quotations(seed_quotations):
 def master_with_quotations(seed_quotations):
     """Authenticated as 'master01' on a DB with 3 seeded quotations."""
     resp = seed_quotations.post("/auth/login", json={
-        "username": "master01", "password": "masterpass", "remember_me": False,
+        "username": "master01", "password": "Mast3r!Pass12", "remember_me": False,
     })
     assert resp.status_code == 200
     return seed_quotations

@@ -18,7 +18,7 @@ class TestLogin:
         """Login with correct credentials should succeed."""
         resp = seeded_db.post("/auth/login", json={
             "username": "master01",
-            "password": "masterpass",
+            "password": "Mast3r!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -37,7 +37,7 @@ class TestLogin:
         """Login with unknown username should fail."""
         resp = seeded_db.post("/auth/login", json={
             "username": "nobody",
-            "password": "irrelevant",
+            "password": "Irrelev4nt!Pass",
             "remember_me": False,
         })
         assert resp.status_code == 401
@@ -50,7 +50,7 @@ class TestLogin:
 
         resp = seeded_db.post("/auth/login", json={
             "username": "user",
-            "password": "userpass",
+            "password": "Us3r!Pass123",
             "remember_me": False,
         })
         assert resp.status_code == 403
@@ -60,7 +60,7 @@ class TestLogin:
         """Login with remember_me=true should succeed."""
         resp = seeded_db.post("/auth/login", json={
             "username": "user",
-            "password": "userpass",
+            "password": "Us3r!Pass123",
             "remember_me": True,
         })
         assert resp.status_code == 200
@@ -69,7 +69,7 @@ class TestLogin:
         """Login response should contain expected fields."""
         resp = seeded_db.post("/auth/login", json={
             "username": "admin",
-            "password": "adminpass",
+            "password": "Adm1n!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -91,7 +91,7 @@ class TestLogin:
         # Login as admin
         resp = seeded_db.post("/auth/login", json={
             "username": "admin",
-            "password": "adminpass",
+            "password": "Adm1n!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -99,7 +99,7 @@ class TestLogin:
         # Login as master (clears session, sets new one)
         resp = seeded_db.post("/auth/login", json={
             "username": "master01",
-            "password": "masterpass",
+            "password": "Mast3r!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -113,7 +113,7 @@ class TestLogin:
         # seeded_db creates users with must_change_password=False
         resp = seeded_db.post("/auth/login", json={
             "username": "user",
-            "password": "userpass",
+            "password": "Us3r!Pass123",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -157,7 +157,7 @@ class TestLoginRateLimiting:
         # Successful login (clears counter)
         resp = seeded_db.post("/auth/login", json={
             "username": "admin",
-            "password": "adminpass",
+            "password": "Adm1n!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -192,7 +192,7 @@ class TestLoginRateLimiting:
         # Correct password for disabled account → 403, counter NOT incremented
         resp = seeded_db.post("/auth/login", json={
             "username": "user",
-            "password": "userpass",
+            "password": "Us3r!Pass123",
             "remember_me": False,
         })
         assert resp.status_code == 403
@@ -200,7 +200,7 @@ class TestLoginRateLimiting:
         # Counter is still at 4 → admin login should succeed (not blocked)
         resp = seeded_db.post("/auth/login", json={
             "username": "admin",
-            "password": "adminpass",
+            "password": "Adm1n!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -266,8 +266,8 @@ class TestChangePassword:
     def test_change_password_returns_200(self, master_client):
         """Changing password with valid data should succeed."""
         resp = master_client.post("/auth/change-password", json={
-            "old_password": "masterpass",
-            "new_password": "newsecurepass",
+            "old_password": "Mast3r!Pass12",
+            "new_password": "S3cur3!Pass99",
         })
         assert resp.status_code == 200
         assert resp.json() == {"status": "password changed"}
@@ -276,36 +276,44 @@ class TestChangePassword:
         """Changing password without auth should return 401."""
         resp = app_client.post("/auth/change-password", json={
             "old_password": "x",
-            "new_password": "y",
+            "new_password": "V4lid!Pass123",
         })
         assert resp.status_code == 401
 
     def test_login_with_new_password(self, master_client):
         """After changing password, login with the new password should work."""
         master_client.post("/auth/change-password", json={
-            "old_password": "masterpass",
-            "new_password": "newpass",
+            "old_password": "Mast3r!Pass12",
+            "new_password": "N3w!Strong99",
         })
         master_client.post("/auth/logout")
 
         resp = master_client.post("/auth/login", json={
             "username": "master01",
-            "password": "newpass",
+            "password": "N3w!Strong99",
             "remember_me": False,
         })
         assert resp.status_code == 200
 
+    def test_change_password_weak_rejected(self, master_client):
+        """Changing to a weak password should return 422."""
+        resp = master_client.post("/auth/change-password", json={
+            "old_password": "Mast3r!Pass12",
+            "new_password": "short",
+        })
+        assert resp.status_code == 422
+
     def test_login_with_old_password_fails(self, master_client):
         """After changing password, login with the old password should fail."""
         master_client.post("/auth/change-password", json={
-            "old_password": "masterpass",
-            "new_password": "newpass",
+            "old_password": "Mast3r!Pass12",
+            "new_password": "N3w!Strong99",
         })
         master_client.post("/auth/logout")
 
         resp = master_client.post("/auth/login", json={
             "username": "master01",
-            "password": "masterpass",
+            "password": "Mast3r!Pass12",
             "remember_me": False,
         })
         assert resp.status_code == 401
@@ -315,12 +323,12 @@ class TestChangePassword:
         from backend.auth import create_user
 
         # Create a user with must_change_password=True
-        create_user("newbie", "initialpass", "user", must_change_password=True)
+        create_user("newbie", "Init!Strong99", "user", must_change_password=True)
 
         # Login — flag should be True
         resp = seeded_db.post("/auth/login", json={
             "username": "newbie",
-            "password": "initialpass",
+            "password": "Init!Strong99",
             "remember_me": False,
         })
         assert resp.status_code == 200
@@ -328,8 +336,8 @@ class TestChangePassword:
 
         # Change password
         seeded_db.post("/auth/change-password", json={
-            "old_password": "initialpass",
-            "new_password": "newpass",
+            "old_password": "Init!Strong99",
+            "new_password": "N3w!Strong99",
         })
 
         # GET /me should now show must_change_password=False
@@ -358,7 +366,7 @@ class TestUserCRUD:
         """POST /users with valid data should create a user."""
         resp = master_client.post("/users", json={
             "username": "newuser",
-            "password": "newpass",
+            "password": "N3w!Strong99",
             "role": "user",
         })
         assert resp.status_code == 200
@@ -367,11 +375,20 @@ class TestUserCRUD:
         assert body["role"] == "user"
         assert "id" in body
 
+    def test_create_weak_password_rejected(self, master_client):
+        """POST /users with a weak password should return 422."""
+        resp = master_client.post("/users", json={
+            "username": "weakpwuser",
+            "password": "short",
+            "role": "user",
+        })
+        assert resp.status_code == 422
+
     def test_create_duplicate_username(self, master_client):
         """POST /users with existing username should return 400."""
         resp = master_client.post("/users", json={
             "username": "admin",
-            "password": "irrelevant",
+            "password": "Irrelev4nt!Pass",
             "role": "user",
         })
         assert resp.status_code == 400
@@ -402,7 +419,7 @@ class TestUserCRUD:
         # Create a user to delete
         resp = master_client.post("/users", json={
             "username": "todelete",
-            "password": "pass",
+            "password": "T3st!Str0ng99",
             "role": "user",
         })
         user_id = resp.json()["id"]
@@ -425,7 +442,7 @@ class TestUserCRUD:
         """After creating a user, it should appear in the user list."""
         resp = master_client.post("/users", json={
             "username": "listcheck",
-            "password": "pass",
+            "password": "T3st!Str0ng99",
             "role": "admin",
         })
         assert resp.status_code == 200
@@ -461,7 +478,7 @@ class TestUserCRUDRoles:
         """Admin should get 403 when creating a user."""
         resp = admin_client.post("/users", json={
             "username": "shouldfail",
-            "password": "pass",
+            "password": "T3st!Str0ng99",
             "role": "user",
         })
         assert resp.status_code == 403

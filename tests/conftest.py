@@ -92,9 +92,9 @@ def seeded_db(app_client):
     """
     from backend.auth import create_user
 
-    create_user("master01", "masterpass", "master", must_change_password=False)
-    create_user("admin", "adminpass", "admin", must_change_password=False)
-    create_user("user", "userpass", "user", must_change_password=False)
+    create_user("master01", "Mast3r!Pass12", "master", must_change_password=False)
+    create_user("admin", "Adm1n!Pass12", "admin", must_change_password=False)
+    create_user("user", "Us3r!Pass123", "user", must_change_password=False)
     return app_client
 
 
@@ -103,7 +103,7 @@ def master_client(seeded_db):
     """TestClient authenticated as master01 (master role)."""
     resp = seeded_db.post("/auth/login", json={
         "username": "master01",
-        "password": "masterpass",
+        "password": "Mast3r!Pass12",
         "remember_me": False,
     })
     assert resp.status_code == 200, f"master login failed: {resp.json()}"
@@ -115,7 +115,7 @@ def admin_client(seeded_db):
     """TestClient authenticated as admin (admin role)."""
     resp = seeded_db.post("/auth/login", json={
         "username": "admin",
-        "password": "adminpass",
+        "password": "Adm1n!Pass12",
         "remember_me": False,
     })
     assert resp.status_code == 200, f"admin login failed: {resp.json()}"
@@ -127,7 +127,7 @@ def user_client(seeded_db):
     """TestClient authenticated as user (user role)."""
     resp = seeded_db.post("/auth/login", json={
         "username": "user",
-        "password": "userpass",
+        "password": "Us3r!Pass123",
         "remember_me": False,
     })
     assert resp.status_code == 200, f"user login failed: {resp.json()}"

@@ -229,7 +229,7 @@ class TestFullRoundTrip:
 
         # Login as master
         resp = seeded_db.post("/auth/login", json={
-            "username": "master01", "password": "masterpass", "remember_me": False,
+            "username": "master01", "password": "Mast3r!Pass12", "remember_me": False,
         })
         assert resp.status_code == 200
         client = seeded_db
