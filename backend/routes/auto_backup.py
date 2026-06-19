@@ -73,7 +73,7 @@ def _discover_backups() -> dict:
     return result
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(require_role("admin", "master"))])
 async def auto_backup_status():
     """Return auto-backup subsystem status."""
     last_date = _last_daily_backup_date()
@@ -103,7 +103,7 @@ async def auto_backup_status():
     }
 
 
-@router.get("/list")
+@router.get("/list", dependencies=[Depends(require_role("admin", "master"))])
 async def auto_backup_list():
     """Return all auto-backup files grouped by category."""
     return _discover_backups()
