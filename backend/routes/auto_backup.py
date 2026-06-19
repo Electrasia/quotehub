@@ -7,10 +7,8 @@ Provides:
     - POST /auto-backup/restore  — restore from a selected auto-backup
 """
 
-import json
 import logging
-import os
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request, Form
@@ -22,26 +20,13 @@ from ..auto_backup import (
     _get_state,
     _last_daily_backup_date,
     AUTO_BACKUP_ROOT,
-    retention_sweep,
 )
-from ..key_manager import get_internal_key, get_current_key_version
+from ..key_manager import get_internal_key
 from ..export_import import run_import
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auto-backup", tags=["auto-backup"])
-
-
-def _read_manifest_metadata(p: Path) -> dict | None:
-    """Read the exportType and exportedAtUtc from a decrypted manifest.
-
-    To avoid decrypting every file in the list endpoint, we return basic
-    file metadata (name, size, mtime) and let the frontend request the
-    manifest only for a selected file.
-    """
-    # For the list endpoint, just return file-level metadata.
-    # Full manifest is computed during the restore preflight.
-    return None
 
 
 def _discover_backups() -> dict:
