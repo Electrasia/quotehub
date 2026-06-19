@@ -144,6 +144,7 @@ async function submitAddUser() {
         hideAddUserForm();
         closeModal('usersModal');
         await loadUsersTable();
+        showBriefPopup('Saved');
     } catch (e) {
         showUsersError(e.message);
     }
@@ -177,6 +178,7 @@ async function submitEditUser() {
         hideEditUserForm();
         closeModal('usersModal');
         await loadUsersTable();
+        showBriefPopup('Saved');
     } catch (e) {
         showUsersError(e.message);
     }

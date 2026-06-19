@@ -214,6 +214,7 @@ async function doChangePassword() {
         });
         if (r.ok) {
             hideChangePassword();
+            showBriefPopup('Password changed');
             document.getElementById('cpOld').value = '';
             document.getElementById('cpNew').value = '';
             document.getElementById('cpConfirm').value = '';
