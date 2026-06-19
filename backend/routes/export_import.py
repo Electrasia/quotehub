@@ -2,13 +2,15 @@
 backend/routes/export_import.py — Encrypted export/import endpoints.
 
 Provides:
-    - Export password management (set, check, forgot-recovery)
     - Encrypted .quodb export download
     - Encrypted .quodb import with dry-run support
 
-All exports and imports are encrypted with AES-256-GCM and require a
-master-set export password. The password uses bcrypt and PBKDF2 for
-key derivation (600 000 iterations, OWASP 2023 recommendation).
+Exports use a per-file password supplied by the user at export time
+(not stored). The same password must be provided at import time.
+
+The password belongs to the FILE, not the system. There is no
+"forgot password" recovery. If the password is lost, the backup
+is permanently unrecoverable.
 
 Import supports:
     - Dry-run mode (analyze without applying)
@@ -24,16 +26,14 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from ..auth import require_role
+from ..auth import get_current_user, require_role
 from ..export_import import (
-    export_password_exists,
-    set_export_password,
     run_export,
     run_import,
 )
@@ -44,62 +44,34 @@ router = APIRouter(tags=["export-import"])
 # ─── Models ────────────────────────────────────────────────
 
 
-class ExportPasswordRequest(BaseModel):
-    """Set, change, or reset the export password."""
-    new_password: str
-    current_password: str | None = None
-    login_password: str | None = None
-
-
 class ExportRunRequest(BaseModel):
     """Trigger an encrypted export."""
     password: str
-
-
-# ─── Export Password Management ───────────────────────────
-
-
-@router.post("/export-password", dependencies=[Depends(require_role("master"))])
-async def set_export_password_endpoint(req: ExportPasswordRequest):
-    """Set, change, or reset the export password.
-
-    Three modes:
-    - No current_password or login_password → first-time setup
-    - current_password provided → normal change (verifies old password)
-    - login_password provided → forgot recovery (verifies master login)
-    """
-    return set_export_password(
-        new_password=req.new_password,
-        current_password=req.current_password,
-        login_password=req.login_password,
-    )
-
-
-@router.get("/export-password/status", dependencies=[Depends(require_role("admin", "master"))])
-async def export_password_status():
-    """Check whether an export password has been set."""
-    return {"password_set": export_password_exists()}
 
 
 # ─── Export ───────────────────────────────────────────────
 
 
 @router.post("/export/run", dependencies=[Depends(require_role("admin", "master"))])
-async def run_export_endpoint(req: ExportRunRequest):
+async def run_export_endpoint(req: ExportRunRequest, request: Request):
     """Run encrypted export and download the .quodb package.
 
+    The password is used once to encrypt the file and is NOT stored.
+    The user must remember it for later import.
+
     The export workflow:
-    1. Verifies the export password
-    2. Runs PRAGMA integrity_check on the database
-    3. Reads all records and verifies referenced files exist in archive
-    4. Reports orphan files on disk (warnings, not blocking)
-    5. Snapshots the DB via sqlite3.backup()
-    6. Copies files with streaming SHA-256
-    7. Builds a ZIP64 archive with manifest + checksums
-    8. Encrypts with AES-256-GCM
+    1. Runs PRAGMA integrity_check on the database
+    2. Reads all records and verifies referenced files exist in archive
+    3. Reports orphan files on disk (warnings, not blocking)
+    4. Snapshots the DB via sqlite3.backup()
+    5. Copies files with streaming SHA-256
+    6. Builds a ZIP64 archive with manifest + checksums
+    7. Encrypts with AES-256-GCM
+    8. Silent decrypt round-trip verifies the password
     9. Streams the .quodb file as a download
     """
-    result = run_export(req.password)
+    user = get_current_user(request)
+    result = run_export(req.password, user)
     package_path = Path(result["packagePath"])
     package_size = result["packageSizeBytes"]
 

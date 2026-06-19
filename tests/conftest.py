@@ -202,24 +202,16 @@ def seed_quotations(seeded_db):
     return seeded_db
 
 
-# ─── Export/import test constants ─────────────────────────
+# ─── Export/import test helpers ─────────────────────────
 
 TEST_EXPORT_PASSWORD = "Str0ng!P@ss42"
 
 
 @pytest.fixture
-def export_password_set(master_client, monkeypatch):
-    """Set export password to TEST_EXPORT_PASSWORD with low KDF iterations.
-
-    Patches PBKDF2_ITERATIONS to 1 so crypto operations in subsequent
-    test calls are fast. Returns the authenticated TestClient.
-    """
+def fast_crypto(monkeypatch):
+    """Patch PBKDF2 iterations to 1 for fast crypto in tests."""
     monkeypatch.setattr("backend.export_import.PBKDF2_ITERATIONS", 1)
-    resp = master_client.post("/export-password", json={
-        "new_password": TEST_EXPORT_PASSWORD,
-    })
-    assert resp.status_code == 200, f"set export password failed: {resp.json()}"
-    return master_client
+    yield
 
 
 @pytest.fixture

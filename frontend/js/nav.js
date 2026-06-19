@@ -166,8 +166,6 @@ async function _doShowSettings() {
         updateIdleTimeoutFromConfig(cfg);
         applyAdminSettingsLock();
     } catch (e) { /* ignore */ }
-    // Load export password status (visible to admin+, but needs apiFetch which requires session)
-    loadExportPasswordStatus();
     // Load users table if master
     if (isMaster()) {
         await loadUsersTable();

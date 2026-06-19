@@ -1,5 +1,18 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.061.0 (2026-06-19)
+- **Change**: Removed all export password management (set/change/forgot) — password is now per-file, never stored. Matches the 7-Zip/KeePass/Veracrypt model.
+- **Change**: Removed `POST /export-password` and `GET /export-password/status` endpoints — routes reduced from 47 to 45
+- **Change**: `run_export(password, user)` signature accepts user dict for manifest attribution — no more stored hash check
+- **Change**: Import response now includes `exportAttribution` (master identity) for import confirmation screen
+- **Feature**: Silent decrypt round-trip after every export verifies the password before serving the download
+- **Feature**: Frontend — Export modal reworked: warning banner + password+confirm + eye icons + strength bar, 3 states (input/progress/result)
+- **Feature**: Frontend — Import has eye icon on password field, dry-run default unchecked, attribution display area
+- **Chore**: Removed `get_master_user()` from `backend/auth.py` (unused after forgot-password removal)
+- **Chore**: Removed `export_password_set` fixture and `TEST_EXPORT_PASSWORD` constant from `tests/conftest.py`
+- **Chore**: 37 tests for export/import (24 unit + 13 API) — password management tests removed, `master_client` replaces `export_password_set`
+- **Chore**: VERSION → 0.061.0
+
 ## v0.060.0 (2026-06-19)
 - **Security**: Removed unencrypted `GET /export` (plain ZIP) — the only export path is now encrypted AES-256-GCM
 - **Security**: Removed `POST /import/upload` (plain ZIP/JSON) — all imports go through the encrypted `.quodb` flow

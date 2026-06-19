@@ -75,98 +75,16 @@ def validate_export_password(password: str) -> list[str]:
             break
     return errors
 
-
 # ─── Password management ─────────────────────────────────────────────────────
-
-def export_password_exists() -> bool:
-    """Return True if an export password has been set."""
-    from .auth import DATA_DIR
-    return (DATA_DIR / "export_password.hash").exists()
-
-
-def _read_password_hash() -> str | None:
-    """Read the stored bcrypt hash, or None if not set."""
-    from .auth import DATA_DIR
-    path = DATA_DIR / "export_password.hash"
-    if not path.exists():
-        return None
-    return path.read_text().strip()
-
-
-def _write_password_hash(password: str):
-    """Hash password with bcrypt and write to disk."""
-    from .auth import DATA_DIR, hash_password
-    path = DATA_DIR / "export_password.hash"
-    hashed = hash_password(password)
-    path.write_text(hashed)
-    os.chmod(path, 0o600)
-
-
-def verify_export_password(password: str) -> bool:
-    """Verify password against stored bcrypt hash. Returns False if no hash file."""
-    stored = _read_password_hash()
-    if stored is None:
-        return False
-    from .auth import verify_password as bcrypt_verify
-    return bcrypt_verify(password, stored)
-
-
-def set_export_password(new_password: str, current_password: str | None = None, login_password: str | None = None) -> dict:
-    """Set, change, or reset the export password.
-
-    Args:
-        new_password: The new export password.
-        current_password: Required for normal change (verify old password).
-        login_password: Required for forgot recovery (verify master login).
-
-    Returns:
-        dict with status and warning.
-
-    Raises:
-        HTTPException on validation failure or wrong credentials.
-    """
-    # Validate new password strength
-    errors = validate_export_password(new_password)
-    if errors:
-        raise HTTPException(status_code=422, detail={"errors": errors})
-
-    from .auth import DATA_DIR
-    hash_exists = (DATA_DIR / "export_password.hash").exists()
-
-    if not hash_exists:
-        # First-time setup — no current password needed
-        _write_password_hash(new_password)
-        logger.info("Export password set", extra={'category': 'ADMIN'})
-        return {"status": "set"}
-
-    if current_password:
-        # Normal change — verify old password
-        if not verify_export_password(current_password):
-            raise HTTPException(status_code=401, detail="Current export password is incorrect")
-        if current_password == new_password:
-            raise HTTPException(status_code=422, detail="New password must differ from current password")
-        _write_password_hash(new_password)
-        logger.info("Export password changed", extra={'category': 'ADMIN'})
-        return {"status": "changed"}
-
-    if login_password:
-        # Forgot recovery — verify master login password
-        from .auth import verify_password as verify_login, get_master_user
-        master = get_master_user()
-        if master is None:
-            raise HTTPException(status_code=500, detail="No master user found")
-        if not verify_login(login_password, master["password_hash"]):
-            raise HTTPException(status_code=401, detail="Login password is incorrect")
-        _write_password_hash(new_password)
-        logger.info("Export password reset via login recovery", extra={'category': 'ADMIN'})
-        return {
-            "status": "reset",
-            "warning": "Export password has been reset. Existing backup files (.quodb) encrypted "
-                       "with the previous password are permanently unrecoverable unless you remember "
-                       "the previous password."
-        }
-
-    raise HTTPException(status_code=422, detail="Provide current_password or login_password")
+#
+# NOTE: The export password belongs to the file, not the system.
+# No hash is stored. Each master provides a password at export time
+# that is used once to encrypt the .quodb package. The same password
+# must be provided at import time to decrypt it.
+# No "forgot password" is possible — the password is unrecoverable.
+#
+# Password validation is still performed client-side and server-side
+# in the endpoint, but no bcrypt hash is ever written to disk.
 
 
 # ─── Crypto helpers ──────────────────────────────────────────────────────────
@@ -367,29 +285,23 @@ def _get_latest_success_sequence(system_id: str) -> int | None:
 
 # ─── Export workflow ─────────────────────────────────────────────────────────
 
-def run_export(password: str) -> dict:
+def run_export(password: str, user: dict) -> dict:
     """Execute the full export workflow.
 
-    1. Verify export password
-    2. PRAGMA integrity_check
-    3. Read all records, verify files exist
-    4. Snapshot DB via backup() API
-    5. Copy files with streaming SHA-256
-    6. Build manifest + validation report
-    7. Build ZIP64 archive
-    8. AES-256-GCM encrypt
+    1. PRAGMA integrity_check
+    2. Read all records, verify files exist
+    3. Snapshot DB via backup() API
+    4. Copy files with streaming SHA-256
+    5. Build manifest + validation report
+    6. Build ZIP64 archive
+    7. AES-256-GCM encrypt
+    8. Silent decrypt round-trip verify
 
     Returns report dict with exportId, packagePath, and summary.
     """
     from .main import APP_VERSION, ARCHIVE_DIR
 
-    # ── 1. Password check ──
-    if not export_password_exists():
-        raise HTTPException(status_code=400, detail="Export password not set. Set one in Settings first.")
-    if not verify_export_password(password):
-        raise HTTPException(status_code=401, detail="Wrong export password")
-
-    # ── 2. Generate identifiers ──
+    # ── 1. Generate identifiers ──
     export_id = str(uuid.uuid4())
     system_id = get_machine_id()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -481,6 +393,9 @@ def run_export(password: str) -> dict:
             "exportedAtUtc": timestamp,
             "appVersion": APP_VERSION,
             "schemaVersion": 0,
+            "masterUserId": user.get("id"),
+            "masterDisplayName": user.get("username", "unknown"),
+            "masterRole": user.get("role", "unknown"),
             "exportStatus": "SUCCESS",
             "dbChecksum": db_checksum,
             "encryption": encryption_meta,
@@ -526,7 +441,20 @@ def run_export(password: str) -> dict:
             encrypt_package(zip_path, package_path, password)
             package_size = package_path.stat().st_size
 
-            # ── 10. Registry SUCCESS ──
+            # ── 10. Silent decrypt round-trip ──
+            _verify_path = Path(tempfile.mkstemp(suffix=".verify")[1])
+            try:
+                decrypt_package(package_path, _verify_path, password)
+            except HTTPException:
+                package_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Password could not be verified for this export. Please choose a different password."
+                )
+            finally:
+                _verify_path.unlink(missing_ok=True)
+
+            # ── 11. Registry SUCCESS ──
             _succeed_export(export_id, str(package_path), len(records), len(files_meta), package_size)
 
             logger.info("Export completed", extra={
@@ -774,6 +702,12 @@ def run_import(package: Path, password: str, *, dry_run: bool = False, force_sys
                 "live_issues": live_issues,
             },
             "timestamps": {"started_at": timestamp, "completed_at": timestamp},
+            "exportAttribution": {
+                "masterUserId": manifest.get("masterUserId"),
+                "masterDisplayName": manifest.get("masterDisplayName"),
+                "masterRole": manifest.get("masterRole"),
+                "exportedAtUtc": manifest.get("exportedAtUtc"),
+            },
         }
 
         if seq_warning:

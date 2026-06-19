@@ -87,18 +87,6 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
         row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
 
-def get_master_user() -> Optional[dict]:
-    """Get the first active master user.
-
-    Returns the user dict if an active master exists, None otherwise.
-    Used by export password forgot-recovery flow.
-    """
-    with get_db(readonly=True) as db:
-        row = db.execute(
-            "SELECT * FROM users WHERE role = 'master' AND active = 1 LIMIT 1"
-        ).fetchone()
-        return dict(row) if row else None
-
 def create_user(username: str, password: str, role: str,
                 must_change_password: bool = False) -> int:
     """Create a new user and return their ID."""

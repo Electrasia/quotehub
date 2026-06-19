@@ -114,204 +114,113 @@ function openBackupRestore() {
     showSettings();
 }
 
-// ─── Export Password Management ──────────────────────────────
+// ─── Export ─────────────────────────────────────────────────
 
-let _exportPasswordMode = 'set'; // 'set' | 'change' | 'forgot' | 'export'
-
-function loadExportPasswordStatus() {
-    apiFetch('/export-password/status')
-    .then(r => r.json().then(data => ({ ok: r.ok, data })))
-    .then(({ ok, data }) => {
-        if (!ok) throw new Error('Failed to check password status');
-        const isSet = data.password_set;
-        const statusEl = document.getElementById('exportPasswordStatus');
-        const setBtn = document.getElementById('exportPasswordSetBtn');
-        const changeBtn = document.getElementById('exportPasswordChangeBtn');
-        const forgotBtn = document.getElementById('exportPasswordForgotBtn');
-
-        if (isSet) {
-            statusEl.textContent = '✅ Export password is set.';
-            if (isMaster()) {
-                setBtn.classList.add('hidden');
-                changeBtn.classList.remove('hidden');
-                forgotBtn.classList.remove('hidden');
-            }
-        } else {
-            statusEl.textContent = '❌ No export password set. Set one before exporting.';
-            if (isMaster()) {
-                setBtn.classList.remove('hidden');
-                changeBtn.classList.add('hidden');
-                forgotBtn.classList.add('hidden');
-            }
-        }
-    })
-    .catch(() => {
-        document.getElementById('exportPasswordStatus').textContent =
-            '⚠ Could not check password status.';
-    });
+function showExportModal() {
+    // Reset form
+    document.getElementById('exportPassword').value = '';
+    document.getElementById('exportPasswordConfirm').value = '';
+    document.getElementById('exportError').classList.add('hidden');
+    document.getElementById('exportStrengthBar').classList.add('hidden');
+    document.getElementById('exportStrengthLabel').classList.add('hidden');
+    document.getElementById('exportSubmitBtn').disabled = true;
+    document.getElementById('exportModalBody').classList.remove('hidden');
+    document.getElementById('exportProgressBody').classList.add('hidden');
+    document.getElementById('exportModal').classList.add('active');
 }
 
-function showExportPasswordModal(mode) {
-    _exportPasswordMode = mode;
-    const titleEl = document.getElementById('exportPasswordModalTitle');
-    const descEl = document.getElementById('exportPasswordModalDesc');
-    const currentField = document.getElementById('exportPasswordCurrentField');
-    const currentLabel = document.getElementById('exportPasswordCurrentLabel');
-    const newField = document.getElementById('exportPasswordNew');
-    const confirmField = document.getElementById('exportPasswordConfirm');
-    const submitBtn = document.getElementById('exportPasswordSubmitBtn');
-    const errorEl = document.getElementById('exportPasswordError');
-    const strengthEl = document.getElementById('exportPasswordStrength');
-
-    // Reset
-    errorEl.classList.add('hidden');
-    strengthEl.classList.add('hidden');
-    document.getElementById('exportPasswordCurrent').value = '';
-    newField.value = '';
-    confirmField.value = '';
-
-    if (mode === 'set') {
-        titleEl.textContent = 'Set Export Password';
-        descEl.textContent = 'Choose a strong export password (min 12 characters, must include uppercase, lowercase, digit, and special character).';
-        currentField.classList.add('hidden');
-        submitBtn.textContent = 'Set Password';
-    } else if (mode === 'change') {
-        titleEl.textContent = 'Change Export Password';
-        descEl.textContent = 'Enter your current password and choose a new one.';
-        currentLabel.textContent = 'Current Export Password';
-        currentField.classList.remove('hidden');
-        submitBtn.textContent = 'Change Password';
-    } else if (mode === 'forgot') {
-        titleEl.textContent = 'Reset Export Password';
-        descEl.textContent = 'Verify your master login password to reset. WARNING: Existing backups encrypted with the old password become permanently unrecoverable.';
-        currentLabel.textContent = 'Master Login Password';
-        currentField.classList.remove('hidden');
-        submitBtn.textContent = 'Reset Password';
-    } else if (mode === 'export') {
-        titleEl.textContent = 'Enter Export Password';
-        descEl.textContent = 'Enter the export password to create an encrypted backup.';
-        currentField.classList.add('hidden');
-        newField.value = '';
-        confirmField.value = '';
-        submitBtn.textContent = 'Download Backup';
+function togglePassword(fieldId, toggleEl) {
+    const field = document.getElementById(fieldId);
+    if (field.type === 'password') {
+        field.type = 'text';
+        toggleEl.textContent = '🙈';
+    } else {
+        field.type = 'password';
+        toggleEl.textContent = '👁';
     }
-
-    document.getElementById('exportPasswordModal').classList.add('active');
 }
 
-async function submitExportPassword() {
-    const mode = _exportPasswordMode;
-    const errorEl = document.getElementById('exportPasswordError');
-    const strengthEl = document.getElementById('exportPasswordStrength');
-    errorEl.classList.add('hidden');
-    strengthEl.classList.add('hidden');
+function calcPasswordStrength(pw) {
+    let score = 0;
+    if (pw.length >= 12) score += 25;
+    if (pw.length >= 16) score += 10;
+    if (/[A-Z]/.test(pw)) score += 15;
+    if (/[a-z]/.test(pw)) score += 15;
+    if (/[0-9]/.test(pw)) score += 15;
+    if (/[^A-Za-z0-9]/.test(pw)) score += 20;
+    return Math.min(score, 100);
+}
 
-    if (mode === 'export') {
-        // Export flow — password only, no management
-        const password = document.getElementById('exportPasswordNew').value.trim();
-        if (!password) {
-            errorEl.textContent = 'Password is required';
-            errorEl.classList.remove('hidden');
-            return;
-        }
-        closeModal('exportPasswordModal');
-        await runEncryptedExport(password);
-        return;
-    }
+function strengthLabel(score) {
+    if (score < 40) return { label: 'Weak', color: '#e74c3c' };
+    if (score < 70) return { label: 'Fair', color: '#f39c12' };
+    return { label: 'Strong', color: '#27ae60' };
+}
 
-    // Password management flow
-    const newPassword = document.getElementById('exportPasswordNew').value;
+function validateExportPassword(pw) {
+    if (pw.length < 12) return 'Password must be at least 12 characters';
+    if (!/[A-Z]/.test(pw)) return 'Must include an uppercase letter';
+    if (!/[a-z]/.test(pw)) return 'Must include a lowercase letter';
+    if (!/[0-9]/.test(pw)) return 'Must include a digit';
+    if (!/[^A-Za-z0-9]/.test(pw)) return 'Must include a special character';
+    return null;
+}
+
+function updateExportButton() {
+    const pw = document.getElementById('exportPassword').value;
     const confirm = document.getElementById('exportPasswordConfirm').value;
+    const errorEl = document.getElementById('exportError');
+    const barEl = document.getElementById('exportStrengthBar');
+    const fillEl = document.getElementById('exportStrengthFill');
+    const labelEl = document.getElementById('exportStrengthLabel');
 
-    // Client-side validation
-    if (newPassword.length < 12) {
-        errorEl.textContent = 'Password must be at least 12 characters';
-        errorEl.classList.remove('hidden');
-        return;
-    }
-    if (!/[A-Z]/.test(newPassword)) {
-        errorEl.textContent = 'Password must contain an uppercase letter';
-        errorEl.classList.remove('hidden');
-        return;
-    }
-    if (!/[a-z]/.test(newPassword)) {
-        errorEl.textContent = 'Password must contain a lowercase letter';
-        errorEl.classList.remove('hidden');
-        return;
-    }
-    if (!/[0-9]/.test(newPassword)) {
-        errorEl.textContent = 'Password must contain a digit';
-        errorEl.classList.remove('hidden');
-        return;
-    }
-    if (!/[^A-Za-z0-9]/.test(newPassword)) {
-        errorEl.textContent = 'Password must contain a special character';
-        errorEl.classList.remove('hidden');
-        return;
-    }
-    if (newPassword !== confirm) {
-        errorEl.textContent = 'Passwords do not match';
-        errorEl.classList.remove('hidden');
-        return;
+    // Strength
+    if (pw.length > 0) {
+        const score = calcPasswordStrength(pw);
+        const info = strengthLabel(score);
+        barEl.classList.remove('hidden');
+        fillEl.style.width = score + '%';
+        fillEl.style.background = info.color;
+        labelEl.classList.remove('hidden');
+        labelEl.textContent = info.label;
+        labelEl.style.color = info.color;
+    } else {
+        barEl.classList.add('hidden');
+        labelEl.classList.add('hidden');
     }
 
-    const body = { new_password: newPassword };
-    if (mode === 'change') {
-        body.current_password = document.getElementById('exportPasswordCurrent').value.trim();
-        if (!body.current_password) {
-            errorEl.textContent = 'Current password is required';
-            errorEl.classList.remove('hidden');
-            return;
-        }
-    } else if (mode === 'forgot') {
-        body.login_password = document.getElementById('exportPasswordCurrent').value.trim();
-        if (!body.login_password) {
-            errorEl.textContent = 'Login password is required';
-            errorEl.classList.remove('hidden');
-            return;
-        }
+    // Validation
+    errorEl.classList.add('hidden');
+    if (!pw || !confirm) {
+        document.getElementById('exportSubmitBtn').disabled = true;
+        return;
     }
-
-    const submitBtn = document.getElementById('exportPasswordSubmitBtn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Saving...';
-
-    try {
-        const resp = await apiFetch('/export-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const data = await resp.json();
-        if (!resp.ok) {
-            const err = data.detail?.errors?.[0] || data.detail || 'Save failed';
-            errorEl.textContent = err;
-            errorEl.classList.remove('hidden');
-            return;
-        }
-        closeModal('exportPasswordModal');
-        const msg = data.status === 'set' ? 'Export password set' :
-                    data.status === 'changed' ? 'Export password changed' :
-                    'Export password reset';
-        showBriefPopup(`✅ ${msg}.`);
-        loadExportPasswordStatus();
-    } catch (e) {
-        errorEl.textContent = e.message || 'Failed to save password';
-        errorEl.classList.remove('hidden');
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Save';
+    if (pw !== confirm) {
+        document.getElementById('exportSubmitBtn').disabled = true;
+        return;
     }
+    const err = validateExportPassword(pw);
+    if (err) {
+        document.getElementById('exportSubmitBtn').disabled = true;
+        return;
+    }
+    document.getElementById('exportSubmitBtn').disabled = false;
 }
 
-// ─── Encrypted Export ───────────────────────────────────────
+async function submitExport() {
+    const password = document.getElementById('exportPassword').value;
+    const errorEl = document.getElementById('exportError');
+    const modalBody = document.getElementById('exportModalBody');
+    const progressBody = document.getElementById('exportProgressBody');
+    const progressFill = document.getElementById('exportProgressFill');
+    const progressText = document.getElementById('exportProgressText');
 
-async function runEncryptedExport(password) {
-    const btn = document.getElementById('exportBtn');
-    const prog = document.getElementById('exportProgress');
-    btn.disabled = true;
-    prog.classList.remove('hidden');
-    prog.textContent = 'Running integrity check...';
+    // Show progress
+    modalBody.classList.add('hidden');
+    progressBody.classList.remove('hidden');
+    progressFill.style.width = '10%';
+    progressText.textContent = 'Preparing...';
+
     try {
         const resp = await apiFetch('/export/run', {
             method: 'POST',
@@ -322,39 +231,32 @@ async function runEncryptedExport(password) {
             const data = await resp.json().catch(() => ({}));
             throw new Error(data.detail || 'Export failed');
         }
-        prog.textContent = 'Downloading encrypted package...';
+        progressFill.style.width = '60%';
+        progressText.textContent = 'Downloading...';
+
         const blob = await resp.blob();
+        progressFill.style.width = '90%';
+        progressText.textContent = 'Finalizing...';
+
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `quodb_export_${new Date().toISOString().slice(0, 10)}.quodb`;
         a.click();
         URL.revokeObjectURL(url);
-        prog.textContent = 'Done!';
-        setTimeout(() => { prog.classList.add('hidden'); }, 2000);
+
+        closeModal('exportModal');
+        showBriefPopup('✅ Backup downloaded.');
     } catch (e) {
-        showBriefPopup('Export failed: ' + e.message);
-        prog.classList.add('hidden');
-    } finally {
-        btn.disabled = false;
+        errorEl.textContent = e.message || 'Export failed';
+        errorEl.classList.remove('hidden');
+        modalBody.classList.remove('hidden');
+        progressBody.classList.add('hidden');
     }
 }
 
 async function exportDatabase() {
-    // Check if export password is set
-    try {
-        const resp = await apiFetch('/export-password/status');
-        const data = await resp.json();
-        if (!resp.ok || !data.password_set) {
-            showBriefPopup('⚠ No export password set. Go to Settings → Backup / Restore to set one.');
-            return;
-        }
-    } catch (e) {
-        showBriefPopup('Could not check password status: ' + e.message);
-        return;
-    }
-    // Show password prompt modal
-    showExportPasswordModal('export');
+    showExportModal();
 }
 
 // ─── Import ──────────────────────────────────────────────────
@@ -365,18 +267,20 @@ async function importDatabase(input) {
     const file = input.files[0];
     if (!file) return;
 
-    // Reset .quodb import form
+    // Reset form
     document.getElementById('quodbImportForm').classList.add('hidden');
     document.getElementById('quodbImportReport').classList.add('hidden');
     document.getElementById('quodbImportError').classList.add('hidden');
+    document.getElementById('quodbAttribution').classList.add('hidden');
 
-    // Prepare the .quodb import form
     _quodbFile = file;
     document.getElementById('quodbImportPassword').value = '';
-    document.getElementById('quodbImportDryRun').checked = true;
+    document.getElementById('quodbImportDryRun').checked = false;
     document.getElementById('quodbImportForm').classList.remove('hidden');
     document.getElementById('importResult').classList.add('hidden');
     document.getElementById('importProgress').classList.add('hidden');
+    document.getElementById('quodbImportBtn').disabled = false;
+    document.getElementById('quodbImportBtn').textContent = 'Restore';
 }
 
 async function runQuodbImport() {
@@ -393,7 +297,7 @@ async function runQuodbImport() {
     const reportEl = document.getElementById('quodbImportReport');
 
     btn.disabled = true;
-    btn.textContent = dryRun ? 'Analyzing...' : 'Importing...';
+    btn.textContent = dryRun ? 'Analyzing...' : 'Restoring...';
     reportEl.classList.add('hidden');
 
     const formData = new FormData();
@@ -409,30 +313,35 @@ async function runQuodbImport() {
             const err = data.detail || 'Import failed';
             document.getElementById('quodbImportError').textContent = err;
             document.getElementById('quodbImportError').classList.remove('hidden');
-            if (dryRun) {
-                btn.textContent = 'Preview';
-            } else {
-                btn.textContent = 'Import';
-                btn.disabled = false;
-            }
+            btn.textContent = dryRun ? 'Preview' : 'Restore';
+            btn.disabled = false;
             return;
         }
 
+        // Show attribution
+        const attr = data.exportAttribution || {};
+        const attrEl = document.getElementById('quodbAttribution');
+        if (attr.masterDisplayName) {
+            attrEl.textContent = `Created by: ${attr.masterDisplayName} (${attr.masterRole || 'master'}) · ${attr.exportedAtUtc ? new Date(attr.exportedAtUtc).toLocaleDateString() : ''}`;
+            attrEl.classList.remove('hidden');
+        }
+
         if (dryRun) {
-            // Show dry-run report
             renderImportReport(data);
-            btn.textContent = 'Import';
+            btn.textContent = 'Restore';
             btn.disabled = false;
         } else {
             // Import applied
-            let msg = '✅ Import complete.\n';
             const summary = data.summary || {};
-            msg += `Records imported: ${summary.records_imported || 0}\n`;
-            msg += `Records skipped (duplicate): ${summary.records_skipped_duplicate || 0}\n`;
-            msg += `Files imported: ${summary.files_imported || 0}\n`;
-            msg += `Files skipped: ${summary.files_skipped_duplicate || 0}\n`;
+            let msg = '✅ Restore complete.\n';
+            msg += `${summary.records_imported || 0} records restored`;
+            if (summary.records_skipped_duplicate > 0) msg += ` (${summary.records_skipped_duplicate} duplicates skipped)`;
+            msg += '\n';
+            msg += `${summary.files_imported || 0} files restored`;
+            if (summary.files_skipped_duplicate > 0) msg += ` (${summary.files_skipped_duplicate} existing skipped)`;
+            msg += '\n';
             if (summary.file_conflicts > 0) {
-                msg += `⚠ File conflicts: ${summary.file_conflicts}\n`;
+                msg += `⚠ ${summary.file_conflicts} file conflict(s) — existing files differ from backup\n`;
             }
             if (summary.warnings && summary.warnings.length > 0) {
                 msg += '\nWarnings:\n' + summary.warnings.join('\n');
@@ -442,7 +351,6 @@ async function runQuodbImport() {
             reportEl.style.color = '#27ae60';
             btn.textContent = 'Done';
             btn.disabled = true;
-            resetQuodbImport();
             if (!document.getElementById('searchView').classList.contains('hidden')) {
                 searchQuotations();
             }
@@ -450,7 +358,7 @@ async function runQuodbImport() {
     } catch (e) {
         document.getElementById('quodbImportError').textContent = e.message || 'Import failed';
         document.getElementById('quodbImportError').classList.remove('hidden');
-        btn.textContent = dryRun ? 'Preview' : 'Import';
+        btn.textContent = dryRun ? 'Preview' : 'Restore';
         btn.disabled = false;
     }
 }
@@ -458,16 +366,11 @@ async function runQuodbImport() {
 function renderImportReport(data) {
     const reportEl = document.getElementById('quodbImportReport');
     const summary = data.summary || {};
-    let msg = '📋 DRY-RUN REPORT — No changes applied\n';
+    let msg = '📋 Preview — No changes applied yet\n';
     msg += '═'.repeat(40) + '\n';
-    msg += `Status: ${data.status || 'PREFLIGHT'}\n`;
-    msg += `System ID match: ${data.systemIdMatch ? '✅ Yes' : '⚠ No'}\n`;
-    msg += `Incoming records: ${summary.total_incoming_records || 0}\n`;
-    msg += `Incoming files: ${summary.total_incoming_files || 0}\n`;
-    msg += '\n';
-    msg += `Records to import: ${summary.records_imported || 0}\n`;
+    msg += `Records to restore: ${summary.records_imported || 0}\n`;
     msg += `Records to skip (duplicates): ${summary.records_skipped_duplicate || 0}\n`;
-    msg += `Files to import: ${summary.files_imported || 0}\n`;
+    msg += `Files to restore: ${summary.files_imported || 0}\n`;
     msg += `Files to skip (identical): ${summary.files_skipped_duplicate || 0}\n`;
     if (summary.file_conflicts > 0) {
         msg += `⚠ File conflicts: ${summary.file_conflicts}\n`;
@@ -488,9 +391,10 @@ function resetQuodbImport() {
     document.getElementById('quodbImportForm').classList.add('hidden');
     document.getElementById('quodbImportReport').classList.add('hidden');
     document.getElementById('quodbImportError').classList.add('hidden');
+    document.getElementById('quodbAttribution').classList.add('hidden');
     document.getElementById('quodbImportPassword').value = '';
     document.getElementById('quodbImportBtn').disabled = false;
-    document.getElementById('quodbImportBtn').textContent = 'Import';
+    document.getElementById('quodbImportBtn').textContent = 'Restore';
     document.getElementById('importBtn').disabled = false;
 }
 

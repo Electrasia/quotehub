@@ -2,11 +2,25 @@
 
 ## Current Version
 
-**v0.060.0** (dev branch)
+**v0.061.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.061.0 — Simplified export/import (no stored password)
+
+- **Change**: Removed all export password management (set/change/forgot) — password is now per-file, never stored. Matches the 7-Zip/KeePass/Veracrypt model.
+- **Change**: Removed `POST /export-password` and `GET /export-password/status` endpoints — routes reduced from 47 to 45
+- **Change**: `run_export(password, user)` signature accepts user dict for manifest attribution — no more stored hash check
+- **Change**: Import response now includes `exportAttribution` (master identity) for import confirmation screen
+- **Feature**: Silent decrypt round-trip after every export verifies the password before serving the download
+- **Feature**: Frontend — Export modal reworked: warning banner + password+confirm + eye icons + strength bar, 3 states (input/progress/result)
+- **Feature**: Frontend — Import has eye icon on password field, dry-run default unchecked, attribution display area
+- **Chore**: Removed `get_master_user()` from `backend/auth.py` (unused after forgot-password removal)
+- **Chore**: Removed `export_password_set` fixture and `TEST_EXPORT_PASSWORD` constant from `tests/conftest.py`; added `fast_crypto` fixture
+- **Chore**: 37 tests for export/import (24 unit + 13 API) — password management tests removed, `master_client` replaces `export_password_set`
+- **Chore**: VERSION → 0.061.0
 
 ### v0.060.0 — Encrypted AES-256-GCM export/import
 - **Security**: Removed unencrypted `GET /export` — the only export path is now encrypted
@@ -179,6 +193,21 @@
 
 ## Files Changed Recently
 
+### v0.061.0
+- `backend/export_import.py` — Removed `export_password_exists()`, `_read_password_hash()`, `_write_password_hash()`, `verify_export_password()`, `set_export_password()`. `run_export(password, user)` accepts user dict. Manifest includes `masterUserId`, `masterDisplayName`, `masterRole`. Silent decrypt round-trip added. `run_import()` returns `exportAttribution`.
+- `backend/routes/export_import.py` — Removed `POST /export-password` and `GET /export-password/status`. Only 2 routes remain. Export passes `request` + user to `run_export()`.
+- `backend/auth.py` — Removed `get_master_user()` (only used by removed forgot-password flow).
+- `frontend/index.html` — Removed Export Password status/set/change/forgot section. New export modal (warning banner + password+confirm + eye icons + strength bar + progress states). Import: eye icon, dry-run default unchecked, attribution area.
+- `frontend/js/settings.js` — Removed `loadExportPasswordStatus()`, `showExportPasswordModal()`, `submitExportPassword()`, `runEncryptedExport()`. Added `showExportModal()`, `togglePassword()`, `calcPasswordStrength()`, `validateExportPassword()`, `updateExportButton()`, `submitExport()`. Simplified `exportDatabase()`, `importDatabase()`, `runQuodbImport()`, `resetQuodbImport()`.
+- `frontend/js/nav.js` — Removed `loadExportPasswordStatus()` call.
+- `tests/conftest.py` — Removed `TEST_EXPORT_PASSWORD` constant, `export_password_set` fixture. Added `fast_crypto` fixture.
+- `tests/test_export_import_unit.py` — Removed `TestPasswordManagement` class, password management imports.
+- `tests/test_export_import_api.py` — Rewritten: removed all password endpoint tests, adapted auth gates + export/import tests for no-hash model, added attribution test. Uses `master_client` and `fast_crypto` fixture.
+- `VERSION` — 0.060.0 → 0.061.0
+- `CHANGELOG.md` — Added v0.061.0 release notes
+- `HANDOFF.md` — Updated version, work log, files changed, test counts, next session
+- `README.md` — Updated Backup & Restore section (per-file password flow)
+
 ### v0.058.1
 - `backend/main.py` — Added `uploaded_by` to `save_upload_state()` save payload
 - `backend/routes/files.py` — Added `GET /queue` endpoint; calls `save_upload_state()` after upload, clear, remove-file, confirm, skip
@@ -284,10 +313,10 @@
 | Search | ✅ Complete |
 | Settings | ✅ Complete (simplified AI ON/OFF toggle) |
 | Authentication & Roles | ✅ Complete |
-| Export/Import | ✅ Complete (with 0-item validation) |
+| Export/Import | ✅ Complete (v0.061.0: per-file password, never stored, AES-256-GCM encrypted `.quodb`) |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
-| Automated Tests | ✅ **189 tests passing**. All endpoint categories covered: auth (35), search (12), admin (21), files CRUD (18), export/import (14), SSE error paths (4), health (1), extraction pipeline (44), upload validation (6). Full coverage across auth gates, CRUD operations, error paths, and disk cleanup. |
+| Automated Tests | ✅ **212 tests passing**. All endpoint categories covered: auth (35), search (12), admin (21), files CRUD (18), export/import (37), SSE error paths (4), health (1), extraction pipeline (42), extract (20), config validation (16), upload validation (6). Full coverage across auth gates, CRUD operations, error paths, and disk cleanup. |
 | Vision LLM (scanned PDFs) | ✅ Working (fixed pdf_path bug) |
 | Multi-page PDF extraction | ✅ Working (single prompt for all pages) |
 
@@ -406,7 +435,7 @@ Items still needed before the app can be considered production-ready:
 
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
-3. Run `pytest tests/ -v` to verify all tests pass (189 expected)
+3. Run `pytest tests/ -v` to verify all tests pass (212 expected)
 4. Remaining Production Readiness items — see checklist above. Recommended order:
     - **🟢 XLSX column resizing** (2 days, SheetJS limitation)
     - **🟢 Database + file backup** (0.5 day, external cron, no app code)

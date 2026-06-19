@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.060.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.061.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -90,7 +90,7 @@ This will:
 
 - `VERSION` file in the repo root defines the current release (e.g. `0.053.3`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.060.0 (377b4c7)`
+- The app header displays both: `v0.061.0 (commit hash)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -299,12 +299,11 @@ docker-compose up -d
 
 ## Backup & Restore
 
-> **Security:** Starting in v0.060.0, all exports and imports use AES-256-GCM encrypted `.quodb` packages. Plain ZIP/JSON imports are no longer supported.
+> **Security:** All exports use AES-256-GCM encrypted `.quodb` packages. Plain ZIP/JSON imports are no longer supported.
 
 1. Go to **Settings** (top nav bar)
-2. **Set an export password** (one-time, master-only) — this password is used for all future exports. Store it safely; it cannot be recovered, only reset by a master user.
-3. **Export**: Click **Download Encrypted Backup** to download a `.quodb` file with all quotations and PDFs. You will be prompted for the export password.
-4. **Import**: Click **Choose .quodb File** and select a previously exported `.quodb` backup. Optionally check **Dry Run** to preview changes without applying them.
+2. **Export**: Click **Download Encrypted Backup** — a modal asks for a password (with confirmation, strength bar, and a warning to write it down). The password is **never stored**. **You must remember it** to import this backup later. There is no "forgot password" recovery.
+3. **Import**: Click **Choose .quodb File** and select a previously exported `.quodb` backup. Enter the same password used during export. Optionally check **Dry Run** to preview changes without applying them.
 
 ## Troubleshooting
 

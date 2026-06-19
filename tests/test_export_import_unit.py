@@ -21,11 +21,6 @@ from backend.export_import import (
     decrypt_package,
     _file_sha256,
     _copy_with_sha256,
-    export_password_exists,
-    verify_export_password,
-    set_export_password,
-    _read_password_hash,
-    _write_password_hash,
     PBKDF2_ITERATIONS,
     AES_KEY_SIZE,
     SALT_SIZE,
@@ -263,69 +258,8 @@ class TestFileHelpers:
 
 # ═══════════════════════════════════════════════════════════════
 # ─── Password management ──────────────────────────────────────
-# ═══════════════════════════════════════════════════════════════
-
-class TestPasswordManagement:
-    """Export password storage — needs patched DATA_DIR."""
-
-    def test_not_exists_by_default(self, tmp_path, monkeypatch):
-        """export_password_exists returns False when no hash file."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        assert export_password_exists() is False
-
-    def test_write_and_verify(self, tmp_path, monkeypatch):
-        """After writing a hash, verify returns True for correct password."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        _write_password_hash("MyStr0ng!Pass")
-        assert export_password_exists() is True
-        assert verify_export_password("MyStr0ng!Pass") is True
-        assert verify_export_password("WrongPass1!") is False
-
-    def test_set_password_first_time(self, tmp_path, monkeypatch):
-        """set_export_password with no current password creates a hash."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        result = set_export_password("NewStr0ng!Pass42")
-        assert result["status"] == "set"
-        assert export_password_exists() is True
-        # Should be able to verify with the new password
-        from backend.export_import import verify_export_password
-        assert verify_export_password("NewStr0ng!Pass42") is True
-
-    def test_set_password_change(self, tmp_path, monkeypatch):
-        """set_export_password with current_password changes the hash."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        # First set
-        set_export_password("FirstStr0ng!P1")
-        # Change with correct old password
-        result = set_export_password("SecondStr0ng!P2", current_password="FirstStr0ng!P1")
-        assert result["status"] == "changed"
-        from backend.export_import import verify_export_password
-        assert verify_export_password("SecondStr0ng!P2") is True
-        assert verify_export_password("FirstStr0ng!P1") is False
-
-    def test_change_wrong_current_password(self, tmp_path, monkeypatch):
-        """set_export_password with wrong current_password raises 401."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        set_export_password("FirstStr0ng!P1")
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as exc:
-            set_export_password("SecondStr0ng!P2", current_password="WrongOldPass1!")
-        assert exc.value.status_code == 401
-
-    def test_change_same_password(self, tmp_path, monkeypatch):
-        """set_export_password with same new and current password raises 422."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        set_export_password("SameStr0ng!Pass")
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as exc:
-            set_export_password("SameStr0ng!Pass", current_password="SameStr0ng!Pass")
-        assert exc.value.status_code == 422
-
-    def test_set_weak_password_raises(self, tmp_path, monkeypatch):
-        """set_export_password with weak password raises 422 with validation errors."""
-        monkeypatch.setattr("backend.auth.DATA_DIR", tmp_path)
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as exc:
-            set_export_password("weak")
-        assert exc.value.status_code == 422
-        assert "errors" in exc.value.detail
+#
+# NOTE: Password management functions (export_password_exists,
+# set_export_password, etc.) were removed in v0.061.0.
+# The export password is now per-file and never stored.
+# Password validation is still tested above in TestValidateExportPassword.
