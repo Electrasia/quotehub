@@ -606,3 +606,249 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// ═══════════════════════════════════════════════════════════════
+// ─── Auto-backup ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+async function refreshAutoBackupStatus() {
+    try {
+        const resp = await apiFetch('/auto-backup/status');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const section = document.getElementById('autoBackupSection');
+        if (!section) return;
+
+        if (!data.active) {
+            section.classList.add('hidden');
+            return;
+        }
+
+        // Show the section (for master — the parent card handles role visibility)
+        section.classList.remove('hidden');
+
+        // Last backup
+        const lastEl = document.getElementById('autoBackupLast');
+        if (data.lastBackup.date) {
+            lastEl.textContent = data.lastBackup.date;
+        } else {
+            lastEl.textContent = 'Never';
+        }
+
+        // Status badge
+        const statusEl = document.getElementById('autoBackupStatus');
+        const statusLine = document.getElementById('autoBackupStatusLine');
+        if (data.lastBackup.status === 'SUCCESS') {
+            statusEl.textContent = '✅';
+            statusEl.className = '';
+            statusLine.style.display = 'none';
+        } else if (data.lastBackup.status === 'FAILED') {
+            statusEl.textContent = '❌';
+            statusEl.className = '';
+            statusLine.style.display = '';
+        } else {
+            statusEl.textContent = '—';
+            statusEl.className = '';
+            statusLine.style.display = 'none';
+        }
+
+        // Next scheduled
+        const nextEl = document.getElementById('autoBackupNext');
+        if (data.nextScheduled) {
+            const dt = new Date(data.nextScheduled);
+            nextEl.textContent = dt.toLocaleString();
+        } else {
+            nextEl.textContent = '—';
+        }
+    } catch (e) {
+        // Auto-backup disabled or not available — hide section
+        const section = document.getElementById('autoBackupSection');
+        if (section) section.classList.add('hidden');
+    }
+}
+
+let _autoRestoreSelectedFile = null;
+
+async function showAutoRestoreModal() {
+    if (!isMaster()) { showBriefPopup('Only Master can restore backups'); return; }
+    _autoRestoreSelectedFile = null;
+    document.getElementById('autoRestoreBody').querySelectorAll('.hidden').forEach(el => el.classList.add('hidden'));
+    document.getElementById('autoRestoreLoading').classList.remove('hidden');
+    document.getElementById('autoRestoreList').classList.add('hidden');
+    document.getElementById('autoRestoreReport').classList.add('hidden');
+    document.getElementById('autoRestoreError').classList.add('hidden');
+    document.getElementById('autoRestoreConfirmBtn').classList.add('hidden');
+    openModal('autoRestoreModal');
+
+    try {
+        const resp = await apiFetch('/auto-backup/list');
+        if (!resp.ok) throw new Error('Failed to load backups');
+        const data = await resp.json();
+        renderAutoRestoreList(data);
+    } catch (e) {
+        document.getElementById('autoRestoreLoading').textContent = 'Error loading backups: ' + e.message;
+        return;
+    }
+    document.getElementById('autoRestoreLoading').classList.add('hidden');
+    document.getElementById('autoRestoreList').classList.remove('hidden');
+}
+
+function renderAutoRestoreList(data) {
+    const container = document.getElementById('autoRestoreList');
+    let html = '';
+
+    // Daily + weekly (recent backups)
+    const recent = [...(data.daily || []), ...(data.weekly || [])];
+    recent.sort((a, b) => new Date(b.modifiedUtc) - new Date(a.modifiedUtc));
+
+    if (recent.length > 0) {
+        html += '<h4 style="margin:8px 0 6px;font-size:13px">Recent automatic backups</h4>';
+        html += '<div style="margin-bottom:12px">';
+        for (const f of recent.slice(0, 10)) {
+            const label = f.name.replace(/\.quodb$/, '');
+            html += `<div style="padding:6px 8px;cursor:pointer;border-radius:4px;font-size:13px" 
+                         onmouseover="this.style.background='#e8f5e9'" 
+                         onmouseout="this.style.background=''"
+                         onclick="autoRestoreSelect('${f.path}')">
+                         📅 ${label} <span style="color:#999;font-size:11px">(${(f.sizeBytes / 1048576).toFixed(1)} MB)</span>
+                     </div>`;
+        }
+        html += '</div>';
+    }
+
+    // Events
+    if (data.events && data.events.length > 0) {
+        html += '<h4 style="margin:8px 0 6px;font-size:13px">Before recent events</h4>';
+        html += '<div style="margin-bottom:12px">';
+        for (const f of data.events.slice(0, 20)) {
+            // Build a human-readable label from the filename
+            let label = f.name.replace(/\.quodb$/, '').replace(/_/g, ' ');
+            html += `<div style="padding:6px 8px;cursor:pointer;border-radius:4px;font-size:13px"
+                         onmouseover="this.style.background='#fff3e0'"
+                         onmouseout="this.style.background=''"
+                         onclick="autoRestoreSelect('${f.path}')">
+                         🔶 ${label} <span style="color:#999;font-size:11px">(${(f.sizeBytes / 1048576).toFixed(1)} MB)</span>
+                     </div>`;
+        }
+        html += '</div>';
+    }
+
+    if (!recent.length && (!data.events || !data.events.length)) {
+        html = '<p style="font-size:13px;color:#999">No automatic backups found.</p>';
+    }
+
+    container.innerHTML = html;
+}
+
+async function autoRestoreSelect(filePath) {
+    _autoRestoreSelectedFile = filePath;
+    document.getElementById('autoRestoreList').classList.add('hidden');
+    document.getElementById('autoRestoreReport').classList.add('hidden');
+    document.getElementById('autoRestoreError').classList.add('hidden');
+    document.getElementById('autoRestoreConfirmBtn').classList.add('hidden');
+    document.getElementById('autoRestoreLoading').classList.remove('hidden');
+    document.getElementById('autoRestoreLoading').textContent = 'Analyzing backup…';
+
+    try {
+        const formData = new FormData();
+        formData.append('filename', filePath);
+        formData.append('dry_run', 'true');
+        formData.append('force_system_id', 'false');
+
+        const resp = await apiFetch('/auto-backup/restore', {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Restore check failed');
+
+        renderAutoRestoreReport(data);
+        document.getElementById('autoRestoreConfirmBtn').classList.remove('hidden');
+    } catch (e) {
+        document.getElementById('autoRestoreError').textContent = e.message;
+        document.getElementById('autoRestoreError').classList.remove('hidden');
+    }
+    document.getElementById('autoRestoreLoading').classList.add('hidden');
+}
+
+function renderAutoRestoreReport(data) {
+    const container = document.getElementById('autoRestoreReport');
+    container.classList.remove('hidden');
+
+    if (data.status === 'FAILED') {
+        container.innerHTML = `<div style="padding:12px;background:#fde8e8;border-radius:6px;font-size:13px;color:#c0392b">
+            <strong>Restore blocked:</strong> ${data.detail || 'Unknown error'}
+        </div>`;
+        document.getElementById('autoRestoreConfirmBtn').classList.add('hidden');
+        return;
+    }
+
+    const summary = data.summary || {};
+    const warnings = data.warnings || [];
+    const fileConflicts = summary.file_conflicts || 0;
+
+    let html = `<div style="padding:12px;background:#f0f7ff;border-radius:6px;font-size:13px">
+        <strong>Restore preview from:</strong> ${_autoRestoreSelectedFile}<br>`;
+
+    if (data.status === 'PREFLIGHT') {
+        html += `<div style="margin-top:8px">
+            <span style="color:#27ae60">✅ ${summary.records_imported || 0} records will be restored</span><br>
+            <span style="color:#999">${summary.records_skipped_duplicate || 0} duplicates will be skipped</span><br>
+            <span style="color:#999">${summary.files_imported || 0} files will be restored</span><br>`;
+        if (summary.files_skipped_duplicate > 0) {
+            html += `<span style="color:#999">${summary.files_skipped_duplicate} existing files will be kept</span><br>`;
+        }
+        if (fileConflicts > 0) {
+            html += `<span style="color:#e67e22">⚠ ${fileConflicts} file conflict(s) — existing files differ from backup</span><br>`;
+        }
+        html += '</div>';
+    } else if (data.status === 'SUCCESS') {
+        html += `<div style="margin-top:8px;color:#27ae60">
+            ✅ Restore complete. ${summary.records_imported || 0} records restored, ${summary.files_imported || 0} files restored.
+        </div>`;
+    }
+
+    if (warnings.length > 0) {
+        html += '<div style="margin-top:8px;padding:8px;background:#fef9e7;border-radius:4px">';
+        for (const w of warnings) {
+            html += `<div style="font-size:12px;color:#856404">⚠ ${w}</div>`;
+        }
+        html += '</div>';
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+async function autoRestoreConfirm() {
+    if (!_autoRestoreSelectedFile) return;
+
+    document.getElementById('autoRestoreConfirmBtn').disabled = true;
+    document.getElementById('autoRestoreConfirmBtn').textContent = 'Restoring…';
+
+    try {
+        const formData = new FormData();
+        formData.append('filename', _autoRestoreSelectedFile);
+        formData.append('dry_run', 'false');
+        formData.append('force_system_id', 'false');
+
+        const resp = await apiFetch('/auto-backup/restore', {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Restore failed');
+
+        renderAutoRestoreReport(data);
+        document.getElementById('autoRestoreConfirmBtn').classList.add('hidden');
+        showBriefPopup('✅ Restore complete');
+        refreshAutoBackupStatus();
+    } catch (e) {
+        document.getElementById('autoRestoreError').textContent = e.message;
+        document.getElementById('autoRestoreError').classList.remove('hidden');
+    } finally {
+        document.getElementById('autoRestoreConfirmBtn').disabled = false;
+        document.getElementById('autoRestoreConfirmBtn').textContent = 'Confirm & Restore';
+    }
+}

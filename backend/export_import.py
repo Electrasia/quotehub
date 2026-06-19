@@ -89,10 +89,18 @@ def validate_export_password(password: str) -> list[str]:
 
 # ─── Crypto helpers ──────────────────────────────────────────────────────────
 
-def _derive_key(password: str, salt: bytes, iterations: int = PBKDF2_ITERATIONS) -> bytes:
-    """Derive an AES-256 key from a password using PBKDF2-HMAC-SHA256."""
+def _derive_key(password: str | bytes, salt: bytes, iterations: int = PBKDF2_ITERATIONS) -> bytes:
+    """Derive an AES-256 key from a password using PBKDF2-HMAC-SHA256.
+
+    When *iterations* == 0, *password* is treated as a raw 32-byte key
+    (used by auto-backup with internal key — no KDF needed).
+    """
+    if iterations == 0:
+        return password if isinstance(password, bytes) else password.encode("utf-8")
+    # Normalise to bytes
+    pwd = password.encode("utf-8") if isinstance(password, str) else password
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=AES_KEY_SIZE, salt=salt, iterations=iterations)
-    return kdf.derive(password.encode("utf-8"))
+    return kdf.derive(pwd)
 
 
 def _file_sha256(path: Path) -> str:
@@ -115,8 +123,16 @@ def _copy_with_sha256(src: Path, dst: Path) -> str:
     return h.hexdigest()
 
 
-def encrypt_package(zip_path: Path, output_path: Path, password: str) -> dict:
+def encrypt_package(
+    zip_path: Path, output_path: Path, password: str | bytes,
+    *,
+    key_version: int = KEY_VERSION,
+    iterations: int = PBKDF2_ITERATIONS,
+) -> dict:
     """Encrypt a ZIP64 file with AES-256-GCM. Streaming, handles any file size.
+
+    When *key_version* >= 2, *password* is treated as a raw 32-byte AES key
+    (no PBKDF2 derivation — used by auto-backup).
 
     Output format:
         [41-byte header: salt(16) + nonce(16) + keyVersion(1) + iterations(8)]
@@ -125,16 +141,16 @@ def encrypt_package(zip_path: Path, output_path: Path, password: str) -> dict:
 
     Returns encryption metadata dict.
     """
-    salt = os.urandom(SALT_SIZE)
+    salt = os.urandom(SALT_SIZE) if iterations > 0 else b'\x00' * SALT_SIZE
     nonce = os.urandom(GCM_NONCE_SIZE)
-    key = _derive_key(password, salt, PBKDF2_ITERATIONS)
+    key = _derive_key(password, salt, iterations)
 
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce))
     encryptor = cipher.encryptor()
 
     zip_size = os.path.getsize(zip_path)
     with open(output_path, "wb") as out:
-        out.write(HEADER_FORMAT.pack(salt, nonce, KEY_VERSION, PBKDF2_ITERATIONS))
+        out.write(HEADER_FORMAT.pack(salt, nonce, key_version, iterations))
         with open(zip_path, "rb") as f:
             while chunk := f.read(CHUNK_SIZE):
                 out.write(encryptor.update(chunk))
@@ -143,21 +159,25 @@ def encrypt_package(zip_path: Path, output_path: Path, password: str) -> dict:
 
     return {
         "algorithm": "AES-256-GCM",
-        "kdf": "PBKDF2-HMAC-SHA256",
-        "kdfIterations": PBKDF2_ITERATIONS,
+        "kdf": "PBKDF2-HMAC-SHA256" if iterations > 0 else "none",
+        "kdfIterations": iterations,
         "salt": salt.hex(),
         "nonce": nonce.hex(),
-        "keyVersion": KEY_VERSION,
+        "keyVersion": key_version,
     }
 
 
-def decrypt_package(package_path: Path, output_path: Path, password: str) -> dict:
+def decrypt_package(package_path: Path, output_path: Path, password: str | bytes) -> dict:
     """Decrypt a .quodb file. Streaming, handles any file size.
 
     Reads the 41-byte header, then streams the ciphertext through AES-256-GCM.
     The 16-byte auth tag is read from the end of the file and verified during finalize().
 
-    Returns encryption metadata from the header.
+    When the header's keyVersion >= 2, *password* is treated as a raw 32-byte
+    AES key (no PBKDF2 — used by auto-backup).  The caller does not need to
+    know the key version in advance; the header is self-describing.
+
+    Returns encryption metadata from the header (salt, nonce, key_version, iterations).
 
     Raises:
         HTTPException 401 if auth tag verification fails (wrong password or corruption).
@@ -175,8 +195,9 @@ def decrypt_package(package_path: Path, output_path: Path, password: str) -> dic
         f.seek(-GCM_TAG_SIZE, os.SEEK_END)
         tag = f.read(GCM_TAG_SIZE)
 
-        # Derive key and decrypt
+        # Derive key (skip PBKDF2 for auto-backup, keyVersion >= 2)
         key = _derive_key(password, salt, iterations)
+
         cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
         decryptor = cipher.decryptor()
 
@@ -285,7 +306,14 @@ def _get_latest_success_sequence(system_id: str) -> int | None:
 
 # ─── Export workflow ─────────────────────────────────────────────────────────
 
-def run_export(password: str, user: dict) -> dict:
+def run_export(
+    password: str | bytes,
+    user: dict,
+    *,
+    output_path: Path | None = None,
+    event_tag: str | None = None,
+    key_version: int = KEY_VERSION,
+) -> dict:
     """Execute the full export workflow.
 
     1. PRAGMA integrity_check
@@ -295,7 +323,16 @@ def run_export(password: str, user: dict) -> dict:
     5. Build manifest + validation report
     6. Build ZIP64 archive
     7. AES-256-GCM encrypt
-    8. Silent decrypt round-trip verify
+    8. Silent decrypt round-trip verify (only for manual exports, key_version == 1)
+
+    *password* is a user-supplied string (manual) or a raw 32-byte key (auto-backup).
+    When *key_version* >= 2 the password is used directly (no PBKDF2 — see
+    :func:`encrypt_package`).
+
+    *output_path* — if provided, the .quodb is moved here instead of returning a
+    temp path for download streaming.
+    *event_tag* — if provided, added to the manifest as ``exportType``
+    (e.g. ``"daily"``, ``"pre-update"``).
 
     Returns report dict with exportId, packagePath, and summary.
     """
@@ -377,11 +414,12 @@ def run_export(password: str, user: dict) -> dict:
         (checksums_dir / "sha256sums.txt").write_text("\n".join(sha_lines) + "\n")
 
         # ── 7d. Encryption metadata (for reference — binary header is source of truth) ──
+        is_auto = key_version >= 2
         encryption_meta = {
             "algorithm": "AES-256-GCM",
-            "kdf": "PBKDF2-HMAC-SHA256",
-            "kdfIterations": PBKDF2_ITERATIONS,
-            "keyVersion": KEY_VERSION,
+            "kdf": "none" if is_auto else "PBKDF2-HMAC-SHA256",
+            "kdfIterations": 0 if is_auto else PBKDF2_ITERATIONS,
+            "keyVersion": key_version,
         }
 
         # ── 7e. Manifest ──
@@ -393,6 +431,7 @@ def run_export(password: str, user: dict) -> dict:
             "exportedAtUtc": timestamp,
             "appVersion": APP_VERSION,
             "schemaVersion": 0,
+            "exportType": event_tag or "manual",
             "masterUserId": user.get("id"),
             "masterDisplayName": user.get("username", "unknown"),
             "masterRole": user.get("role", "unknown"),
@@ -438,28 +477,39 @@ def run_export(password: str, user: dict) -> dict:
 
             # ── 9. Encrypt ──
             package_path = Path(tempfile.mkstemp(suffix=".quodb")[1])
-            encrypt_package(zip_path, package_path, password)
+
+            pkg_iterations = 0 if is_auto else PBKDF2_ITERATIONS
+            encrypt_package(zip_path, package_path, password, key_version=key_version, iterations=pkg_iterations)
             package_size = package_path.stat().st_size
 
-            # ── 10. Silent decrypt round-trip ──
-            _verify_path = Path(tempfile.mkstemp(suffix=".verify")[1])
-            try:
-                decrypt_package(package_path, _verify_path, password)
-            except HTTPException:
-                package_path.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=500,
-                    detail="Password could not be verified for this export. Please choose a different password."
-                )
-            finally:
-                _verify_path.unlink(missing_ok=True)
+            # ── 10. Silent decrypt round-trip (skip for auto-backup — key is correct by construction) ──
+            if not is_auto:
+                _verify_path = Path(tempfile.mkstemp(suffix=".verify")[1])
+                try:
+                    decrypt_package(package_path, _verify_path, password)
+                except HTTPException:
+                    package_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Password could not be verified for this export. Please choose a different password."
+                    )
+                finally:
+                    _verify_path.unlink(missing_ok=True)
 
-            # ── 11. Registry SUCCESS ──
+            # ── 11. Move to final location or keep temp ──
+            if output_path:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(package_path), str(output_path))
+                package_path = output_path
+                package_size = package_path.stat().st_size
+
+            # ── 12. Registry SUCCESS ──
             _succeed_export(export_id, str(package_path), len(records), len(files_meta), package_size)
 
             logger.info("Export completed", extra={
-                'category': 'ADMIN',
+                'category': 'ADMIN' if not is_auto else 'SYS',
                 'export_id': export_id,
+                'event_tag': event_tag or "manual",
                 'records': len(records),
                 'files': len(files_meta),
                 'package_bytes': package_size,
@@ -473,6 +523,7 @@ def run_export(password: str, user: dict) -> dict:
                 "fileCount": len(files_meta),
                 "packageSizeBytes": package_size,
                 "packagePath": str(package_path),
+                "eventTag": event_tag,
                 "warnings": [f"Orphan file on disk: {o}" for o in orphan_files] if orphan_files else [],
             }
 

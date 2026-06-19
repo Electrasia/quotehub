@@ -278,9 +278,27 @@
                             <div class="actions">
                                 <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
                                 <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
-                            </div>
+                    </div>
+                </div>
+
+                <!-- Auto backup section -->
+                <div id="autoBackupSection" class="hidden" style="padding:16px;background:#eefaf5;border-radius:8px">
+                    <h4 style="margin-bottom:8px;font-size:14px">🔄 Automatic backups</h4>
+                    <div style="font-size:13px;color:#555">
+                        <div style="margin-bottom:4px">
+                            Last automatic backup: <span id="autoBackupLast">—</span>
+                            <span id="autoBackupStatus" class="hidden" style="font-weight:600;margin-left:4px"></span>
+                        </div>
+                        <div style="margin-bottom:8px">
+                            Next scheduled: <span id="autoBackupNext">—</span>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap">
+                            <button class="btn btn-primary btn-sm" onclick="showAutoRestoreModal()">Restore from automatic backup…</button>
+                            <span id="autoBackupStatusLine" style="display:none;font-size:13px;color:#e74c3c;align-self:center">Last automatic backup failed — see logs</span>
                         </div>
                     </div>
+                </div>
+            </div>
                 </div>
             </div>
         </div>
@@ -918,6 +936,23 @@
             <div class="actions" style="justify-content:center">
                 <button class="btn btn-primary" onclick="showSettings(); closeModal('logsModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('logsModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto-restore Modal -->
+    <div class="modal-overlay" id="autoRestoreModal">
+        <div class="modal" style="max-width:700px;width:90%;text-align:left">
+            <h3 style="margin-bottom:16px">🔄 Restore from Automatic Backup</h3>
+            <div id="autoRestoreBody">
+                <div id="autoRestoreLoading" style="text-align:center;padding:24px;font-size:14px;color:#666">Loading backups…</div>
+                <div id="autoRestoreList" class="hidden"></div>
+                <div id="autoRestoreReport" class="hidden"></div>
+                <div id="autoRestoreError" class="hidden" style="margin-top:12px;font-size:13px;color:#e74c3c"></div>
+            </div>
+            <div class="actions" style="justify-content:space-between;margin-top:16px">
+                <button class="btn btn-secondary" onclick="closeModal('autoRestoreModal')">Cancel</button>
+                <button class="btn btn-primary hidden" id="autoRestoreConfirmBtn" onclick="autoRestoreConfirm()">Confirm & Restore</button>
             </div>
         </div>
     </div>

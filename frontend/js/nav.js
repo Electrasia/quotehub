@@ -171,6 +171,10 @@ async function _doShowSettings() {
         await loadUsersTable();
         loadCleanupStats(); // Load cleanup stats
     }
+    // Load auto-backup status (master only — section is hidden for others)
+    if (typeof refreshAutoBackupStatus === 'function') {
+        refreshAutoBackupStatus();
+    }
 }
 
 function showHelp() {

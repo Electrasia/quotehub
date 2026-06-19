@@ -275,6 +275,15 @@ async def lifespan(app: FastAPI):
     print(f"QuoDB starting. AI connected: {ai_connected}")
     auth.bootstrap_master()
     load_upload_state()
+
+    # Start the auto-backup subsystem (key init, catch-up, background scheduler)
+    try:
+        from .auto_backup import start_auto_backup_subsystem
+        start_auto_backup_subsystem()
+    except Exception:
+        logger.warning("Auto-backup subsystem failed to start — continuing without it",
+                       extra={'category': 'SYSTEM'})
+
     yield
     logger.info("QuoDB shutting down", extra={'category': 'SYSTEM'})
     print("QuoDB stopped.")
@@ -299,6 +308,7 @@ from .routes import (
     auth_router, users_router, init_password_router,
     files_router, ai_router, admin_router,
     export_import_router,
+    auto_backup_router,
 )
 
 app.include_router(auth_router)
@@ -308,6 +318,7 @@ app.include_router(files_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(export_import_router)
+app.include_router(auto_backup_router)
 
 # ─── Static Files ─────────────────────────────────────────
 
