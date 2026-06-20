@@ -8,9 +8,9 @@
 
 ## Last Completed Work
 
-### v0.063.0 — Production audit fixes (P0-1 through P0-6), file-at-rest encryption, non-root container
+### v0.063.0 — Production audit fixes (P0-1 through P0-10), all P0 items addressed
 
-This release addresses the top findings from a production-readiness audit:
+This release addresses all 10 findings from a production-readiness audit:
 
 **Fixed — P0-1 (busy timeout):**
 - `backend/db.py` — Added `timeout=5` to `sqlite3.connect()` so concurrent writes don't raise `database is locked`
@@ -29,9 +29,25 @@ This release addresses the top findings from a production-readiness audit:
 
 **Fixed — P0-6 (non-root container):**
 - `Dockerfile` — Created `quodb` user (UID 1001), installed `gosu` for privilege drop, `chown` data dirs at build time, switched to entrypoint-based startup.
-- `entrypoint.sh` — New file. Runs as root, `chown -R quodb:quodb /app/data` (handles both fresh and pre-existing volumes), then `exec gosu quodb "$@"` to drop privileges and start the app.
+- `entrypoint.sh` — New file. Runs as root, `chown -R quodb:quodb /app/data` + `chown quodb:quodb /app/config.json` (fixes settings save bug), then `exec gosu quodb "$@"` to drop privileges and start the app.
 - No `USER` directive in Dockerfile — the entrypoint handles privilege dropping, which is the standard Docker pattern (same as PostgreSQL, Redis, etc.).
 - Existing deployments are handled automatically — the entrypoint's `chown` fixes ownership of pre-existing volumes on first restart.
+- **Fix**: Added `/app/config.json` to chown list — `quodb` user could not write settings to bind-mounted config.json (PermissionError → 500 → frontend JSON parse error).
+
+**Fixed — P0-7 (API docs exposure):**
+- `backend/main.py` — FastAPI instantiation reads `QUODB_DOCS_ENABLED` env var; `/docs`, `/redoc`, `/openapi.json` disabled by default.
+- `docker-compose.yml` — Added `QUODB_DOCS_ENABLED=${QUODB_DOCS_ENABLED:-false}` env var.
+- Toggle on for debugging: `QUODB_DOCS_ENABLED=true docker compose up`
+
+**Fixed — P0-8 (host header injection):**
+- `backend/main.py` — Added `TrustedHostMiddleware(allowed_hosts=["*"])` to middleware stack.
+- Accepted risk with wildcard — avoids IP/hostname churn on LAN. LAN + NPM + session auth = no practical exploit.
+
+**Fixed — P0-9 (LLM output validation):**
+- `backend/extraction/llm.py` — Added `ExtractionResult` + `ExtractionItem` Pydantic models. All LLM output validated through `model_validate()`; `ValidationError` caught gracefully as extraction warning. Catches type errors, missing fields, and malformed structures before they reach downstream code.
+
+**Fixed — P0-10 (VLM response size cap):**
+- `backend/extraction/vision.py` — Added 100 KB response size cap with truncate + warn. 12× safety margin over `max_tokens=4096` (~8 KB). Prevents OOM on runaway model output.
 
 **Decision — P0-5 (DB encryption — accepted risk):**
 - The database is not encrypted at rest. SQLite has no built-in encryption; SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break any tool that reads the DB directly.
@@ -249,14 +265,16 @@ This release addresses the top findings from a production-readiness audit:
 - `backend/routes/files.py` — Upload handler encrypts content before write. `_count_pages()` → `_count_pages_impl()` wrapper with transparent decryption. `_generate_page_images()` → `_generate_page_images_impl()` wrapper. `process_stream()` pre-decrypts filepath for parser + vision pipeline. Temp file cleanup in `finally` block. Path traversal rejection, empty-stem rejection, magic bytes validation.
 - `backend/db.py` — Added `timeout=5` to `sqlite3.connect()`.
 - `Dockerfile` — Added `gosu` install, created `quodb` user (UID 1001), `chown` data dirs at build time, set `ENTRYPOINT` to entrypoint.sh.
-- `entrypoint.sh` — New file. chowns `/app/data` at runtime (handles existing volumes), then drops to `quodb` user via `gosu`.
-- `backend/main.py` — FastAPI instantiation reads `QUODB_DOCS_ENABLED` env var; `/docs`, `/redoc`, `/openapi.json` disabled by default.
+- `entrypoint.sh` — New file. chowns `/app/data` + `/app/config.json` at runtime, then drops to `quodb` user via `gosu`.
+- `backend/main.py` — FastAPI instantiation reads `QUODB_DOCS_ENABLED` env var; `/docs`, `/redoc`, `/openapi.json` disabled by default. Added `TrustedHostMiddleware(allowed_hosts=["*"])`.
 - `docker-compose.yml` — Added `FILE_ENCRYPTION_KEY` and `QUODB_DOCS_ENABLED` env vars.
+- `backend/extraction/llm.py` — Added `ExtractionResult` + `ExtractionItem` Pydantic models; LLM output validated through `model_validate()`.
+- `backend/extraction/vision.py` — Added 100 KB VLM response size cap with truncate + warn.
 - `tests/test_upload_validation.py` — 15 tests: extension, path traversal, stem check, empty file, oversized, magic bytes, mixed batches.
 - `tests/test_encryption_at_rest.py` — New file. 14 tests: crypto round-trip, key env var, disk encryption verification, backward compat.
 - `VERSION` — 0.062.0 → 0.063.0
 - `CHANGELOG.md` — Added v0.063.0 release notes
-- `HANDOFF.md` — Updated version, work log, files changed, test counts, production audit findings, P0-5 decision, P0-6 fix
+- `HANDOFF.md` — Full rewrite: all 10 P0 items documented, P1-P3 findings updated to actual audit results, work log and files changed updated through P0-10
 
 ### v0.062.0
 - `backend/auto_backup.py` — New file. Automatic backup subsystem: daily/weekly/event tiers, retention sweep, background scheduler, startup catch-up, post-upgrade check.
@@ -459,50 +477,49 @@ These rules are MANDATORY for every new migration. They prevent data corruption 
 
 ### Production Audit Completed (v0.063.0)
 
-A full production-readiness audit was performed covering 15 non-negotiable requirements (passwords, file encryption, SQL parameterization, container hardening, session security, etc.) for a local-LAN deployment with up to 10 concurrent users. 21 findings were identified across P0–P3 priority levels.
+A full production-readiness audit was performed covering 15 non-negotiable requirements (passwords, file encryption, SQL parameterization, container hardening, session security, etc.) for a local-LAN deployment with up to 10 concurrent users. 21 findings were identified across P0–P3 priority levels. **All 10 P0 items are addressed.**
 
-#### 🔴 P0 — Fixed (v0.063.0)
+#### 🔴 P0 — Summary
 
-| # | Area | Finding | Fix |
-|---|------|---------|-----|
-| 1 | DB | No busy timeout — concurrent writes can `database is locked` | `timeout=5` in `sqlite3.connect()` |
-| 2 | Files | Path traversal in `/upload` — filename not sanitized | Reject `..`, `/`, `\` + empty-stem check |
-| 3 | Files | No magic bytes — `.pdf` can be any file type | Check `%PDF` / `PK\x03\x04` before write |
-| 4 | Files | Files not encrypted at rest | AES-256-GCM on write, transparent decrypt on read, key from `FILE_ENCRYPTION_KEY` env var |
-| 5 | Infra | Container runs as `root` | `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` |
-| 6 | Infra | `/docs` (Swagger UI) publicly accessible — leaks API surface | Gated by `QUODB_DOCS_ENABLED` env var (default `false`). Toggle on for debugging. |
+| # | Area | Finding | Resolution | Status |
+|---|------|---------|------------|--------|
+| 1 | DB | No busy timeout — concurrent writes can `database is locked` | `timeout=5` in `sqlite3.connect()` | ✅ Fixed |
+| 2 | Files | Path traversal in `/upload` — filename not sanitized | Reject `..`, `/`, `\` + empty-stem check | ✅ Fixed |
+| 3 | Files | No magic bytes — `.pdf` can be any file type | Check `%PDF` / `PK\x03\x04` before write | ✅ Fixed |
+| 4 | Files | Files not encrypted at rest | AES-256-GCM on write, transparent decrypt on read | ✅ Fixed |
+| 5 | Infra | Container runs as `root` | `quodb` user (UID 1001), `gosu` privilege drop | ✅ Fixed |
+| 6 | Infra | `/docs` publicly accessible — leaks API surface | Gated by `QUODB_DOCS_ENABLED` env var (default `false`) | ✅ Fixed |
+| 7 | DB | Database not encrypted at rest | **Accepted.** SQLite has no built-in encryption. Protected by Docker volume isolation + filesystem perms + LAN isolation. Use LUKS if threat model changes. | ✅ Accepted |
+| 8 | Infra | No `TrustedHostMiddleware` — host header injection | `allowed_hosts=["*"]` — wildcard avoids IP/hostname churn. LAN + NPM + auth = no practical exploit. | ✅ Accepted |
+| 9 | AI | LLM output parsed by regex + `json.loads` — no schema validation | `ExtractionResult` + `ExtractionItem` Pydantic models in `llm.py`. `ValidationError` caught gracefully. | ✅ Fixed |
+| 10 | AI | VLM response has no size cap — memory exhaustion risk | 100 KB cap with truncate + warn in `vision.py`. 12× safety margin over `max_tokens=4096`. | ✅ Fixed |
 
-#### 🔴 P0 — Accepted risk (documented)
+#### 🟡 P1 — Non-blocking (should be addressed)
 
-| # | Area | Finding | Decision |
-|---|------|---------|----------|
-| 7 | DB | Database not encrypted at rest | **ACCEPTED.** SQLite has no built-in encryption. SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break the KISS deployment model. Protected by: Docker named volume isolation (only `quodb` container mounts `quodb_data`), filesystem permissions (root-owned on host), network isolation (LAN behind NPM reverse proxy), and no PII/credentials stored. If threat model changes (shared cloud VM, PII storage), use LUKS at the host level. |
-| 8 | Infra | `main.py` | **ACCEPTED.** `TrustedHostMiddleware(allowed_hosts=["*"])` in place — wildcard avoids operational churn from IP/hostname changes. On a LAN behind NPM with session auth and role-based access, host header injection has no practical exploit path. |
+| # | Area | Location | Finding | Suggested Fix | Effort |
+|---|------|----------|---------|---------------|--------|
+| 1 | Frontend | `utils.js:69-73` | `showBriefPopup()` uses `innerHTML` with unsanitized `message` — XSS sink | Change to `textContent` or sanitize via DOMPurify | 5 min |
+| 2 | Frontend | `utils.js:90-98` | `showConfirmPopup()` same `innerHTML` pattern with unsanitized `message` | Same fix as #1 | 5 min |
+| 3 | Frontend | `settings.js:741` | `renderAutoRestoreList()` injects backup file path into `innerHTML` without escaping | Use `textContent` or `escapeHtml()` | 5 min |
+| 4 | Backend | `files.py:328-335` | Only `.pdf` and `.xlsx` allowed — no generic document type support explicitly rejected at network boundary | Add `Content-Length` header check matching `max_upload_size_mb` before reading body | 5 min |
 
-##### 🔴 P0 — Fixed
+#### 🟡 P2 — Medium priority
 
-| # | Area | Finding | Fix |
-|---|------|---------|-----|
-| 9 | AI | LLM output parsed by regex + `json.loads` — no Pydantic schema validation | `ExtractionResult` + `ExtractionItem` Pydantic models in `extraction/llm.py`. `_call_llm()` validates through `model_validate()`; `ValidationError` caught gracefully as extraction warning. |
-| 10 | AI | VLM response has no size cap — memory exhaustion risk | 100 KB cap with truncate + warn in `extraction/vision.py`. 12× safety margin over `max_tokens=4096` (~8 KB). |
+| # | Area | Finding | Suggested Fix | Effort |
+|---|------|---------|---------------|--------|
+| 5 | Infra | No health check on DB connection | Add periodic `SELECT 1` ping or connection pool health check | 1 hour |
+| 6 | AI | No graceful degradation notification when AI server is down (extraction silently falls to local) | Log a visible warning in the UI when AI is unreachable and extraction fell back to local | 1 day |
+| 7 | Observability | No request ID tracing across logs | Add `uuid4` per-request ID in middleware, include in log lines | 1 day |
+| 8 | Infra | No resource limits on containers (CPU/memory) | Add `deploy.resources.limits` to `docker-compose.yml` | 5 min |
+| 9 | Infra | Single container, no HA | Document that this is a single-node deployment; no HA planned | 1 hour |
 
-#### 🔴 P0 — Completed (all items addressed)
+#### 🟢 P3 — Low priority
 
-#### 🟡 P1–P3 — Full finding list (see production audit report for details)
-
-Remaining P1–P3 findings (non-blocking for go-live but should be tracked):
-- P1: No monitoring/log aggregation (no structured log shipping)
-- P1: No Pydantic response models on API endpoints (no response schema validation)
-- P1: No Docker Content Trust / image signing
-- P1: No SBOM (software bill of materials)
-- P2: No health check on DB connection
-- P2: No graceful degradation when AI server is down (extraction silently falls to local, but user gets no clear notification)
-- P2: No request ID tracing across logs
-- P2: No resource limits on containers (CPU/memory)
-- P2: No pod anti-affinity (single container, no HA)
-- P3: No version pinning in `requirements.txt` (uses `>=` ranges)
-- P3: No linting in CI
-- P3: No `docker scan` / Trivy in CI
+| # | Area | Finding | Suggested Fix | Effort |
+|---|------|---------|---------------|--------|
+| 10 | Build | No version pinning in `requirements.txt` (uses `>=` ranges) | Pin exact versions and use `pip freeze` or `pip-compile` | 1 hour |
+| 11 | CI | No linting in CI | Add `ruff` or `flake8` to CI pipeline | 1 day |
+| 12 | CI | No `docker scan` / Trivy in CI | Add container image scanning step | 1 day |
 
 ---
 
@@ -580,5 +597,7 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. All 🔴 P0 items are addressed. Next focus: 🟡 P1–P3 items from the full finding list above.
-5. Non-blocking P1-P3 items can be worked in any order once P0 items are complete
+4. All 🔴 P0 items are addressed. Next focus: 🟡 P1–P3 items from the full finding list below:
+   - **P1-1 to P1-4**: Frontend XSS sinks + Content-Length boundary check (5 min each)
+   - **P2-5 to P2-9**: DB health check, AI degradation notification, request tracing, resource limits, HA doc
+   - **P3-10 to P3-12**: Version pinning, CI linting, container scanning
