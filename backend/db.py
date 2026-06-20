@@ -99,7 +99,7 @@ def get_db(readonly=False):
           the context. You can also call db.commit() explicitly.
         - If an exception occurs, the transaction is rolled back automatically.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     try:
