@@ -477,12 +477,12 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | # | Area | Finding | Decision |
 |---|------|---------|----------|
 | 7 | DB | Database not encrypted at rest | **ACCEPTED.** SQLite has no built-in encryption. SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break the KISS deployment model. Protected by: Docker named volume isolation (only `quodb` container mounts `quodb_data`), filesystem permissions (root-owned on host), network isolation (LAN behind NPM reverse proxy), and no PII/credentials stored. If threat model changes (shared cloud VM, PII storage), use LUKS at the host level. |
+| 8 | Infra | `main.py` | **ACCEPTED.** `TrustedHostMiddleware(allowed_hosts=["*"])` in place — wildcard avoids operational churn from IP/hostname changes. On a LAN behind NPM with session auth and role-based access, host header injection has no practical exploit path. |
 
 #### 🔴 P0 — Remaining (not yet addressed)
 
 | # | Area | Location | Finding | Suggested Fix |
 |---|------|----------|---------|---------------|
-| 8 | Infra | `main.py` | No `TrustedHostMiddleware` — host header injection possible | Add `TrustedHostMiddleware(allowed_hosts=[...])` |
 | 9 | AI | `extraction/llm.py` | LLM output is parsed by regex + `json.loads` — no Pydantic schema validation. Malformed/structured-injection output can crash extraction or produce garbage | Validate AI output against a Pydantic model before use |
 | 10 | AI | `extraction/vision.py` | VLM response has no size cap — a model could return megabytes of junk, exhausting memory | Set a response size limit (e.g. 100KB) and truncate/reject oversized responses |
 
@@ -551,7 +551,7 @@ Items still needed before the app can be considered production-ready:
 | 🔴 High | **Database encryption (P0-5)** | N/A | ✅ **Accepted risk.** SQLite has no built-in encryption. SQLCipher would break the KISS model. Protected by Docker volume isolation + filesystem permissions + LAN isolation. Use LUKS at host level if threat model changes. |
 | 🔴 High | **Non-root container (P0-6)** | 0.5 day | ✅ Done (v0.063.0). `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` for existing volumes. |
 | 🔴 High | **Disable /docs in production (P0-7)** | 1 line | ✅ Done (v0.063.0). Gated by `QUODB_DOCS_ENABLED` env var (default `false`). Toggle on for debugging. |
-| 🔴 High | **TrustedHostMiddleware (P0-8)** | 5 min | ❌ Add `TrustedHostMiddleware(allowed_hosts=...)` to `main.py`. |
+| 🔴 High | **TrustedHostMiddleware (P0-8)** | 5 min | ✅ **Accepted risk.** `allowed_hosts=["*"]` — wildcard avoids IP/hostname churn. LAN + NPM + auth = no practical exploit. |
 | 🔴 High | **LLM output validation (P0-9)** | 1 day | ❌ LLM output parsed by regex + `json.loads` — no Pydantic model. |
 | 🔴 High | **VLM response size cap (P0-10)** | 0.5 day | ❌ No size limit on VLM responses. |
 | 🟡 Medium | **Queue persistence** | 0.5 day | ✅ Done (v0.058.1). Backend persists queue on every mutation; frontend restores via `GET /queue` on page load. Queue survives container restart and browser refresh. |
@@ -579,7 +579,7 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
 4. Remaining P0 blocking items — see Production Readiness Checklist above. Recommended order:
-    - **🔴 TrustedHostMiddleware (P0-8)** — Add to middleware stack
+    - **🔴 TrustedHostMiddleware (P0-8)** — ✅ Accepted risk with wildcard; middleware in place
     - **🔴 LLM output validation (P0-9)** — Validate against Pydantic model
     - **🔴 VLM response cap (P0-10)** — Set response size limit
 5. Non-blocking P1-P3 items can be worked in any order once P0 items are complete

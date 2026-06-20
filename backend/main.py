@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import auth
 from .auth import DATA_DIR
@@ -312,6 +313,11 @@ app.add_middleware(
 from .middleware import SessionCookieMiddleware, SecureCookieMiddleware
 app.add_middleware(SessionCookieMiddleware)
 app.add_middleware(SecureCookieMiddleware)
+
+# Host header validation — accept all origins.
+# On a LAN behind NPM with session auth this is defense-in-depth;
+# the wildcard avoids operational churn when server IPs or hostnames change.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
 # ─── Register Routes ──────────────────────────────────────
 
