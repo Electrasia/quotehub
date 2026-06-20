@@ -281,26 +281,9 @@
                     </div>
                 </div>
 
-                <!-- Auto backup section -->
-                <div id="autoBackupSection" class="hidden" style="padding:16px;background:#eefaf5;border-radius:8px">
-                    <h4 style="margin-bottom:8px;font-size:14px">🔄 Automatic backups</h4>
-                    <div style="font-size:13px;color:#555">
-                        <div style="margin-bottom:4px">
-                            Last automatic backup: <span id="autoBackupLast">—</span>
-                            <span id="autoBackupStatus" class="hidden" style="font-weight:600;margin-left:4px"></span>
-                        </div>
-                        <div style="margin-bottom:8px">
-                            Next scheduled: <span id="autoBackupNext">—</span>
-                        </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap">
-                            <button class="btn btn-primary btn-sm" onclick="showAutoRestoreModal()">Restore from automatic backup…</button>
-                            <span id="autoBackupStatusLine" style="display:none;font-size:13px;color:#e74c3c;align-self:center">Last automatic backup failed — see logs</span>
-                        </div>
-                    </div>
-                </div>
             </div>
-                </div>
-            </div>
+        </div>
+        </div>
         </div>
 
         <!-- ═══════════════ SEARCH VIEW ═══════════════ -->
@@ -456,6 +439,24 @@
                         </div>
                         <div id="quodbImportError" class="hidden" style="margin-top:8px;font-size:13px;color:#e74c3c"></div>
                         <div id="quodbImportReport" class="hidden" style="margin-top:8px;font-size:12px;color:#333;background:#f8f9fa;padding:8px;border-radius:4px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:monospace"></div>
+                    </div>
+                </div>
+
+                <!-- Auto backup section -->
+                <div id="autoBackupSection" class="hidden" style="padding:16px;background:#eefaf5;border-radius:8px">
+                    <h4 style="margin-bottom:8px;font-size:14px">🔄 Automatic backups</h4>
+                    <div style="font-size:13px;color:#555">
+                        <div style="margin-bottom:4px">
+                            Last automatic backup: <span id="autoBackupLast">—</span>
+                            <span id="autoBackupStatus" class="hidden" style="font-weight:600;margin-left:4px"></span>
+                        </div>
+                        <div style="margin-bottom:8px">
+                            Next scheduled: <span id="autoBackupNext">—</span>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap">
+                            <button class="btn btn-primary btn-sm" onclick="showAutoRestoreModal()">Restore from automatic backup…</button>
+                            <span id="autoBackupStatusLine" style="display:none;font-size:13px;color:#e74c3c;align-self:center">Last automatic backup failed — see logs</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -652,27 +653,42 @@
                 <p style="font-size:13px;color:#e74c3c;margin-top:12px"><strong>⚠ Warning:</strong> This action is irreversible. Once deleted, data cannot be recovered.</p>
             </div>
 
-            <!-- 9. User Roles -->
+            <!-- 9. 🔄 Automatic Backups -->
+            <div class="settings-card">
+                <h3>🔄 Automatic Backups</h3>
+                <p style="font-size:14px;color:#444;line-height:1.6">The system automatically creates daily encrypted backups at 03:00. Weekly snapshots are promoted on Sundays. Event backups are taken before imports and app updates.</p>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Settings → <strong>Backup / Restore</strong> shows the last and next backup time</li>
+                    <li>Click <strong>Restore from automatic backup</strong> to browse and restore a previous snapshot</li>
+                    <li>Retention: 7 daily, 4 weekly, 45 days for event backups</li>
+                    <li>Automatic backups are encrypted with a machine-bound internal key (no password needed to restore)</li>
+                </ul>
+            </div>
+
+            <!-- 10. User Roles -->
             <div class="settings-card">
                 <h3>👤 User Roles</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
                     <li><strong>User</strong> — search and browse existing data</li>
-                    <li><strong>Admin</strong> — upload, process, edit, export backup, view logs, read AI settings (no changes). Cannot access General, AI Settings, Import, Cleanup, or User Management</li>
-                    <li><strong>Master</strong> — full control, including all settings, import, cleanup, and user management</li>
+                    <li><strong>Admin</strong> — upload, process, edit, export backup, view logs, read AI settings (no changes). Cannot access General, AI Settings, Import, Cleanup, User Management, or restore automatic backups</li>
+                    <li><strong>Master</strong> — full control, including all settings, import/export, cleanup, user management, and backup restore</li>
                 </ul>
             </div>
 
-            <!-- 10. Important Notes -->
+            <!-- 11. Important Notes -->
             <div class="settings-card">
                 <h3>⚠️ Important Notes</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
                     <li>Always review extracted data before saving</li>
                     <li>System Cleanup is permanent and cannot be undone</li>
                     <li>Processing time depends on file size and number of pages</li>
+                    <li>Passwords must be at least 12 characters — use the strength meter as a guide</li>
+                    <li>Exported backups are encrypted per-file. <strong>The password is never stored.</strong> If you lose it, the backup is permanently unrecoverable</li>
+                    <li>Export and Import are <strong>master-only</strong> operations</li>
                 </ul>
             </div>
 
-            <!-- 11. Support & Contacts -->
+            <!-- 12. Support & Contacts -->
             <div class="settings-card">
                 <h3>📞 Support &amp; Contacts</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">

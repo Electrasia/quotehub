@@ -31,9 +31,10 @@ Upload PDF and XLSX quotations, extract structured data using AI, search across 
 
 ### 4. Settings
 - AI server connection configuration
-- Extraction mode selection (LLM first, local first, LLM only, local only)
-- Export backup (ZIP archive of database + PDFs)
-- Import restore (ZIP or JSON upload)
+- Extraction ON/OFF toggle (auto-mode detects scanned vs text PDFs)
+- Export encrypted backup (AES-256-GCM `.quodb` with per-file password)
+- Import encrypted backup (`.quodb` with dry-run mode)
+- Automatic daily backups at 03:00 with weekly retention (master-only restore)
 - System cleanup with document type filter
 - User management (master only)
 

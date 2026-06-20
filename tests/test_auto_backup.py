@@ -343,6 +343,141 @@ class TestRetentionSweep:
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  Startup catch-up
+# ══════════════════════════════════════════════════════════════════════
+
+class TestCatchUp:
+
+    def test_catch_up_runs_when_no_last_date(self, patched_auto_backup, seeded_export_data):
+        """No last_daily_date → runs backup, sets state to today."""
+        from datetime import date
+        from backend.auto_backup import catch_up_missed_auto_backups
+        from backend.key_manager import _get_state
+
+        catch_up_missed_auto_backups()
+
+        assert _count_files(patched_auto_backup["daily"]) >= 1
+        stored = _get_state("last_daily_date")
+        assert stored == date.today().isoformat()
+
+    def test_catch_up_skips_when_already_today(self, patched_auto_backup, seeded_export_data):
+        """last_daily_date = today → no new backup."""
+        from datetime import date
+        from backend.auto_backup import catch_up_missed_auto_backups, run_daily_backup
+        from backend.key_manager import _set_state
+
+        # Run one backup to establish state
+        run_daily_backup()
+        assert _count_files(patched_auto_backup["daily"]) == 1
+
+        # Pre-set state to today (should already be set by run_daily_backup,
+        # but be explicit)
+        _set_state("last_daily_date", date.today().isoformat())
+
+        # Second call — should skip
+        catch_up_missed_auto_backups()
+        assert _count_files(patched_auto_backup["daily"]) == 1
+
+    def test_catch_up_runs_when_yesterday(self, patched_auto_backup, seeded_export_data):
+        """last_daily_date = yesterday → runs backup, updates state."""
+        from datetime import date, timedelta
+        from backend.auto_backup import catch_up_missed_auto_backups, run_daily_backup
+        from backend.key_manager import _set_state, _get_state
+
+        # Run one backup
+        run_daily_backup()
+        assert _count_files(patched_auto_backup["daily"]) == 1
+
+        # Pretend last backup was yesterday
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        _set_state("last_daily_date", yesterday)
+
+        # Catch-up should run a new backup
+        catch_up_missed_auto_backups()
+        assert _count_files(patched_auto_backup["daily"]) == 2
+        stored = _get_state("last_daily_date")
+        assert stored == date.today().isoformat()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Weekly promotion
+# ══════════════════════════════════════════════════════════════════════
+
+class TestWeeklyPromotion:
+
+    def _create_dailies(self, daily_dir: Path, count: int = 3):
+        from datetime import datetime
+        now = time.time()
+        for i in range(count):
+            ts = now - (count - 1 - i) * 7200  # 2-hour gaps
+            name = f"auto_{datetime.fromtimestamp(ts).strftime('%Y-%m-%d_%H-%M-%S')}_{i:04x}.quodb"
+            p = daily_dir / name
+            p.write_text(f"daily-{i}")
+            os.utime(p, (ts, ts))
+
+    def test_promote_on_sunday(self, patched_auto_backup):
+        """Sunday with dailies → copies latest to weekly."""
+        from datetime import date
+        from unittest.mock import Mock, patch
+        from backend.auto_backup import _promote_weekly_if_sunday
+
+        self._create_dailies(patched_auto_backup["daily"], 3)
+        sunday = date(2026, 6, 21)  # known Sunday
+
+        # Python 3.12+: cannot patch C extension type attributes directly,
+        # so patch the entire module-level reference instead.
+        mock_date = Mock()
+        mock_date.today.return_value = sunday
+        with patch("backend.auto_backup.date", mock_date):
+            _promote_weekly_if_sunday()
+
+        weeklies = sorted(patched_auto_backup["weekly"].glob("*.quodb"))
+        assert len(weeklies) == 1
+        # The promoted file should be the latest (highest index, newest mtime)
+        assert weeklies[0].read_text() == "daily-2"
+
+    def test_no_promote_on_monday(self, patched_auto_backup):
+        """Not Sunday → no promotion."""
+        from datetime import date
+        from unittest.mock import Mock, patch
+        from backend.auto_backup import _promote_weekly_if_sunday
+
+        self._create_dailies(patched_auto_backup["daily"], 3)
+        monday = date(2026, 6, 22)  # Monday
+
+        mock_date = Mock()
+        mock_date.today.return_value = monday
+        with patch("backend.auto_backup.date", mock_date):
+            _promote_weekly_if_sunday()
+
+        assert _count_files(patched_auto_backup["weekly"]) == 0
+
+    def test_promote_idempotent(self, patched_auto_backup):
+        """Already promoted today → no duplicate."""
+        from datetime import date
+        from unittest.mock import Mock, patch
+        from backend.auto_backup import _promote_weekly_if_sunday
+
+        self._create_dailies(patched_auto_backup["daily"], 3)
+        sunday = date(2026, 6, 21)
+
+        mock_date = Mock()
+        mock_date.today.return_value = sunday
+
+        # First promotion
+        with patch("backend.auto_backup.date", mock_date):
+            _promote_weekly_if_sunday()
+
+        assert _count_files(patched_auto_backup["weekly"]) == 1
+
+        # Second call — idempotent
+        with patch("backend.auto_backup.date", mock_date):
+            _promote_weekly_if_sunday()
+
+        assert _count_files(patched_auto_backup["weekly"]) == 1
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  CLI
 # ══════════════════════════════════════════════════════════════════════
 

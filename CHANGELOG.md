@@ -1,5 +1,22 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.062.0 (2026-06-20)
+- **Feature**: Auto-backup subsystem — daily backups at 03:00, weekly promotions (Sunday), event-based backups (pre-update, pre-import, pre-bulk)
+- **Feature**: Internal Backup Key manager — 2-layer HKDF-wrapped AES-256-GCM key hierarchy, machine-bound, key rotation via CLI
+- **Feature**: Automatic backup retention — 7 daily / 4 weekly / 45-day event retention, purge-unused key versions
+- **Feature**: Startup catch-up — missed daily backups are run on container restart
+- **Feature**: Post-upgrade forensic check — logs warning if pre-update backup is missing after version change
+- **Feature**: Frontend auto-backup display — status section in Settings showing last/next backup, success/failure indicator
+- **Feature**: Frontend auto-restore modal — browse daily/weekly/event backups, dry-run preview, confirm & restore
+- **Feature**: CLI — `python -m backend.cli backup pre-update --version X.Y.Z`, `key rotate`, `key current`
+- **Security**: Export and import restricted to master role only (`require_role("master")`)
+- **Security**: Password strengthening — eye icons, strength meters, 12-character minimum across all password forms
+- **UX**: Success popups on user create/edit and password change
+- **Chore**: Dead code removal from `backend/routes/auto_backup.py`
+- **Chore**: 36 new auto-backup tests (startup catch-up, weekly promotion, retention sweep, CLI, unit, API)
+- **Chore**: 221 total tests (36 auto-backup, 37 auth, 24 export/import unit, 21 admin, 20 extract, 18 files CRUD, 16 config, 13 pipeline, 13 export/import API, 12 search, 6 upload, 4 SSE, 1 health)
+- **Chore**: VERSION → 0.062.0
+
 ## v0.061.0 (2026-06-19)
 - **Change**: Removed all export password management (set/change/forgot) — password is now per-file, never stored. Matches the 7-Zip/KeePass/Veracrypt model.
 - **Change**: Removed `POST /export-password` and `GET /export-password/status` endpoints — routes reduced from 47 to 45

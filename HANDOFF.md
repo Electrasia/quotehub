@@ -2,11 +2,27 @@
 
 ## Current Version
 
-**v0.061.0** (dev branch)
+**v0.062.0** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.062.0 — Auto-backup subsystem, master-only export/import, password strengthening
+
+- **Feature**: Auto-backup subsystem — `backend/auto_backup.py` — daily backups at 03:00, weekly promotions (Sunday), event-based backups (pre-update, pre-import, pre-bulk), startup catch-up, post-upgrade forensic check
+- **Feature**: Internal Backup Key manager — `backend/key_manager.py` — 2-layer HKDF-wrapped AES-256-GCM key hierarchy, machine-bound, rotatable via CLI
+- **Feature**: Auto-backup routes — `backend/routes/auto_backup.py` — `GET /auto-backup/status`, `GET /auto-backup/list`, `POST /auto-backup/restore` with dry-run
+- **Feature**: CLI — `backend/cli.py` — `python -m backend.cli backup pre-update --version X.Y.Z`, `key rotate`, `key current`
+- **Feature**: Frontend auto-backup display — status section in Settings with last/next backup, success/failure indicator
+- **Feature**: Frontend auto-restore modal — browse daily/weekly/event backups, dry-run preview, confirm & restore
+- **Security**: Export and import restricted to **master-only** (`require_role("master")`)
+- **Security**: Password strengthening — eye icons, strength meters, 12-character minimum across all login/password forms
+- **UX**: Success popups on user create/edit and password change
+- **Chore**: Dead code removal from `backend/routes/auto_backup.py` (pre-merge cleanup)
+- **Chore**: 36 new auto-backup tests (startup catch-up, weekly promotion, retention sweep, CLI, unit, API = `tests/test_auto_backup.py`)
+- **Chore**: 221 total tests (36 auto-backup, 37 auth, 24 export/import unit, 21 admin, 20 extract, 18 files CRUD, 16 config validation, 13 pipeline, 13 export/import API, 12 search, 6 upload validation, 4 SSE, 1 health)
+- **Chore**: VERSION → 0.062.0
 
 ### v0.061.0 — Simplified export/import (no stored password)
 
@@ -193,6 +209,25 @@
 
 ## Files Changed Recently
 
+### v0.062.0
+- `backend/auto_backup.py` — New file. Automatic backup subsystem: daily/weekly/event tiers, retention sweep, background scheduler, startup catch-up, post-upgrade check.
+- `backend/key_manager.py` — New file. Internal Backup Key management: 2-layer HKDF-wrapped AES-256-GCM, key rotation, version purge.
+- `backend/cli.py` — New file. CLI entry point for pre-update backup and key operations.
+- `backend/routes/auto_backup.py` — New file. Auto-backup status, list, and restore endpoints.
+- `backend/export_import.py` — Export/import unchanged (reused by auto-backup with key_version >= 2).
+- `backend/routes/export_import.py` — `POST /export/run` and `POST /import/run` restricted to `require_role("master")`.
+- `backend/routes/files.py` — Added `pre_import_backup()` call before import to create event backup.
+- `backend/main.py` — Registered auto-backup router, calls `start_auto_backup_subsystem()` in lifespan.
+- `frontend/index.html` — Auto-backup status section in Settings (moved from broken div nesting). Auto-restore modal. Help section updated with auto-backup, master-only notes, password rules.
+- `frontend/js/settings.js` — Added `refreshAutoBackupStatus()`, `showAutoRestoreModal()`, `renderAutoRestoreList()`, `autoRestoreSelect()`, `renderAutoRestoreReport()`, `autoRestoreConfirm()`.
+- `tests/test_auto_backup.py` — New file. 36 tests: startup catch-up, weekly promotion, retention sweep, CLI, unit tests, API tests.
+- `tests/conftest.py` — Added `patched_auto_backup` fixture for auto-backup tests.
+- `NPM-DEPLOY-INTERNAL.md` — New IT deploy guide (internal, tracked).
+- `VERSION` — 0.061.0 → 0.062.0
+- `CHANGELOG.md` — Added v0.062.0 release notes
+- `HANDOFF.md` — Updated version, work log, files changed, test counts, next session
+- `README.md` — Updated version, config table, roles, backup/restore, project structure, features, tech stack
+
 ### v0.061.0
 - `backend/export_import.py` — Removed `export_password_exists()`, `_read_password_hash()`, `_write_password_hash()`, `verify_export_password()`, `set_export_password()`. `run_export(password, user)` accepts user dict. Manifest includes `masterUserId`, `masterDisplayName`, `masterRole`. Silent decrypt round-trip added. `run_import()` returns `exportAttribution`.
 - `backend/routes/export_import.py` — Removed `POST /export-password` and `GET /export-password/status`. Only 2 routes remain. Export passes `request` + user to `run_export()`.
@@ -313,10 +348,11 @@
 | Search | ✅ Complete |
 | Settings | ✅ Complete (simplified AI ON/OFF toggle) |
 | Authentication & Roles | ✅ Complete |
-| Export/Import | ✅ Complete (v0.061.0: per-file password, never stored, AES-256-GCM encrypted `.quodb`) |
+| Export/Import | ✅ Complete (v0.062.0: master-only, per-file password, AES-256-GCM encrypted `.quodb`) |
+| Auto-Backup (daily/weekly/event) | ✅ Complete (v0.062.0: daily 03:00, weekly Sunday promotion, event triggers, retention sweep, machine-bound key) |
 | System Cleanup | ✅ Complete |
 | Config Validation | ✅ Complete |
-| Automated Tests | ✅ **212 tests passing**. All endpoint categories covered: auth (35), search (12), admin (21), files CRUD (18), export/import (37), SSE error paths (4), health (1), extraction pipeline (42), extract (20), config validation (16), upload validation (6). Full coverage across auth gates, CRUD operations, error paths, and disk cleanup. |
+| Automated Tests | ✅ **221 tests passing** (36 auto-backup, 37 auth, 24 export/import unit, 21 admin, 20 extract, 18 files CRUD, 16 config, 13 pipeline, 13 export/import API, 12 search, 6 upload, 4 SSE, 1 health). All endpoint categories covered. Full coverage across auth gates, CRUD operations, error paths, disk cleanup, and auto-backup lifecycle. |
 | Vision LLM (scanned PDFs) | ✅ Working (fixed pdf_path bug) |
 | Multi-page PDF extraction | ✅ Working (single prompt for all pages) |
 
@@ -426,7 +462,7 @@ Items still needed before the app can be considered production-ready:
 | 🟢 Low | **Queue routing after cancel/save** | 0.5 day | ✅ Done (v0.057.2). Routes to queue if files remain, upload if empty. |
 | 🟢 Low | **Uploaded_by display in queue UI** | 0.5 day | ✅ Done (v0.059.1). `renderFileList()` now shows `by username` next to filename. |
 | 🟢 Low | **XLSX column resizing** | 2 days | ❌ SheetJS renders read-only table; users cannot resize columns. |
-| 🟢 Low | **Database + file backup** | 0.5 day | ❌ No built-in backup. SQLite dump + archive tarball via cron. |
+| 🟢 Low | **Database + file backup** | 0.5 day | ✅ **Resolved by auto-backup** (v0.062.0). Automatic daily encrypted backups + weekly retention. Internal Backup Key (machine-bound AES-256-GCM). See `backend/auto_backup.py`. |
 | 🟢 Low | **Unbounded disk growth** | 0.5 day | ✅ Done (v0.059.0). `POST /cleanup/purge-orphans` deletes temp files with no queue entry and image dirs with no reference in queue, archive, or DB. `GET /cleanup/stats` reports orphan counts and estimated bytes. |
 
 ---
@@ -435,7 +471,6 @@ Items still needed before the app can be considered production-ready:
 
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
-3. Run `pytest tests/ -v` to verify all tests pass (212 expected)
+3. Run `pytest tests/ -v` to verify all tests pass (221 expected)
 4. Remaining Production Readiness items — see checklist above. Recommended order:
     - **🟢 XLSX column resizing** (2 days, SheetJS limitation)
-    - **🟢 Database + file backup** (0.5 day, external cron, no app code)

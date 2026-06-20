@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.061.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.062.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -18,6 +18,9 @@ AI-powered quotation document processing system. Upload PDF or XLSX quotations, 
 - **Smart Navigation** — Cancel/save routes to the file queue, not the upload page, when files remain
 - **Configurable Popups** — Adjust success popup duration in settings
 - **Version + Commit Display** — App header shows current version and commit hash for traceability
+- **Auto-Backup** — Automatic daily encrypted backups at 03:00 with weekly promotion, event-based backups (pre-import, pre-update), and retention management
+- **Internal Backup Key** — Machine-bound HKDF-wrapped AES-256-GCM key hierarchy, rotatable via CLI
+- **CLI Interface** — Pre-update backups and key management via `python -m backend.cli`
 
 ## Prerequisites
 
@@ -88,9 +91,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.053.3`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.062.0`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.061.0 (commit hash)`
+- The app header displays both: `v0.062.0 (commit hash)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -102,17 +105,17 @@ QuoteHub has a 3-role authentication system (introduced in `0.030.0`). All acces
 
 ### Roles
 
-| Role | Search | Upload / Process / Edit / Delete | AI Settings | User Management |
-|------|--------|-----------------------------------|-------------|----------------|
-| **user** | ✓ | — | — | — |
-| **admin** | ✓ | ✓ | view only (fields disabled) | — |
-| **master** | ✓ | ✓ | ✓ | ✓ |
+| Role | Search | Upload / Process / Edit / Delete | AI Settings | Export / Import | User Management | Auto-Backup Restore |
+|------|--------|-----------------------------------|-------------|----------------|-----------------|---------------------|
+| **user** | ✓ | — | — | — | — | — |
+| **admin** | ✓ | ✓ | view only (fields disabled) | — | — | status only |
+| **master** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 A short summary:
 
 - **user** — read-only access. Can search and view PDFs. Cannot upload, edit, or change settings.
-- **admin** — day-to-day operations. Can upload, process, edit, delete, view logs, and view AI settings (read-only). **Cannot:** change General settings, modify AI Settings, export/import backups, access System Cleanup, or manage users. Those are master-only.
-- **master** — full access, including all settings, import, cleanup, and user management.
+- **admin** — day-to-day operations. Can upload, process, edit, delete, view logs, view AI settings (read-only), and see auto-backup status. **Cannot:** change General settings, modify AI Settings, export/import backups, access System Cleanup, restore automatic backups, or manage users. Those are master-only.
+- **master** — full control, including all settings, export/import, auto-backup restore, cleanup, and user management.
 
 ### First-Run Master Password
 
@@ -195,7 +198,10 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 | `external_url` | QuoteHub URL for image access | `""` (auto localhost) |
 | `popup_duration` | Success popup duration (seconds) | `3` |
 | `ocr_enabled` | Enable OCR for scanned PDFs | `true` |
+| `ocr_fallback_to_llm` | Use vision LLM when OCR quality is low | `true` |
 | `extraction_enabled` | Enable AI extraction (ON/OFF toggle) | `true` |
+| `max_upload_size_mb` | Maximum upload file size (1–20 MB) | `5` |
+| `trust_proxy_headers` | Trust proxy headers (Nginx Proxy Manager) | `false` |
 
 ### Extraction Pipeline
 
@@ -227,12 +233,16 @@ quotehub/
 │   │   ├── local.py         # Rules-based extractor
 │   │   ├── llm.py           # Text LLM extractor (per-sheet for XLSX)
 │   │   └── vision.py        # Vision LLM extractor (scanned PDFs)
+│   ├── auto_backup.py       # Automatic backup subsystem (daily/weekly/event)
+│   ├── key_manager.py       # Internal Backup Key management
+│   ├── cli.py               # CLI entry point (pre-update backup, key rotation)
 │   ├── routes/               # Route modules (split from main.py)
 │   │   ├── __init__.py      # Route registry
 │   │   ├── auth.py          # Login/logout, user management
-│   │   ├── files.py         # Upload, processing, confirm, delete, export/import
+│   │   ├── files.py         # Upload, processing, confirm, delete
 │   │   ├── ai.py            # AI server connection testing
 │   │   ├── export_import.py # Encrypted export/import endpoints
+│   │   ├── auto_backup.py   # Auto-backup status, list, restore endpoints
 │   │   └── admin.py         # Config, cleanup, search, brand suggestions
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
@@ -300,10 +310,20 @@ docker-compose up -d
 ## Backup & Restore
 
 > **Security:** All exports use AES-256-GCM encrypted `.quodb` packages. Plain ZIP/JSON imports are no longer supported.
+> **Access:** Export and Import are **master-only** operations.
 
-1. Go to **Settings** (top nav bar)
-2. **Export**: Click **Download Encrypted Backup** — a modal asks for a password (with confirmation, strength bar, and a warning to write it down). The password is **never stored**. **You must remember it** to import this backup later. There is no "forgot password" recovery.
+### Manual Backup
+1. Go to **Settings** → **Backup / Restore** (top nav bar)
+2. **Export**: Click **Export Backup** — a modal asks for a password (with confirmation, strength bar, and a warning to write it down). The password is **never stored**. **You must remember it** to import this backup later. There is no "forgot password" recovery.
 3. **Import**: Click **Choose .quodb File** and select a previously exported `.quodb` backup. Enter the same password used during export. Optionally check **Dry Run** to preview changes without applying them.
+
+### Automatic Backups
+The system automatically creates daily encrypted backups at 03:00 (configurable). Weekly snapshots are promoted on Sundays. Event backups are triggered before imports and app updates.
+
+- **Settings** → **Backup / Restore** shows the last and next backup time
+- Click **Restore from automatic backup** to browse and restore a previous snapshot — these use a machine-bound internal key, so no password is needed for restore
+- Retention: 7 daily backups, 4 weekly backups, 45 days for event backups
+- Internal Backup Key hierarchy: HKDF-wrapped AES-256-GCM, machine-bound, verifiable via CLI
 
 ## Troubleshooting
 
@@ -328,6 +348,8 @@ docker-compose up -d
 - **AI:** Any OpenAI-compatible VLM API (LM Studio, vLLM, etc.)
 - **Extraction:** Pluggable package (local rules-based + LLM with fallback, Vision LLM for scanned PDFs)
 - **Container:** Docker with Python 3.11-slim
+- **Backup Encryption:** AES-256-GCM with optional PBKDF2-600K key derivation
+- **Auto-Backup Key:** Machine-bound HKDF-wrapped AES-256-GCM key hierarchy
 
 ## License
 
