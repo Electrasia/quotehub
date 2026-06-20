@@ -8,7 +8,7 @@
 
 ## Last Completed Work
 
-### v0.063.0 — Production audit fixes (P0-1 through P0-4), file-at-rest encryption
+### v0.063.0 — Production audit fixes (P0-1 through P0-6), file-at-rest encryption, non-root container
 
 This release addresses the top findings from a production-readiness audit:
 
@@ -26,6 +26,12 @@ This release addresses the top findings from a production-readiness audit:
 - `backend/routes/files.py` — Upload handler encrypts content before writing. `_count_pages()` and `_generate_page_images()` have transparent decryption wrappers. `process_stream()` pre-decrypts once and passes the decrypted path through the parser + extraction pipeline, cleaning up the temp file in the `finally` block.
 - `docker-compose.yml` — Added `FILE_ENCRYPTION_KEY=${FILE_ENCRYPTION_KEY:-}` env var (defaults to empty = no encryption, backward compatible).
 - Backward compatible: when `FILE_ENCRYPTION_KEY` is unset, no encryption is applied.
+
+**Fixed — P0-6 (non-root container):**
+- `Dockerfile` — Created `quodb` user (UID 1001), installed `gosu` for privilege drop, `chown` data dirs at build time, switched to entrypoint-based startup.
+- `entrypoint.sh` — New file. Runs as root, `chown -R quodb:quodb /app/data` (handles both fresh and pre-existing volumes), then `exec gosu quodb "$@"` to drop privileges and start the app.
+- No `USER` directive in Dockerfile — the entrypoint handles privilege dropping, which is the standard Docker pattern (same as PostgreSQL, Redis, etc.).
+- Existing deployments are handled automatically — the entrypoint's `chown` fixes ownership of pre-existing volumes on first restart.
 
 **Decision — P0-5 (DB encryption — accepted risk):**
 - The database is not encrypted at rest. SQLite has no built-in encryption; SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break any tool that reads the DB directly.
@@ -240,15 +246,16 @@ This release addresses the top findings from a production-readiness audit:
 
 ### v0.063.0
 - `backend/export_import.py` — Added `encrypt_file_at_rest()`, `decrypt_file_at_rest()`, `get_encryption_key()`, `decrypt_file_to_temp()`. Reuses existing AES-256-GCM + `_derive_key()` with `iterations=0` (raw key mode).
-- `backend/routes/files.py` — Upload handler encrypts content before write. `_count_pages()` → `_count_pages_impl()` wrapper with transparent decryption. `_generate_page_images()` → `_generate_page_images_impl()` wrapper. `process_stream()` pre-decrypts filepath for parser + vision pipeline. Temp file cleanup in `finally` block.
+- `backend/routes/files.py` — Upload handler encrypts content before write. `_count_pages()` → `_count_pages_impl()` wrapper with transparent decryption. `_generate_page_images()` → `_generate_page_images_impl()` wrapper. `process_stream()` pre-decrypts filepath for parser + vision pipeline. Temp file cleanup in `finally` block. Path traversal rejection, empty-stem rejection, magic bytes validation.
 - `backend/db.py` — Added `timeout=5` to `sqlite3.connect()`.
-- `backend/routes/files.py` — Path traversal rejection (`..`, `/`, `\`), empty-stem rejection, magic bytes validation (`%PDF` / `PK\x03\x04`).
+- `Dockerfile` — Added `gosu` install, created `quodb` user (UID 1001), `chown` data dirs at build time, set `ENTRYPOINT` to entrypoint.sh.
+- `entrypoint.sh` — New file. chowns `/app/data` at runtime (handles existing volumes), then drops to `quodb` user via `gosu`.
 - `docker-compose.yml` — Added `FILE_ENCRYPTION_KEY=${FILE_ENCRYPTION_KEY:-}` env var.
 - `tests/test_upload_validation.py` — 15 tests: extension, path traversal, stem check, empty file, oversized, magic bytes, mixed batches.
 - `tests/test_encryption_at_rest.py` — New file. 14 tests: crypto round-trip, key env var, disk encryption verification, backward compat.
 - `VERSION` — 0.062.0 → 0.063.0
 - `CHANGELOG.md` — Added v0.063.0 release notes
-- `HANDOFF.md` — Updated version, work log, files changed, test counts, production audit findings, P0-5 decision
+- `HANDOFF.md` — Updated version, work log, files changed, test counts, production audit findings, P0-5 decision, P0-6 fix
 
 ### v0.062.0
 - `backend/auto_backup.py` — New file. Automatic backup subsystem: daily/weekly/event tiers, retention sweep, background scheduler, startup catch-up, post-upgrade check.
@@ -461,18 +468,18 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 2 | Files | Path traversal in `/upload` — filename not sanitized | Reject `..`, `/`, `\` + empty-stem check |
 | 3 | Files | No magic bytes — `.pdf` can be any file type | Check `%PDF` / `PK\x03\x04` before write |
 | 4 | Files | Files not encrypted at rest | AES-256-GCM on write, transparent decrypt on read, key from `FILE_ENCRYPTION_KEY` env var |
+| 5 | Infra | Container runs as `root` | `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` |
 
 #### 🔴 P0 — Accepted risk (documented)
 
 | # | Area | Finding | Decision |
 |---|------|---------|----------|
-| 5 | DB | Database not encrypted at rest | **ACCEPTED.** SQLite has no built-in encryption. SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break the KISS deployment model. Protected by: Docker named volume isolation (only `quodb` container mounts `quodb_data`), filesystem permissions (root-owned on host), network isolation (LAN behind NPM reverse proxy), and no PII/credentials stored. If threat model changes (shared cloud VM, PII storage), use LUKS at the host level. |
+| 6 | DB | Database not encrypted at rest | **ACCEPTED.** SQLite has no built-in encryption. SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break the KISS deployment model. Protected by: Docker named volume isolation (only `quodb` container mounts `quodb_data`), filesystem permissions (root-owned on host), network isolation (LAN behind NPM reverse proxy), and no PII/credentials stored. If threat model changes (shared cloud VM, PII storage), use LUKS at the host level. |
 
 #### 🔴 P0 — Remaining (not yet addressed)
 
 | # | Area | Location | Finding | Suggested Fix |
 |---|------|----------|---------|---------------|
-| 6 | Infra | `Dockerfile` | Container runs as `root` — any container compromise is a full host compromise | Add `USER nobody:nogroup` or create a non-root user with `chown` on data dirs |
 | 7 | Infra | `main.py` | `/docs` (Swagger UI) publicly accessible — leaks API surface | Set `docs_url=None` in production, or gate behind master role |
 | 8 | Infra | `main.py` | No `TrustedHostMiddleware` — host header injection possible | Add `TrustedHostMiddleware(allowed_hosts=[...])` |
 | 9 | AI | `extraction/llm.py` | LLM output is parsed by regex + `json.loads` — no Pydantic schema validation. Malformed/structured-injection output can crash extraction or produce garbage | Validate AI output against a Pydantic model before use |
@@ -541,7 +548,7 @@ Items still needed before the app can be considered production-ready:
 | 🔴 High | **Magic bytes validation (P0-3)** | 0.5 day | ✅ Done (v0.063.0). Checks `%PDF` / `PK\x03\x04` before write. |
 | 🔴 High | **File-at-rest encryption (P0-4)** | 2 hours | ✅ Done (v0.063.0). AES-256-GCM on write, transparent decrypt on read, key from `FILE_ENCRYPTION_KEY` env var. |
 | 🔴 High | **Database encryption (P0-5)** | N/A | ✅ **Accepted risk.** SQLite has no built-in encryption. SQLCipher would break the KISS model. Protected by Docker volume isolation + filesystem permissions + LAN isolation. Use LUKS at host level if threat model changes. |
-| 🔴 High | **Non-root container (P0-6)** | 0.5 day | ❌ Dockerfile runs as `root`. Add `USER nobody:nogroup` + fix permissions. |
+| 🔴 High | **Non-root container (P0-6)** | 0.5 day | ✅ Done (v0.063.0). `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` for existing volumes. |
 | 🔴 High | **Disable /docs in production (P0-7)** | 1 line | ❌ Swagger UI publicly accessible. Set `docs_url=None` in `main.py`. |
 | 🔴 High | **TrustedHostMiddleware (P0-8)** | 5 min | ❌ Add `TrustedHostMiddleware(allowed_hosts=...)` to `main.py`. |
 | 🔴 High | **LLM output validation (P0-9)** | 1 day | ❌ LLM output parsed by regex + `json.loads` — no Pydantic model. |
@@ -571,7 +578,6 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
 4. Remaining P0 blocking items — see Production Readiness Checklist above. Recommended order:
-    - **🔴 Non-root container (P0-6)** — Add `USER nobody:nogroup` in Dockerfile, fix permissions on data dirs
     - **🔴 Disable /docs (P0-7)** — Set `docs_url=None` in `main.py`
     - **🔴 TrustedHostMiddleware (P0-8)** — Add to middleware stack
     - **🔴 LLM output validation (P0-9)** — Validate against Pydantic model
