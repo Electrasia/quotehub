@@ -484,12 +484,9 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | # | Area | Finding | Fix |
 |---|------|---------|-----|
 | 9 | AI | LLM output parsed by regex + `json.loads` — no Pydantic schema validation | `ExtractionResult` + `ExtractionItem` Pydantic models in `extraction/llm.py`. `_call_llm()` validates through `model_validate()`; `ValidationError` caught gracefully as extraction warning. |
+| 10 | AI | VLM response has no size cap — memory exhaustion risk | 100 KB cap with truncate + warn in `extraction/vision.py`. 12× safety margin over `max_tokens=4096` (~8 KB). |
 
-#### 🔴 P0 — Remaining (not yet addressed)
-
-| # | Area | Location | Finding | Suggested Fix |
-|---|------|----------|---------|---------------|
-| 10 | AI | `extraction/vision.py` | VLM response has no size cap — a model could return megabytes of junk, exhausting memory | Set a response size limit (e.g. 100KB) and truncate/reject oversized responses |
+#### 🔴 P0 — Completed (all items addressed)
 
 #### 🟡 P1–P3 — Full finding list (see production audit report for details)
 
@@ -558,7 +555,7 @@ Items still needed before the app can be considered production-ready:
 | 🔴 High | **Disable /docs in production (P0-7)** | 1 line | ✅ Done (v0.063.0). Gated by `QUODB_DOCS_ENABLED` env var (default `false`). Toggle on for debugging. |
 | 🔴 High | **TrustedHostMiddleware (P0-8)** | 5 min | ✅ **Accepted risk.** `allowed_hosts=["*"]` — wildcard avoids IP/hostname churn. LAN + NPM + auth = no practical exploit. |
 | 🔴 High | **LLM output validation (P0-9)** | 1 day | ✅ Done. `ExtractionResult` + `ExtractionItem` Pydantic models validate LLM output; `ValidationError` caught gracefully. |
-| 🔴 High | **VLM response size cap (P0-10)** | 0.5 day | ❌ No size limit on VLM responses. |
+| 🔴 High | **VLM response size cap (P0-10)** | 0.5 day | ✅ Done. 100 KB truncate + warn in `extraction/vision.py`. |
 | 🟡 Medium | **Queue persistence** | 0.5 day | ✅ Done (v0.058.1). Backend persists queue on every mutation; frontend restores via `GET /queue` on page load. Queue survives container restart and browser refresh. |
 | 🟡 Medium | **Graceful shutdown** | 0.5 day | ✅ Done (v0.058.1). Analysis showed no functional gap — lock released by `finally` on cancellation, DB not touched during streaming, temp files cleaned on re-process. Shutdown log added to confirm clean stop in container logs. |
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
@@ -583,8 +580,5 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. Remaining P0 blocking items — see Production Readiness Checklist above. Recommended order:
-    - **🔴 TrustedHostMiddleware (P0-8)** — ✅ Accepted risk with wildcard; middleware in place
-    - **🔴 LLM output validation (P0-9)** — ✅ Done. Pydantic models validate LLM output.
-    - **🔴 VLM response cap (P0-10)** — Set response size limit
+4. All 🔴 P0 items are addressed. Next focus: 🟡 P1–P3 items from the full finding list above.
 5. Non-blocking P1-P3 items can be worked in any order once P0 items are complete

@@ -9,6 +9,7 @@
 - **Security**: API docs gated by `QUODB_DOCS_ENABLED` env var — `/docs`, `/redoc`, and `/openapi.json` disabled by default; toggle on for debugging
 - **Security**: `TrustedHostMiddleware` added with wildcard — host header injection mitigated; wildcard avoids IP/hostname churn on LAN
 - **Security**: LLM output validated against Pydantic models (`ExtractionResult` + `ExtractionItem`) — catches type errors, missing fields, and malformed structures before they reach downstream code
+- **Security**: VLM response capped at 100 KB in `extraction/vision.py` — truncated with warning if exceeded; prevents OOM on runaway model output
 - **Decision**: Database at rest encryption accepted as risk — SQLite has no built-in encryption; SQLCipher would break the KISS deployment model. Protected by Docker volume isolation + filesystem permissions + network isolation on LAN behind NPM reverse proxy
 - **Chore**: 29 new tests (15 upload validation + 14 encryption at rest) — 273 total tests
 - **Chore**: VERSION → 0.063.0

@@ -168,6 +168,17 @@ async def extract_with_vision(pdf_path: str, cfg: dict = None) -> dict:
                             raw = raw[:-3]
                         raw = raw.strip()
 
+                        # Cap VLM response size to prevent OOM on runaway models.
+                        # max_tokens=4096 limits the model to ~8KB, so 100KB is a
+                        # generous safety fuse that never triggers in normal operation.
+                        MAX_RESPONSE_BYTES = 100 * 1024  # 100 KB
+                        if len(raw) > MAX_RESPONSE_BYTES:
+                            raw = raw[:MAX_RESPONSE_BYTES]
+                            warnings.append(
+                                f"Page {page_idx + 1}: VLM response truncated "
+                                f"(exceeded {MAX_RESPONSE_BYTES} bytes)"
+                            )
+
                         # Find JSON
                         start = raw.find("{")
                         end = raw.rfind("}") + 1
