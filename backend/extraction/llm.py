@@ -11,6 +11,7 @@ import json
 import logging
 
 import httpx
+from pydantic import BaseModel, Field, ValidationError
 
 from ..utils import normalize_date
 
@@ -81,8 +82,63 @@ Document text:
 {text}"""
 
 
+# ─── Pydantic Validation Models ────────────────────────────
+
+
+class ExtractionItem(BaseModel):
+    """Single line item from an extraction result.
+
+    Every field is a string; anything the LLM returns (None, number, etc.)
+    is coerced and stripped. This gives downstream code a consistent type
+    contract instead of raw dict access.
+    """
+
+    brand: str = ""
+    model: str = ""
+    description: str = ""
+    quantity: str = ""
+    unit: str = ""
+    unit_price: str = ""
+    total: str = ""
+    remark: str = ""
+
+    def __init__(self, **data):
+        # Coerce every value to a stripped string before Pydantic sees it.
+        # This handles None, int, float, bool, etc. that the LLM might return.
+        coerced = {}
+        for k, v in data.items():
+            if k in self.model_fields:
+                coerced[k] = str(v).strip() if v is not None else ""
+        super().__init__(**coerced)
+
+
+class ExtractionResult(BaseModel):
+    """Top-level extraction result from the LLM.
+
+    Validates the overall shape and delegates item validation to ExtractionItem.
+    """
+
+    document_type: str = "unknown"
+    supplier: str = ""
+    date: str = ""
+    currency: str = ""
+    items: list[ExtractionItem] = Field(default_factory=list)
+
+    def __init__(self, **data):
+        # Coerce top-level string fields the same way
+        for key in ("document_type", "supplier", "date", "currency"):
+            v = data.get(key)
+            if v is not None and not isinstance(v, str):
+                data[key] = str(v)
+            elif v is None:
+                data[key] = ""
+        # Ensure items is a list
+        if "items" not in data or data["items"] is None:
+            data["items"] = []
+        super().__init__(**data)
+
+
 def _clean_item(item):
-    """Basic cleanup: strip whitespace. No validation."""
     if not isinstance(item, dict):
         return None
     cleaned = {}
@@ -155,18 +211,28 @@ async def _call_llm(text: str, cfg: dict, is_xlsx: bool = False) -> dict:
                     last_error = "Could not parse JSON"
                     continue
 
-                # Clean items
-                items = []
-                for item in parsed.get("items", []):
-                    cleaned = _clean_item(item)
-                    if cleaned:
-                        items.append(cleaned)
+                # Validate LLM output against Pydantic model.
+                # This catches type errors, missing fields, and malformed
+                # structures that would otherwise cause obscure 500s downstream.
+                try:
+                    validated = ExtractionResult.model_validate(parsed)
+                except ValidationError as e:
+                    last_error = f"LLM output validation failed: {e}"
+                    continue
+
+                # Filter items that have no meaningful content
+                # (same logic as _clean_item's empty-item filter)
+                items = [
+                    item.model_dump()
+                    for item in validated.items
+                    if item.model or item.description or item.unit_price
+                ]
 
                 return {
-                    "document_type": parsed.get("document_type", "unknown"),
-                    "supplier": parsed.get("supplier", ""),
-                    "currency": parsed.get("currency", ""),
-                    "date": normalize_date(parsed.get("date", "")),
+                    "document_type": validated.document_type or "unknown",
+                    "supplier": validated.supplier or "",
+                    "currency": validated.currency or "",
+                    "date": normalize_date(validated.date or ""),
                     "items": items,
                     "llm_warnings": [],
                 }
