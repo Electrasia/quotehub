@@ -498,8 +498,8 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 
 | # | Area | Location | Finding | Suggested Fix | Effort |
 |---|------|----------|---------|---------------|--------|
-| 1 | Frontend | `utils.js:69-73` | `showBriefPopup()` uses `innerHTML` with unsanitized `message` — XSS sink | Change to `textContent` or sanitize via DOMPurify | 5 min |
-| 2 | Frontend | `utils.js:90-98` | `showConfirmPopup()` same `innerHTML` pattern with unsanitized `message` | Same fix as #1 | 5 min |
+| 1 | Frontend | `utils.js:69-73` | `showBriefPopup()` uses `innerHTML` with unsanitized `message` — XSS sink | Changed to `textContent` — message is never rendered as HTML | ✅ Fixed |
+| 2 | Frontend | `utils.js:90-98` | `showConfirmPopup()` same `innerHTML` pattern with unsanitized `message` | Same fix as #1 | ✅ Fixed |
 | 3 | Frontend | `settings.js:741` | `renderAutoRestoreList()` injects backup file path into `innerHTML` without escaping | Use `textContent` or `escapeHtml()` | 5 min |
 | 4 | Backend | `files.py:328-335` | Only `.pdf` and `.xlsx` allowed — no generic document type support explicitly rejected at network boundary | Add `Content-Length` header check matching `max_upload_size_mb` before reading body | 5 min |
 
@@ -598,6 +598,8 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
 4. All 🔴 P0 items are addressed. Next focus: 🟡 P1–P3 items from the full finding list below:
-   - **P1-1 to P1-4**: Frontend XSS sinks + Content-Length boundary check (5 min each)
+   - **P1-1, P1-2** — ✅ Done. `showBriefPopup`/`showConfirmPopup` XSS sinks fixed.
+   - **P1-3**: `renderAutoRestoreList()` unsanitized file path in innerHTML
+   - **P1-4**: Content-Length header check at upload boundary
    - **P2-5 to P2-9**: DB health check, AI degradation notification, request tracing, resource limits, HA doc
    - **P3-10 to P3-12**: Version pinning, CI linting, container scanning
