@@ -289,7 +289,18 @@ async def lifespan(app: FastAPI):
     print("QuoDB stopped.")
 
 
-app = FastAPI(lifespan=lifespan)
+# ─── Docs environment toggle ──────────────────────────────
+# In production, API docs (Swagger UI, ReDoc, OpenAPI schema) are disabled
+# by default to avoid leaking API surface.  Set QUODB_DOCS_ENABLED=true in
+# the environment or .env file to re-enable them for debugging.
+__docs_enabled = os.environ.get("QUODB_DOCS_ENABLED", "false").lower() in ("1", "true", "yes")
+
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if __docs_enabled else None,
+    redoc_url="/redoc" if __docs_enabled else None,
+    openapi_url="/openapi.json" if __docs_enabled else None,
+)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,

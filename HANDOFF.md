@@ -250,7 +250,8 @@ This release addresses the top findings from a production-readiness audit:
 - `backend/db.py` — Added `timeout=5` to `sqlite3.connect()`.
 - `Dockerfile` — Added `gosu` install, created `quodb` user (UID 1001), `chown` data dirs at build time, set `ENTRYPOINT` to entrypoint.sh.
 - `entrypoint.sh` — New file. chowns `/app/data` at runtime (handles existing volumes), then drops to `quodb` user via `gosu`.
-- `docker-compose.yml` — Added `FILE_ENCRYPTION_KEY=${FILE_ENCRYPTION_KEY:-}` env var.
+- `backend/main.py` — FastAPI instantiation reads `QUODB_DOCS_ENABLED` env var; `/docs`, `/redoc`, `/openapi.json` disabled by default.
+- `docker-compose.yml` — Added `FILE_ENCRYPTION_KEY` and `QUODB_DOCS_ENABLED` env vars.
 - `tests/test_upload_validation.py` — 15 tests: extension, path traversal, stem check, empty file, oversized, magic bytes, mixed batches.
 - `tests/test_encryption_at_rest.py` — New file. 14 tests: crypto round-trip, key env var, disk encryption verification, backward compat.
 - `VERSION` — 0.062.0 → 0.063.0
@@ -469,18 +470,18 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 3 | Files | No magic bytes — `.pdf` can be any file type | Check `%PDF` / `PK\x03\x04` before write |
 | 4 | Files | Files not encrypted at rest | AES-256-GCM on write, transparent decrypt on read, key from `FILE_ENCRYPTION_KEY` env var |
 | 5 | Infra | Container runs as `root` | `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` |
+| 6 | Infra | `/docs` (Swagger UI) publicly accessible — leaks API surface | Gated by `QUODB_DOCS_ENABLED` env var (default `false`). Toggle on for debugging. |
 
 #### 🔴 P0 — Accepted risk (documented)
 
 | # | Area | Finding | Decision |
 |---|------|---------|----------|
-| 6 | DB | Database not encrypted at rest | **ACCEPTED.** SQLite has no built-in encryption. SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break the KISS deployment model. Protected by: Docker named volume isolation (only `quodb` container mounts `quodb_data`), filesystem permissions (root-owned on host), network isolation (LAN behind NPM reverse proxy), and no PII/credentials stored. If threat model changes (shared cloud VM, PII storage), use LUKS at the host level. |
+| 7 | DB | Database not encrypted at rest | **ACCEPTED.** SQLite has no built-in encryption. SQLCipher would require recompiling the Python sqlite3 driver, add a fragile build dependency, and break the KISS deployment model. Protected by: Docker named volume isolation (only `quodb` container mounts `quodb_data`), filesystem permissions (root-owned on host), network isolation (LAN behind NPM reverse proxy), and no PII/credentials stored. If threat model changes (shared cloud VM, PII storage), use LUKS at the host level. |
 
 #### 🔴 P0 — Remaining (not yet addressed)
 
 | # | Area | Location | Finding | Suggested Fix |
 |---|------|----------|---------|---------------|
-| 7 | Infra | `main.py` | `/docs` (Swagger UI) publicly accessible — leaks API surface | Set `docs_url=None` in production, or gate behind master role |
 | 8 | Infra | `main.py` | No `TrustedHostMiddleware` — host header injection possible | Add `TrustedHostMiddleware(allowed_hosts=[...])` |
 | 9 | AI | `extraction/llm.py` | LLM output is parsed by regex + `json.loads` — no Pydantic schema validation. Malformed/structured-injection output can crash extraction or produce garbage | Validate AI output against a Pydantic model before use |
 | 10 | AI | `extraction/vision.py` | VLM response has no size cap — a model could return megabytes of junk, exhausting memory | Set a response size limit (e.g. 100KB) and truncate/reject oversized responses |
@@ -549,7 +550,7 @@ Items still needed before the app can be considered production-ready:
 | 🔴 High | **File-at-rest encryption (P0-4)** | 2 hours | ✅ Done (v0.063.0). AES-256-GCM on write, transparent decrypt on read, key from `FILE_ENCRYPTION_KEY` env var. |
 | 🔴 High | **Database encryption (P0-5)** | N/A | ✅ **Accepted risk.** SQLite has no built-in encryption. SQLCipher would break the KISS model. Protected by Docker volume isolation + filesystem permissions + LAN isolation. Use LUKS at host level if threat model changes. |
 | 🔴 High | **Non-root container (P0-6)** | 0.5 day | ✅ Done (v0.063.0). `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` for existing volumes. |
-| 🔴 High | **Disable /docs in production (P0-7)** | 1 line | ❌ Swagger UI publicly accessible. Set `docs_url=None` in `main.py`. |
+| 🔴 High | **Disable /docs in production (P0-7)** | 1 line | ✅ Done (v0.063.0). Gated by `QUODB_DOCS_ENABLED` env var (default `false`). Toggle on for debugging. |
 | 🔴 High | **TrustedHostMiddleware (P0-8)** | 5 min | ❌ Add `TrustedHostMiddleware(allowed_hosts=...)` to `main.py`. |
 | 🔴 High | **LLM output validation (P0-9)** | 1 day | ❌ LLM output parsed by regex + `json.loads` — no Pydantic model. |
 | 🔴 High | **VLM response size cap (P0-10)** | 0.5 day | ❌ No size limit on VLM responses. |
@@ -578,7 +579,6 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
 4. Remaining P0 blocking items — see Production Readiness Checklist above. Recommended order:
-    - **🔴 Disable /docs (P0-7)** — Set `docs_url=None` in `main.py`
     - **🔴 TrustedHostMiddleware (P0-8)** — Add to middleware stack
     - **🔴 LLM output validation (P0-9)** — Validate against Pydantic model
     - **🔴 VLM response cap (P0-10)** — Set response size limit

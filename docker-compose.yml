@@ -10,6 +10,8 @@ services:
     environment:
       # Generate a key:  python3 -c "import secrets; print(secrets.token_hex(32))"
       - FILE_ENCRYPTION_KEY=${FILE_ENCRYPTION_KEY:-}
+      # Set to "true" to enable Swagger UI at /docs for development debugging
+      - QUODB_DOCS_ENABLED=${QUODB_DOCS_ENABLED:-false}
     volumes:
       - ./config.json:/app/config.json
       - quodb_data:/app/data
