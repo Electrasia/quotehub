@@ -27,6 +27,22 @@ logger = logging.getLogger(__name__)
 
 def _count_pages(filepath: Path) -> int:
     """Count pages (PDF) or sheets (XLSX) without a full parse."""
+    # Transparently decrypt file-at-rest encryption
+    from ..export_import import get_encryption_key, decrypt_file_to_temp
+    enc_key = get_encryption_key()
+    _tmp = None
+    if enc_key:
+        _tmp = decrypt_file_to_temp(filepath)
+        filepath = _tmp
+    try:
+        return _count_pages_impl(filepath)
+    finally:
+        if _tmp:
+            _tmp.unlink(missing_ok=True)
+
+
+def _count_pages_impl(filepath: Path) -> int:
+    """Inner implementation: count pages on an already-decrypted file."""
     suffix = filepath.suffix.lower()
     if suffix == ".pdf":
         try:
@@ -62,6 +78,22 @@ def _generate_page_images(filepath: Path) -> list[str]:
     
     Returns a list of relative URL paths (e.g. /images/{stem}/page_1.png).
     """
+    # Transparently decrypt file-at-rest encryption
+    from ..export_import import get_encryption_key, decrypt_file_to_temp
+    enc_key = get_encryption_key()
+    _tmp = None
+    if enc_key:
+        _tmp = decrypt_file_to_temp(filepath)
+        filepath = _tmp
+    try:
+        return _generate_page_images_impl(filepath)
+    finally:
+        if _tmp:
+            _tmp.unlink(missing_ok=True)
+
+
+def _generate_page_images_impl(filepath: Path) -> list[str]:
+    """Inner implementation: generate images from an already-decrypted file."""
     from ..main import IMAGES_DIR
     
     stem = filepath.stem
@@ -333,7 +365,24 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
             })
             errors.append({"filename": file.filename, "error": f"Unsupported file type: {ext}"})
             continue
-        
+
+        # Validate filename — reject path traversal
+        if ".." in file.filename or "/" in file.filename or "\\" in file.filename:
+            logger.warning("Upload rejected: unsafe filename", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': "Filename contains path separators"
+            })
+            errors.append({"filename": file.filename, "error": "Unsafe filename"})
+            continue
+
+        # Validate filename has a name part before the extension
+        stem = Path(file.filename).stem
+        if not stem:
+            logger.warning("Upload rejected: no filename stem", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': "Filename without base name"
+            })
+            errors.append({"filename": file.filename, "error": "Unsafe filename"})
+            continue
+
         # Read file into memory for validation before writing to disk
         content = await file.read()
 
@@ -359,6 +408,26 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
             errors.append({"filename": file.filename,
                            "error": f"File too large ({len(content) / 1024 / 1024:.1f} MB). Maximum: {limit_mb} MB"})
             continue
+
+        # Validate magic bytes — ensure file matches its extension
+        if ext == ".pdf" and not content[:4] == b"%PDF":
+            logger.warning("Upload rejected: invalid PDF magic bytes", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': 'Not a valid PDF file'
+            })
+            errors.append({"filename": file.filename, "error": "Invalid file content"})
+            continue
+        if ext == ".xlsx" and not content[:4] == b"PK\x03\x04":
+            logger.warning("Upload rejected: invalid XLSX magic bytes", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': 'Not a valid XLSX file'
+            })
+            errors.append({"filename": file.filename, "error": "Invalid file content"})
+            continue
+
+        # Encrypt at rest before writing to disk
+        from ..export_import import encrypt_file_at_rest, get_encryption_key
+        enc_key = get_encryption_key()
+        if enc_key:
+            content = encrypt_file_at_rest(content, enc_key)
 
         # Save file to temp directory
         filepath = UPLOAD_DIR / file.filename
@@ -514,6 +583,7 @@ async def process_stream(req: ProcessRequest):
         from ..parser import parse_file_with_ocr
         from ..extraction import extract_items_async
         from ..main import process_lock, IMAGES_DIR
+        from ..export_import import get_encryption_key, decrypt_file_to_temp
         
         import time
         start_time = time.time()
@@ -529,12 +599,21 @@ async def process_stream(req: ProcessRequest):
         
         await process_lock.acquire()
 
+        # Pre-decrypt file-at-rest encryption (if active) so parser and
+        # vision extraction receive a readable file path.
+        _enc_key = get_encryption_key()
+        _tmp_decrypted = None
+        active_path = Path(filepath)
+        if _enc_key and active_path.exists():
+            _tmp_decrypted = decrypt_file_to_temp(active_path)
+            active_path = _tmp_decrypted
+
         try:
             # Signal parsing started
             yield send({"type": "progress", "percent": 0, "page": 0, "total": 1, "message": "Parsing file..."})
 
             try:
-                parse_result = await parse_file_with_ocr(filepath)
+                parse_result = await parse_file_with_ocr(str(active_path))
             except Exception as e:
                 logger.error("Parse failed", extra={
                     'category': 'PROCESS',
@@ -556,16 +635,18 @@ async def process_stream(req: ProcessRequest):
                 return
 
             # Pass pdf_path so extraction router can use Vision LLM for scanned PDFs
-            parse_result["pdf_path"] = str(filepath)
+            parse_result["pdf_path"] = str(active_path)
 
             num_pages = parse_result.get("num_pages", 1)
 
             # Clean up stale page images from a previous (cancelled) run
+            # Use the original filename stem (not the random temp name)
             img_dir = IMAGES_DIR / Path(filepath).stem
             if img_dir.is_dir():
                 shutil.rmtree(img_dir)
 
             # Generate page images for the review PDF viewer
+            # _generate_page_images has its own transparent decryption wrapper
             try:
                 page_images = _generate_page_images(Path(filepath))
                 entry["pages"] = page_images
@@ -640,6 +721,8 @@ async def process_stream(req: ProcessRequest):
                 }
             })
         finally:
+            if _tmp_decrypted:
+                _tmp_decrypted.unlink(missing_ok=True)
             process_lock.release()
     
     return StreamingResponse(

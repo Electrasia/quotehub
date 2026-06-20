@@ -7,6 +7,9 @@ services:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
     ports:
       - "8000:8000"
+    environment:
+      # Generate a key:  python3 -c "import secrets; print(secrets.token_hex(32))"
+      - FILE_ENCRYPTION_KEY=${FILE_ENCRYPTION_KEY:-}
     volumes:
       - ./config.json:/app/config.json
       - quodb_data:/app/data

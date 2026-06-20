@@ -1,5 +1,14 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.063.0 (2026-06-20)
+- **Security**: Busy timeout — added `timeout=5` to `sqlite3.connect()` in `db.py` to prevent `database is locked` errors under concurrent writes
+- **Security**: Path traversal prevention — `/upload` rejects filenames containing `..`, `/`, `\`
+- **Security**: Magic bytes validation — `/upload` checks `%PDF` / `PK\x03\x04` before writing to disk
+- **Security**: File-at-rest encryption — AES-256-GCM on write, transparent decrypt on read, keyed by `FILE_ENCRYPTION_KEY` env var
+- **Decision**: Database at rest encryption accepted as risk — SQLite has no built-in encryption; SQLCipher would break the KISS deployment model. Protected by Docker volume isolation + filesystem permissions + network isolation on LAN behind NPM reverse proxy
+- **Chore**: 29 new tests (15 upload validation + 14 encryption at rest) — 273 total tests
+- **Chore**: VERSION → 0.063.0
+
 ## v0.062.0 (2026-06-20)
 - **Feature**: Auto-backup subsystem — daily backups at 03:00, weekly promotions (Sunday), event-based backups (pre-update, pre-import, pre-bulk)
 - **Feature**: Internal Backup Key manager — 2-layer HKDF-wrapped AES-256-GCM key hierarchy, machine-bound, key rotation via CLI

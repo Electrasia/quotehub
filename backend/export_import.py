@@ -103,6 +103,100 @@ def _derive_key(password: str | bytes, salt: bytes, iterations: int = PBKDF2_ITE
     return kdf.derive(pwd)
 
 
+def encrypt_file_at_rest(data: bytes, key: bytes) -> bytes:
+    """Encrypt file content with AES-256-GCM using a raw 32-byte key.
+
+    Format returned: nonce(16) + ciphertext + tag(16)
+    (32 bytes of overhead regardless of file size.)
+
+    Uses *key* directly with no PBKDF2 — this is for file-at-rest
+    encryption where the key itself is a high-entropy random secret
+    stored in an environment variable, so key stretching is unnecessary.
+
+    Raises:
+        ValueError: If *key* is not exactly 32 bytes.
+    """
+    if len(key) != AES_KEY_SIZE:
+        raise ValueError(f"Key must be exactly {AES_KEY_SIZE} bytes (got {len(key)})")
+    nonce = os.urandom(GCM_NONCE_SIZE)
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce))
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(data) + encryptor.finalize()
+    return nonce + ciphertext + encryptor.tag
+
+
+def decrypt_file_at_rest(data: bytes, key: bytes) -> bytes:
+    """Decrypt a file encrypted with :func:`encrypt_file_at_rest`.
+
+    Args:
+        data: nonce(16) + ciphertext + tag(16) from the earlier encryption.
+        key: 32-byte AES key (must match the key used for encryption).
+
+    Returns:
+        Original plaintext bytes.
+
+    Raises:
+        cryptography.hazmat.primitives.ciphers ... InvalidTag:
+            if the key is wrong or the data is corrupted.
+        ValueError: If *key* is not exactly 32 bytes.
+    """
+    if len(key) != AES_KEY_SIZE:
+        raise ValueError(f"Key must be exactly {AES_KEY_SIZE} bytes (got {len(key)})")
+    nonce = data[:GCM_NONCE_SIZE]
+    tag = data[-GCM_TAG_SIZE:]
+    ciphertext = data[GCM_NONCE_SIZE:-GCM_TAG_SIZE]
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
+    decryptor = cipher.decryptor()
+    return decryptor.update(ciphertext) + decryptor.finalize()
+
+
+def get_encryption_key() -> bytes | None:
+    """Read the file-at-rest encryption key from ``FILE_ENCRYPTION_KEY``.
+
+    The env var must be a 64-character hex string (32 raw bytes).
+    Returns ``None`` when the env var is unset or empty — in that case
+    no encryption is applied and all files are stored as plaintext
+    (backward-compatible behaviour).
+
+    Raise ``ValueError`` if the env var is set but is not a valid
+    64-char hex string.
+    """
+    hex_key = os.environ.get("FILE_ENCRYPTION_KEY", "")
+    if not hex_key:
+        return None
+    key = bytes.fromhex(hex_key)
+    if len(key) != AES_KEY_SIZE:
+        raise ValueError(
+            f"FILE_ENCRYPTION_KEY must decode to {AES_KEY_SIZE} bytes "
+            f"(got {len(key)} from {len(hex_key)} hex chars)"
+        )
+    return key
+
+
+def decrypt_file_to_temp(filepath: Path) -> Path:
+    """Decrypt *filepath* to a temporary file and return its path.
+
+    The caller **must** call ``unlink()`` on the returned path when
+    the decrypted data is no longer needed.  (The temp file lives on
+    disk — typically in ``/tmp/`` — to avoid filling memory with
+    large decrypted payloads.)
+
+    Raises:
+        RuntimeError: If ``FILE_ENCRYPTION_KEY`` is not set.
+    """
+    import tempfile
+    key = get_encryption_key()
+    if key is None:
+        raise RuntimeError("FILE_ENCRYPTION_KEY not set")
+    encrypted = filepath.read_bytes()
+    decrypted = decrypt_file_at_rest(encrypted, key)
+    fd, tmp_path = tempfile.mkstemp(suffix=filepath.suffix)
+    os.close(fd)
+    with open(tmp_path, "wb") as f:
+        f.write(decrypted)
+    return Path(tmp_path)
+
+
 def _file_sha256(path: Path) -> str:
     """Streaming SHA-256 of a file. Handles large files without loading into memory."""
     h = hashlib.sha256()
