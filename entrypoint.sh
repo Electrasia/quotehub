@@ -13,12 +13,16 @@
 #
 set -e
 
-# Fix ownership of the persistent data volume.
+# Fix ownership of the persistent data volume and config file.
+# - /app/data is the runtime volume for uploads, images, etc.
+# - /app/config.json is bind-mounted from the host; the runtime chown ensures
+#   the quodb user can write settings changes to it.
 # On a fresh volume this is a no-op (files are already owned by quodb:quodb
 # from the Dockerfile build step). On an existing volume created by a previous
 # version that ran as root, this fixes ownership so the non-root process can
 # write to it.
 chown -R quodb:quodb /app/data
+chown quodb:quodb /app/config.json
 
 # Drop privileges and run the application
 exec gosu quodb "$@"
