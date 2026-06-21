@@ -583,7 +583,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 5 | Infra | No health check on DB connection | Health endpoint exists, Docker HEALTHCHECK curls it — dead DB cascades to 500s → healthcheck fails. Sufficient for 10 users. | ✅ Accepted |
 | 6 | AI | No graceful degradation notification when AI server is down | Added yellow warning banner in review screen when `extraction_method === 'local'` — "AI server unreachable — extraction used local rules. Results may be limited." | ✅ Fixed |
 | 7 | Observability | No request ID tracing across logs | Overkill for 10 users on LAN. Docker logs + structured formatter provide enough traceability. | ✅ Accepted |
-| 8 | Infra | No resource limits on containers | Not added yet — left as-is for now. | ⏸️ Open |
+| 8 | Infra | No resource limits on containers | Added `deploy.resources.limits` to `docker-compose.yml`: 2 CPUs / 4 GB RAM. Docker throttles CPU and kills container on OOM; auto-restarts via `restart: unless-stopped`. | ✅ Fixed |
 | 9 | Infra | Single container, no HA | Added note in README.md Data Persistence section stating single-node deployment, no failover/clustering planned. | ✅ Fixed |
 | 14 | FastAPI | No global exception handler | Added `@app.exception_handler(Exception)` — logs full traceback server-side, returns safe 500 JSON. HTTPException/422 handlers unchanged. | ✅ Fixed |
 | 15 | Crypto | config.json plaintext on volume | AI endpoint is local LAN only — no credentials. Moving to env var would break Settings UI. | ✅ Accepted |
