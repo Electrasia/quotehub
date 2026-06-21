@@ -548,7 +548,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 15 | Crypto | config.json plaintext on volume | Load sensitive fields from env vars or separate secrets file with 0600 perms | 30 min |
 | 16 | Config | Lifespan startup logs AI endpoint URL to stdout — may contain API key in URL | Strip query params/creds from URL before logging | 5 min |
 | 17 | Tests | No FTS rebuild test | Added `INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild')` to docs and test | ✅ Fixed |
-| 18 | Docker | config.json copied into Docker image at build time — secrets baked into layer | Remove from build; mount-only from host volume; validate at entrypoint | 10 min |
+| 18 | Docker | config.json copied into Docker image at build time — secrets baked into layer | Removed `COPY config.json .` from Dockerfile; config is mount-only at runtime | ✅ Fixed |
 
 #### 🟢 P3 — Low priority
 

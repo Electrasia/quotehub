@@ -22,7 +22,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY VERSION ./VERSION
-COPY config.json .
 
 # Note: data/ is not copied from the build context because it's gitignored
 # (the directory would not exist on a fresh clone). The required subdirectories
