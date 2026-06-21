@@ -696,49 +696,64 @@ async function showAutoRestoreModal() {
 
 function renderAutoRestoreList(data) {
     const container = document.getElementById('autoRestoreList');
-    let html = '';
+    // Clear existing content using textContent-free method
+    container.innerHTML = '';
+
+    // Helper to build a single backup entry row using DOM APIs
+    // (avoids innerHTML string interpolation — prevents XSS from filenames/paths)
+    function _addBackupEntry(containerEl, f, iconClass, iconLabel) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:6px 8px;cursor:pointer;border-radius:4px;font-size:13px';
+        row.addEventListener('mouseenter', () => { row.style.background = iconClass; });
+        row.addEventListener('mouseleave', () => { row.style.background = ''; });
+        row.addEventListener('click', () => autoRestoreSelect(f.path));
+
+        const label = f.name.replace(/\.quodb$/, '').replace(/_/g, ' ');
+        const size = (f.sizeBytes / 1048576).toFixed(1);
+        row.textContent = `${iconLabel} ${label} (${size} MB)`;
+
+        containerEl.appendChild(row);
+    }
 
     // Daily + weekly (recent backups)
     const recent = [...(data.daily || []), ...(data.weekly || [])];
     recent.sort((a, b) => new Date(b.modifiedUtc) - new Date(a.modifiedUtc));
 
     if (recent.length > 0) {
-        html += '<h4 style="margin:8px 0 6px;font-size:13px">Recent automatic backups</h4>';
-        html += '<div style="margin-bottom:12px">';
+        const heading = document.createElement('h4');
+        heading.style.cssText = 'margin:8px 0 6px;font-size:13px';
+        heading.textContent = 'Recent automatic backups';
+        container.appendChild(heading);
+
+        const list = document.createElement('div');
+        list.style.marginBottom = '12px';
         for (const f of recent.slice(0, 10)) {
-            const label = f.name.replace(/\.quodb$/, '');
-            html += `<div style="padding:6px 8px;cursor:pointer;border-radius:4px;font-size:13px" 
-                         onmouseover="this.style.background='#e8f5e9'" 
-                         onmouseout="this.style.background=''"
-                         onclick="autoRestoreSelect('${f.path}')">
-                         📅 ${label} <span style="color:#999;font-size:11px">(${(f.sizeBytes / 1048576).toFixed(1)} MB)</span>
-                     </div>`;
+            _addBackupEntry(list, f, '#e8f5e9', '📅');
         }
-        html += '</div>';
+        container.appendChild(list);
     }
 
     // Events
     if (data.events && data.events.length > 0) {
-        html += '<h4 style="margin:8px 0 6px;font-size:13px">Before recent events</h4>';
-        html += '<div style="margin-bottom:12px">';
+        const heading = document.createElement('h4');
+        heading.style.cssText = 'margin:8px 0 6px;font-size:13px';
+        heading.textContent = 'Before recent events';
+        container.appendChild(heading);
+
+        const list = document.createElement('div');
+        list.style.marginBottom = '12px';
         for (const f of data.events.slice(0, 20)) {
-            // Build a human-readable label from the filename
-            let label = f.name.replace(/\.quodb$/, '').replace(/_/g, ' ');
-            html += `<div style="padding:6px 8px;cursor:pointer;border-radius:4px;font-size:13px"
-                         onmouseover="this.style.background='#fff3e0'"
-                         onmouseout="this.style.background=''"
-                         onclick="autoRestoreSelect('${f.path}')">
-                         🔶 ${label} <span style="color:#999;font-size:11px">(${(f.sizeBytes / 1048576).toFixed(1)} MB)</span>
-                     </div>`;
+            _addBackupEntry(list, f, '#fff3e0', '🔶');
         }
-        html += '</div>';
+        container.appendChild(list);
     }
 
     if (!recent.length && (!data.events || !data.events.length)) {
-        html = '<p style="font-size:13px;color:#999">No automatic backups found.</p>';
+        const msg = document.createElement('p');
+        msg.style.cssText = 'font-size:13px;color:#999';
+        msg.textContent = 'No automatic backups found.';
+        container.appendChild(msg);
     }
-
-    container.innerHTML = html;
 }
 
 async function autoRestoreSelect(filePath) {
