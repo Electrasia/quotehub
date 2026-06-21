@@ -37,6 +37,13 @@ function showReview(filename) {
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
     updateDocumentTypeWarning();
+
+    // Show AI fallback warning if extraction fell to local rules
+    const fallbackWarn = document.getElementById('aiFallbackWarning');
+    if (fallbackWarn) {
+        fallbackWarn.style.display = (extractedData.extraction_method === 'local') ? 'block' : 'none';
+    }
+
     reviewAutoFit = true;
     goToStep(4);
     updateReviewPdf();

@@ -581,7 +581,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | # | Area | Finding | Resolution | Status |
 |---|------|---------|-----------|--------|
 | 5 | Infra | No health check on DB connection | Health endpoint exists, Docker HEALTHCHECK curls it — dead DB cascades to 500s → healthcheck fails. Sufficient for 10 users. | ✅ Accepted |
-| 6 | AI | No graceful degradation notification when AI server is down | Extraction silently falls to local rules — no UI notification. Would improve UX but left as-is for now. | ⏸️ Open |
+| 6 | AI | No graceful degradation notification when AI server is down | Added yellow warning banner in review screen when `extraction_method === 'local'` — "AI server unreachable — extraction used local rules. Results may be limited." | ✅ Fixed |
 | 7 | Observability | No request ID tracing across logs | Overkill for 10 users on LAN. Docker logs + structured formatter provide enough traceability. | ✅ Accepted |
 | 8 | Infra | No resource limits on containers | Not added yet — left as-is for now. | ⏸️ Open |
 | 9 | Infra | Single container, no HA | Added note in README.md Data Persistence section stating single-node deployment, no failover/clustering planned. | ✅ Fixed |
@@ -679,7 +679,6 @@ Items still needed before the app can be considered production-ready:
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (274 expected)
 4. All audit items addressed (21/21 P0–P3 from the production-readiness audit). Left as-is:
-   - **P2-6**: AI degradation UX notification (nice-to-have)
    - **P2-8**: Container resource limits (5 min)
    - **P3-11**: CI linting (no CI pipeline)
    - **P3-12**: Container scanning (manual `docker scout quick` before releases)
