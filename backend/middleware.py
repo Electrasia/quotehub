@@ -90,6 +90,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = self.CSP_HEADER
+        response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
 

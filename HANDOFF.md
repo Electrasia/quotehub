@@ -559,7 +559,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 12 | CI | No `docker scan` / Trivy in CI | Add container image scanning step | 1 day |
 | 19 | FastAPI | No CORSMiddleware | Same-origin app — not needed for browser use, but API open to Docker-network clients | Added `CORSMiddleware(allow_origins=["*"])` with intent documented; session cookie uses `same_site="lax"` as real defense | ✅ Fixed |
 | 20 | Deploy | No Content-Security-Policy header | No CSP — if XSS is found, attacker can exfiltrate data; but LAN+no-internet mitigates | Added `CSPMiddleware` with `default-src 'self'` policy; `'unsafe-inline'` required for existing inline event handlers | ✅ Fixed |
-| 21 | Deploy | No X-Content-Type-Options header | Browser MIME-sniffing enabled by default | Add `X-Content-Type-Options: nosniff` via middleware | 5 min |
+| 21 | Deploy | No X-Content-Type-Options header | Browser MIME-sniffing enabled by default | Added `X-Content-Type-Options: nosniff` to CSPMiddleware | ✅ Fixed |
 
 ---
 
