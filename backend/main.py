@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -319,6 +320,15 @@ app.add_middleware(SecureCookieMiddleware)
 # On a LAN behind NPM with session auth this is defense-in-depth;
 # the wildcard avoids operational churn when server IPs or hostnames change.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+# CORS — open to all origins.
+# The frontend is served same-origin (FastAPI serves index.html), so CORS
+# is not exercised in normal use. The wildcard is safe because the session
+# cookie uses same_site="lax", which blocks cross-origin requests regardless
+# of CORS policy. The open policy prevents operational issues (port changes,
+# reverse proxy, etc.) with no practical attack surface.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                   allow_methods=["*"], allow_headers=["*"])
 
 # ─── Global Exception Handler ──────────────────────────────
 # Logs the full traceback server-side for any unhandled exception,

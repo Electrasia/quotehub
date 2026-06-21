@@ -557,6 +557,9 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 10 | Build | No version pinning in `requirements.txt` (uses `>=` ranges) | Pin exact versions and use `pip freeze` or `pip-compile` | 1 hour |
 | 11 | CI | No linting in CI | Add `ruff` or `flake8` to CI pipeline | 1 day |
 | 12 | CI | No `docker scan` / Trivy in CI | Add container image scanning step | 1 day |
+| 19 | FastAPI | No CORSMiddleware | Same-origin app — not needed for browser use, but API open to Docker-network clients | Added `CORSMiddleware(allow_origins=["*"])` with intent documented; session cookie uses `same_site="lax"` as real defense | ✅ Fixed |
+| 20 | Deploy | No Content-Security-Policy header | No CSP — if XSS is found, attacker can exfiltrate data; but LAN+no-internet mitigates | Add CSP via middleware or NPM response header | 15 min |
+| 21 | Deploy | No X-Content-Type-Options header | Browser MIME-sniffing enabled by default | Add `X-Content-Type-Options: nosniff` via middleware | 5 min |
 
 ---
 
@@ -634,9 +637,9 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. All 🔴 P0 items addressed. All 🟡 P1 items addressed. P2-14 (global exception handler) and P2-17 (FTS rebuild test) fixed. Remaining P2–P3 items:
-   - **P2-15**: config.json secrets in env var or separate secrets file (accepted — local-only AI endpoint, no credentials)
-   - **P2-16**: Strip credentials from AI endpoint before logging (accepted — local-only, never external)
-   - **P2-18**: Remove config.json from Docker build layer
-   - **P2-5 to P2-9**: DB health check, AI degradation notification, request tracing, resource limits, HA doc
-   - **P3-10 to P3-12**: Version pinning, CI linting, container scanning
+4. All P0, P1, P2 items addressed. P3-19 (CORSMiddleware) fixed. Remaining P3:
+   - **P3-20**: Content-Security-Policy header (accepted or implement)
+   - **P3-21**: X-Content-Type-Options header (5 min)
+   - **P3-10**: Version pinning in requirements.txt
+   - **P3-11**: CI linting
+   - **P3-12**: Container scanning in CI
