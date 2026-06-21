@@ -18,7 +18,8 @@ import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -318,6 +319,23 @@ app.add_middleware(SecureCookieMiddleware)
 # On a LAN behind NPM with session auth this is defense-in-depth;
 # the wildcard avoids operational churn when server IPs or hostnames change.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+# ─── Global Exception Handler ──────────────────────────────
+# Logs the full traceback server-side for any unhandled exception,
+# then returns a safe generic 500 response to the client.
+# FastAPI's built-in HTTPException and RequestValidationError handlers
+# take precedence (they're more specific), so this only catches true
+# 500-level errors that would otherwise disappear silently.
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+    )
+
 
 # ─── Register Routes ──────────────────────────────────────
 

@@ -525,6 +525,11 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 7 | Observability | No request ID tracing across logs | Add `uuid4` per-request ID in middleware, include in log lines | 1 day |
 | 8 | Infra | No resource limits on containers (CPU/memory) | Add `deploy.resources.limits` to `docker-compose.yml` | 5 min |
 | 9 | Infra | Single container, no HA | Document that this is a single-node deployment; no HA planned | 1 hour |
+| 14 | FastAPI | No global exception handler | Added `@app.exception_handler(Exception)` that logs full traceback server-side, returns safe JSON to client | ✅ Fixed |
+| 15 | Crypto | config.json plaintext on volume | Load sensitive fields from env vars or separate secrets file with 0600 perms | 30 min |
+| 16 | Config | Lifespan startup logs AI endpoint URL to stdout — may contain API key in URL | Strip query params/creds from URL before logging | 5 min |
+| 17 | Tests | No FTS rebuild test | Add `INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild')` to docs and test | 15 min |
+| 18 | Docker | config.json copied into Docker image at build time — secrets baked into layer | Remove from build; mount-only from host volume; validate at entrypoint | 10 min |
 
 #### 🟢 P3 — Low priority
 
@@ -610,9 +615,10 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. All 🔴 P0 items addressed. All 🟡 P1 items addressed. Next focus: 🟡 P2–P3 items from the full finding list below:
-   - **P1-1, P1-2** — ✅ Done. `showBriefPopup`/`showConfirmPopup` XSS sinks fixed.
-   - **P1-3** — ✅ Done. `renderAutoRestoreList()` XSS sink fixed (DOM APIs, no innerHTML).
-   - **P1-4** — ✅ Done. `Content-Length` header check at upload boundary (413 before body read).
+4. All 🔴 P0 items addressed. All 🟡 P1 items addressed. P2-14 (global exception handler) fixed. Remaining P2–P3 items:
+   - **P2-15**: config.json secrets in env var or separate secrets file
+   - **P2-16**: Strip credentials from AI endpoint before logging
+   - **P2-17**: FTS rebuild test & docs
+   - **P2-18**: Remove config.json from Docker build layer
    - **P2-5 to P2-9**: DB health check, AI degradation notification, request tracing, resource limits, HA doc
    - **P3-10 to P3-12**: Version pinning, CI linting, container scanning
