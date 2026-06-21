@@ -15,6 +15,14 @@
 - **Security**: Content-Length check — early `413 Payload Too Large` rejection at network boundary in `/upload` if content-length exceeds `max_upload_size_mb`
 - **Decision**: Database at rest encryption accepted as risk — SQLite has no built-in encryption; SQLCipher would break the KISS deployment model. Protected by Docker volume isolation + filesystem permissions + network isolation on LAN behind NPM reverse proxy
 - **Chore**: 3 new upload validation tests; updated oversized test to expect 413 — 273 total tests
+- **Security**: Global exception handler — `@app.exception_handler(Exception)` logs full traceback server-side, returns safe 500 JSON to client (P2-14)
+- **Chore**: FTS rebuild test — `TestFtsRebuild` verifies `INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild')` preserves search (P2-17)
+- **Security**: Removed `COPY config.json .` from Dockerfile — config is mount-only at runtime, prevents secrets in image layers (P2-18)
+- **Security**: Added `CORSMiddleware(allow_origins=["*"])` with documented intent (P3-19)
+- **Security**: Added `Content-Security-Policy` header via `CSPMiddleware` (P3-20)
+- **Security**: Added `X-Content-Type-Options: nosniff` header (P3-21)
+- **Chore**: Pinned all dependencies to exact versions (`cryptography==48.0.0`, `bcrypt==4.0.1`) (P3-10)
+- **Chore**: 1 new FTS rebuild test — 274 total tests
 - **Chore**: VERSION → 0.063.0
 
 ## v0.062.0 (2026-06-20)
