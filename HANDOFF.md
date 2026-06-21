@@ -558,7 +558,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 11 | CI | No linting in CI | Add `ruff` or `flake8` to CI pipeline | 1 day |
 | 12 | CI | No `docker scan` / Trivy in CI | Add container image scanning step | 1 day |
 | 19 | FastAPI | No CORSMiddleware | Same-origin app — not needed for browser use, but API open to Docker-network clients | Added `CORSMiddleware(allow_origins=["*"])` with intent documented; session cookie uses `same_site="lax"` as real defense | ✅ Fixed |
-| 20 | Deploy | No Content-Security-Policy header | No CSP — if XSS is found, attacker can exfiltrate data; but LAN+no-internet mitigates | Add CSP via middleware or NPM response header | 15 min |
+| 20 | Deploy | No Content-Security-Policy header | No CSP — if XSS is found, attacker can exfiltrate data; but LAN+no-internet mitigates | Added `CSPMiddleware` with `default-src 'self'` policy; `'unsafe-inline'` required for existing inline event handlers | ✅ Fixed |
 | 21 | Deploy | No X-Content-Type-Options header | Browser MIME-sniffing enabled by default | Add `X-Content-Type-Options: nosniff` via middleware | 5 min |
 
 ---
@@ -637,8 +637,7 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. All P0, P1, P2 items addressed. P3-19 (CORSMiddleware) fixed. Remaining P3:
-   - **P3-20**: Content-Security-Policy header (accepted or implement)
+4. All P0, P1, P2 items addressed. P3-19 (CORSMiddleware) and P3-20 (CSP) fixed. Remaining P3:
    - **P3-21**: X-Content-Type-Options header (5 min)
    - **P3-10**: Version pinning in requirements.txt
    - **P3-11**: CI linting

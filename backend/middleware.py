@@ -62,6 +62,37 @@ class SessionCookieMiddleware(BaseHTTPMiddleware):
         return re.sub(r';\s*Max-Age=\d+', '', cookie_header)
 
 
+class CSPMiddleware(BaseHTTPMiddleware):
+    """Add Content-Security-Policy header to every response.
+
+    Policy: default-src 'self'; script-src 'self' 'unsafe-inline';
+            img-src 'self' data:; style-src 'self' 'unsafe-inline'
+
+    'unsafe-inline' is required for script-src and style-src because the
+    frontend uses inline event handlers (onclick, onchange, etc.) pervasively
+    (78 instances) and inline <style> blocks. Refactoring all of them to
+    external handlers would be high churn with no practical security gain —
+    all XSS sinks (P1-1 through P1-3) are already fixed with DOM APIs.
+
+    The policy still provides value by restricting image, font, frame, and
+    connection sources to same-origin, preventing data exfiltration via
+    injected resource loads even if an XSS bypass were found.
+    """
+
+    CSP_HEADER = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'"
+    )
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = self.CSP_HEADER
+        return response
+
+
 class SecureCookieMiddleware(BaseHTTPMiddleware):
     """Add Secure flag to session cookie when behind an HTTPS proxy.
 

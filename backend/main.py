@@ -312,9 +312,13 @@ app.add_middleware(
     https_only=False,
     max_age=14 * 24 * 60 * 60,  # 14 days for signature validation
 )
-from .middleware import SessionCookieMiddleware, SecureCookieMiddleware
+from .middleware import SessionCookieMiddleware, SecureCookieMiddleware, CSPMiddleware
 app.add_middleware(SessionCookieMiddleware)
 app.add_middleware(SecureCookieMiddleware)
+
+# CSP — defense-in-depth content security policy.
+# See CSPMiddleware docstring in middleware.py for rationale.
+app.add_middleware(CSPMiddleware)
 
 # Host header validation — accept all origins.
 # On a LAN behind NPM with session auth this is defense-in-depth;
