@@ -14,6 +14,7 @@ This module handles:
 import calendar
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from collections import Counter
@@ -259,7 +260,7 @@ async def cleanup_execute(req: CleanupExecuteRequest):
 @router.get("/cleanup/stats", dependencies=[Depends(require_role("master"))])
 async def cleanup_stats():
     """Get current database and file statistics for cleanup overview."""
-    from ..main import ARCHIVE_DIR, IMAGES_DIR, UPLOAD_DIR, uploaded_files
+    from ..main import ARCHIVE_DIR, IMAGES_DIR, UPLOAD_DIR, uploaded_files, uploaded_files_lock
     
     stats = {}
     
@@ -302,7 +303,8 @@ async def cleanup_stats():
                     pass
     
     # ── Queue reference set ──
-    queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
+    async with uploaded_files_lock:
+        queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
     queue_stems = {Path(fname).stem for fname in queue_filenames}
     
     # ── Active stems (anything referenced by queue, archive, or DB) ──
@@ -363,10 +365,11 @@ async def cleanup_purge_orphans():
     Returns counts and bytes freed.
     """
     import shutil
-    from ..main import uploaded_files, UPLOAD_DIR, ARCHIVE_DIR, IMAGES_DIR
+    from ..main import uploaded_files, uploaded_files_lock, UPLOAD_DIR, ARCHIVE_DIR, IMAGES_DIR
     
     # ── Build reference sets ──
-    queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
+    async with uploaded_files_lock:
+        queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
     queue_stems = {Path(fname).stem for fname in queue_filenames}
     
     archive_stems = set()
@@ -437,7 +440,8 @@ async def search(q: str = "", document_type: str = ""):
     with get_db(readonly=True) as db:
         if q:
             words = q.strip().split()
-            fts_words = [w.replace('"', '""') + '*' for w in words]
+            sanitized = [re.sub(r'[^\w]', '', w) for w in words if re.sub(r'[^\w]', '', w)]
+            fts_words = [w.replace('"', '""') + '*' for w in sanitized]
             fts_query = " ".join(fts_words)
             
             # Build base query with optional document_type filter

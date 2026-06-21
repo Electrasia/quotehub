@@ -253,29 +253,31 @@ def _generate_page_images_impl(filepath: Path) -> list[str]:
     return pages
 
 
-def _find_file_by_id(file_id: str) -> tuple[int, dict] | None:
+async def _find_file_by_id(file_id: str) -> tuple[int, dict] | None:
     """Find a file entry by its stable file_id. Returns (index, entry) or None."""
-    from ..main import uploaded_files
-    for i, entry in enumerate(uploaded_files):
-        if entry.get("file_id") == file_id:
-            return i, entry
+    from ..main import uploaded_files, uploaded_files_lock
+    async with uploaded_files_lock:
+        for i, entry in enumerate(uploaded_files):
+            if entry.get("file_id") == file_id:
+                return i, entry
     return None
 
 
-def _find_file_by_index(file_index: int) -> tuple[int, dict] | None:
+async def _find_file_by_index(file_index: int) -> tuple[int, dict] | None:
     """Find a file entry by its array index (legacy). Returns (index, entry) or None."""
-    from ..main import uploaded_files
-    if 0 <= file_index < len(uploaded_files):
-        return file_index, uploaded_files[file_index]
+    from ..main import uploaded_files, uploaded_files_lock
+    async with uploaded_files_lock:
+        if 0 <= file_index < len(uploaded_files):
+            return file_index, uploaded_files[file_index]
     return None
 
 
-def _resolve_file(file_id: str | None = None, file_index: int | None = None) -> tuple[int, dict] | None:
+async def _resolve_file(file_id: str | None = None, file_index: int | None = None) -> tuple[int, dict] | None:
     """Resolve a file by file_id (preferred) or file_index (fallback)."""
     if file_id:
-        return _find_file_by_id(file_id)
+        return await _find_file_by_id(file_id)
     if file_index is not None:
-        return _find_file_by_index(file_index)
+        return await _find_file_by_index(file_index)
     return None
 
 from ..auth import require_role
@@ -318,7 +320,7 @@ class RemoveFileRequest(BaseModel):
 @router.post("/upload", dependencies=[Depends(require_role("admin", "master"))])
 async def upload(files: list[UploadFile] = File(...), request: Request = None):
     """Upload PDF or XLSX files for processing."""
-    from ..main import uploaded_files, UPLOAD_DIR
+    from ..main import uploaded_files, uploaded_files_lock, UPLOAD_DIR
     from ..auth import get_current_user
     from collections import Counter
     
@@ -343,7 +345,8 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
     errors = []
     
     # Compute queue size once (non-saved files only)
-    pending_count = sum(1 for f in uploaded_files if f.get("status") != "saved")
+    async with uploaded_files_lock:
+        pending_count = sum(1 for f in uploaded_files if f.get("status") != "saved")
     MAX_QUEUED = 50
     
     for file in files:
@@ -352,11 +355,12 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
 
         # Reject if queue would exceed the limit
         if pending_count >= MAX_QUEUED:
-            owner_counts = Counter(
-                f.get("uploaded_by", "unknown")
-                for f in uploaded_files
-                if f.get("status") != "saved"
-            )
+            async with uploaded_files_lock:
+                owner_counts = Counter(
+                    f.get("uploaded_by", "unknown")
+                    for f in uploaded_files
+                    if f.get("status") != "saved"
+                )
             top_user, top_count = owner_counts.most_common(1)[0]
             logger.warning("Upload rejected: queue full", extra={
                 'category': 'PROCESS', 'file': file.filename,
@@ -460,13 +464,15 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
             "pages": [],
             "uploaded_by": username,
         }
-        uploaded_files.append(entry)
+        async with uploaded_files_lock:
+            uploaded_files.append(entry)
+            file_index = len(uploaded_files) - 1
         pending_count += 1  # Track for subsequent files in this batch
         results.append({
             "file_id": file_id,
             "filename": file.filename,
             "status": "uploaded",
-            "file_index": len(uploaded_files) - 1,
+            "file_index": file_index,
             "num_pages": num_pages,
             "uploaded_by": username,
         })
@@ -479,26 +485,27 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
         })
     
     from ..main import save_upload_state
-    save_upload_state()
+    await save_upload_state()
     return {"uploaded": len(results), "files": results, "errors": errors}
 
 
 @router.post("/clear", dependencies=[Depends(require_role("admin", "master"))])
 async def clear_files():
     """Clear all uploaded files and clean up files on disk."""
-    from ..main import uploaded_files, IMAGES_DIR
+    from ..main import uploaded_files, uploaded_files_lock, IMAGES_DIR
     from pathlib import Path
 
-    for entry in uploaded_files:
-        filepath = Path(entry.get("filepath", ""))
-        if filepath.is_file():
-            filepath.unlink()
-            img_dir = IMAGES_DIR / filepath.stem
-            if img_dir.exists():
-                shutil.rmtree(str(img_dir), ignore_errors=True)
-    uploaded_files.clear()
+    async with uploaded_files_lock:
+        for entry in uploaded_files:
+            filepath = Path(entry.get("filepath", ""))
+            if filepath.is_file():
+                filepath.unlink()
+                img_dir = IMAGES_DIR / filepath.stem
+                if img_dir.exists():
+                    shutil.rmtree(str(img_dir), ignore_errors=True)
+        uploaded_files.clear()
     from ..main import save_upload_state
-    save_upload_state()
+    await save_upload_state()
     logger.info("All files cleared", extra={
         'category': 'PROCESS'
     })
@@ -508,8 +515,8 @@ async def clear_files():
 @router.post("/remove-file", dependencies=[Depends(require_role("admin", "master"))])
 async def remove_file(req: RemoveFileRequest):
     """Remove a single uploaded file by its stable file_id."""
-    from ..main import uploaded_files, IMAGES_DIR
-    result = _find_file_by_id(req.file_id)
+    from ..main import uploaded_files, uploaded_files_lock, IMAGES_DIR
+    result = await _find_file_by_id(req.file_id)
     if result is None:
         raise HTTPException(status_code=404, detail="File not found")
     idx, entry = result
@@ -524,9 +531,10 @@ async def remove_file(req: RemoveFileRequest):
         img_dir = IMAGES_DIR / filepath.stem
         if img_dir.exists():
             shutil.rmtree(str(img_dir), ignore_errors=True)
-    uploaded_files.pop(idx)
+    async with uploaded_files_lock:
+        uploaded_files.pop(idx)
     from ..main import save_upload_state
-    save_upload_state()
+    await save_upload_state()
     logger.info("File removed", extra={
         'category': 'PROCESS',
         'file_id': req.file_id
@@ -537,18 +545,19 @@ async def remove_file(req: RemoveFileRequest):
 @router.get("/queue", dependencies=[Depends(require_role("admin", "master"))])
 async def get_queue():
     """Return the current upload queue (persisted across restarts)."""
-    from ..main import uploaded_files
-    return {"files": uploaded_files}
+    from ..main import uploaded_files, uploaded_files_lock
+    async with uploaded_files_lock:
+        return {"files": list(uploaded_files)}
 
 
 @router.get("/next-file", dependencies=[Depends(require_role("admin", "master"))])
 async def next_file(file_id: str | None = None, file_index: int = -1):
     """Get next file for processing, or pages for a specific file."""
-    from ..main import uploaded_files, IMAGES_DIR
+    from ..main import uploaded_files, uploaded_files_lock, IMAGES_DIR
     
     # If file_id is provided, return pages for that file (used by review step)
     if file_id:
-        result = _find_file_by_id(file_id)
+        result = await _find_file_by_id(file_id)
         if result:
             idx, entry = result
             filepath = Path(entry.get("filepath", ""))
@@ -558,20 +567,21 @@ async def next_file(file_id: str | None = None, file_index: int = -1):
                 pages = sorted([f"/images/{filepath.stem}/{p.name}" for p in img_dir.glob("page_*.png")])
             return {"file_id": file_id, "file_index": idx, "filename": entry["filename"], "pages": pages}
     
-    # Legacy: if file_index is provided, return pages for that file
-    if file_index >= 0 and file_index < len(uploaded_files):
-        entry = uploaded_files[file_index]
-        filepath = Path(entry.get("filepath", ""))
-        img_dir = IMAGES_DIR / filepath.stem
-        pages = []
-        if img_dir.is_dir():
-            pages = sorted([f"/images/{filepath.stem}/{p.name}" for p in img_dir.glob("page_*.png")])
-        return {"file_id": entry.get("file_id"), "file_index": file_index, "filename": entry["filename"], "pages": pages}
-    
-    # Otherwise, find next uploaded file
-    for i, entry in enumerate(uploaded_files):
-        if entry["status"] == "uploaded":
-            return {"file_id": entry.get("file_id"), "file_index": i, "filename": entry["filename"]}
+    async with uploaded_files_lock:
+        # Legacy: if file_index is provided, return pages for that file
+        if file_index >= 0 and file_index < len(uploaded_files):
+            entry = uploaded_files[file_index]
+            filepath = Path(entry.get("filepath", ""))
+            img_dir = IMAGES_DIR / filepath.stem
+            pages = []
+            if img_dir.is_dir():
+                pages = sorted([f"/images/{filepath.stem}/{p.name}" for p in img_dir.glob("page_*.png")])
+            return {"file_id": entry.get("file_id"), "file_index": file_index, "filename": entry["filename"], "pages": pages}
+        
+        # Otherwise, find next uploaded file
+        for i, entry in enumerate(uploaded_files):
+            if entry["status"] == "uploaded":
+                return {"file_id": entry.get("file_id"), "file_index": i, "filename": entry["filename"]}
     return {"file_id": None, "file_index": -1}
 
 
@@ -580,10 +590,10 @@ async def next_file(file_id: str | None = None, file_index: int = -1):
 @router.post("/process-stream", dependencies=[Depends(require_role("admin", "master"))])
 async def process_stream(req: ProcessRequest):
     """Process a file with streaming progress updates (SSE)."""
-    from ..main import uploaded_files
+    from ..main import uploaded_files, uploaded_files_lock
     from fastapi.responses import StreamingResponse
     
-    resolved = _resolve_file(file_id=req.file_id, file_index=req.file_index)
+    resolved = await _resolve_file(file_id=req.file_id, file_index=req.file_index)
     if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -663,7 +673,8 @@ async def process_stream(req: ProcessRequest):
             # _generate_page_images has its own transparent decryption wrapper
             try:
                 page_images = _generate_page_images(Path(filepath))
-                entry["pages"] = page_images
+                async with uploaded_files_lock:
+                    entry["pages"] = page_images
             except Exception:
                 logger.warning("Page image generation failed for %s", entry.get("filename"), exc_info=True)
                 page_images = []
@@ -755,9 +766,9 @@ async def process_stream(req: ProcessRequest):
 @router.post("/confirm", dependencies=[Depends(require_role("admin", "master"))])
 async def confirm(req: ConfirmRequest):
     """Save processed data to database."""
-    from ..main import uploaded_files, ARCHIVE_DIR, IMAGES_DIR
+    from ..main import uploaded_files, uploaded_files_lock, ARCHIVE_DIR, IMAGES_DIR
     
-    resolved = _resolve_file(file_id=req.file_id, file_index=req.file_index)
+    resolved = await _resolve_file(file_id=req.file_id, file_index=req.file_index)
     if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -794,16 +805,17 @@ async def confirm(req: ConfirmRequest):
     if img_dir.exists():
         shutil.rmtree(str(img_dir))
     
-    entry["status"] = "saved"
+    async with uploaded_files_lock:
+        entry["status"] = "saved"
     from ..main import save_upload_state
-    save_upload_state()
+    await save_upload_state()
     
     logger.info("Quotation saved", extra={
         'category': 'PROCESS',
         'file': entry["filename"],
         'file_id': req.file_id,
         'db_id': last_id,
-        'supplier': supplier,
+        'supplier': '[REDACTED]',
         'document_type': document_type,
         'items': len(items)
     })
@@ -814,14 +826,15 @@ async def confirm(req: ConfirmRequest):
 @router.post("/skip", dependencies=[Depends(require_role("admin", "master"))])
 async def skip(req: ProcessRequest):
     """Skip current file."""
-    from ..main import uploaded_files
-    resolved = _resolve_file(file_id=req.file_id, file_index=req.file_index)
+    from ..main import uploaded_files, uploaded_files_lock
+    resolved = await _resolve_file(file_id=req.file_id, file_index=req.file_index)
     if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
     idx, entry = resolved
-    entry["status"] = "skipped"
+    async with uploaded_files_lock:
+        entry["status"] = "skipped"
     from ..main import save_upload_state
-    save_upload_state()
+    await save_upload_state()
     logger.info("File skipped", extra={
         'category': 'PROCESS',
         'file': entry["filename"],
@@ -912,7 +925,7 @@ async def update(req: UpdateRequest):
     logger.info("Quotation updated", extra={
         'category': 'PROCESS',
         'quotation_id': req.id,
-        'supplier': supplier
+        'supplier': '[REDACTED]'
     })
     
     return {"status": "updated"}

@@ -56,7 +56,8 @@ CONFIG = load_config()
 
 ai_connected = False
 uploaded_files = []
-process_lock = asyncio.Lock()
+uploaded_files_lock = asyncio.Lock()
+process_lock = None
 
 # ─── Log Buffer ───────────────────────────────────────────
 
@@ -191,7 +192,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_STATE_PATH = Path(__file__).parent.parent / "data" / "upload_state.json"
 
 
-def load_upload_state():
+async def load_upload_state():
     """Restore uploaded files from previous session."""
     global uploaded_files
     if UPLOAD_STATE_PATH.exists():
@@ -211,28 +212,30 @@ def load_upload_state():
                     entry["pages"] = [f"/images/{filepath.stem}/{p.name}" for p in page_files]
                     entry["num_pages"] = len(page_files)
                     restored.append(entry)
-            uploaded_files = restored
+            async with uploaded_files_lock:
+                uploaded_files = restored
             print(f"Restored {len(restored)} file(s) from previous session")
         except Exception as e:
             logger.warning("Failed to load upload state: %s", e, exc_info=True)
             print(f"Failed to load upload state: {e}")
 
 
-def save_upload_state():
+async def save_upload_state():
     """Save uploaded files state for persistence."""
     try:
-        to_save = []
-        for entry in uploaded_files:
-            to_save.append({
-                "file_id": entry.get("file_id"),
-                "filename": entry["filename"],
-                "filepath": entry["filepath"],
-                "status": entry["status"],
-                "pages": entry.get("pages", []),
-                "num_pages": entry.get("num_pages", 0),
-                "progress": entry.get("progress", ""),
-                "uploaded_by": entry.get("uploaded_by", "unknown"),
-            })
+        async with uploaded_files_lock:
+            to_save = []
+            for entry in uploaded_files:
+                to_save.append({
+                    "file_id": entry.get("file_id"),
+                    "filename": entry["filename"],
+                    "filepath": entry["filepath"],
+                    "status": entry["status"],
+                    "pages": entry.get("pages", []),
+                    "num_pages": entry.get("num_pages", 0),
+                    "progress": entry.get("progress", ""),
+                    "uploaded_by": entry.get("uploaded_by", "unknown"),
+                })
         with open(UPLOAD_STATE_PATH, "w") as f:
             json.dump(to_save, f, indent=2)
     except Exception as e:
@@ -273,11 +276,12 @@ SECRET_KEY = _get_or_create_secret_key()
 async def lifespan(app: FastAPI):
     """App startup and shutdown events."""
     cfg = load_config()
-    print(f"QuoDB starting. AI endpoint: {cfg.get('ai_endpoint', 'NOT SET')}")
+    ep = cfg.get('ai_endpoint', '')
+    print(f"QuoDB starting. AI endpoint: {'configured' if ep else 'NOT SET'}")
     print(f"QuoDB starting. AI model: {cfg.get('model', 'NOT SET')}")
     print(f"QuoDB starting. AI connected: {ai_connected}")
     auth.bootstrap_master()
-    load_upload_state()
+    await load_upload_state()
 
     # Start the auto-backup subsystem (key init, catch-up, background scheduler)
     try:
@@ -286,6 +290,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Auto-backup subsystem failed to start — continuing without it",
                        extra={'category': 'SYSTEM'})
+
+    global process_lock
+    process_lock = asyncio.Lock()
 
     yield
     logger.info("QuoDB shutting down", extra={'category': 'SYSTEM'})

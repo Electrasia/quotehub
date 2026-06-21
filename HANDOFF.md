@@ -2,11 +2,45 @@
 
 ## Current Version
 
-**v0.063.0** (dev branch)
+**v0.063.1** (dev branch)
 
 ---
 
 ## Last Completed Work
+
+### v0.063.1 — Production audit remaining red flags (8 fixes)
+
+Addresses the 8 remaining red flags from the production audit (FTS-01, ST-01, ST-02, DB-04, TMP-01, REQ-01, SEC-01, RF-07).
+
+**Fixed — FTS-01 (FTS5 MATCH injection):**
+- `backend/routes/admin.py` — Search terms are now sanitized with `re.sub(r'[^\w]', '', w)` before building the FTS5 query. Strips FTS5 operators (`-`, `+`, `AND`, `OR`, `NOT`, `NEAR`, `*`, parentheses) so they can't alter query semantics. A search for `-701` now correctly finds items containing `701` instead of doing a NOT query.
+- Added `import re` to admin.py.
+
+**Fixed — ST-01 (uploaded_files unsynchronized):**
+- `backend/main.py` — Added `uploaded_files_lock = asyncio.Lock()` alongside `uploaded_files`. Made `load_upload_state()` and `save_upload_state()` async with lock acquisition.
+- `backend/routes/files.py` — Made `_find_file_by_id()`, `_find_file_by_index()`, and `_resolve_file()` async with lock. Wrapped all 27 remaining `uploaded_files` accesses across `/upload`, `/clear`, `/remove-file`, `/queue`, `/next-file`, `/process-stream`, `/confirm`, and `/skip` with `async with uploaded_files_lock:`. `/queue` now returns `list(uploaded_files)` copy instead of raw list reference.
+- `backend/routes/admin.py` — Wrapped `uploaded_files` iterations in `cleanup_stats` and `run_cleanup` with the lock.
+
+**Fixed — ST-02 (process_lock at module level):**
+- `backend/main.py` — Changed `process_lock = asyncio.Lock()` to `process_lock = None` at module level. Lock is now created inside `lifespan()` with `global process_lock; process_lock = asyncio.Lock()`. The lazy import in `files.py:process-stream` sees the lifespan-created lock.
+
+**Fixed — TMP-01 (OCR temp files world-readable, cleanup gaps):**
+- `backend/ocr.py` — Replaced `tempfile.NamedTemporaryFile(delete=False)` (world-readable, default umask) with `tempfile.mkstemp()` + `os.close(fd)` (0o600 permissions). Restructured the `ocr_pdf_llm()` function so a single `finally` block covers all return paths after PDF rendering (render failure, no pages, LLM success, LLM failure, unexpected exceptions), eliminating the previous duplicate and gapped cleanup. Added `import os`.
+
+**Fixed — REQ-01 (import reads entire file into memory):**
+- `backend/routes/export_import.py` — Replaced `content = await file.read()` + `f.write(content)` with `shutil.copyfileobj(file.file, f, length=1024*1024)`, streaming the upload directly to disk in 1 MB chunks. A 5+ GB backup file now uses ~1 MB of RAM during the write instead of 5+ GB. Added `import shutil`.
+
+**Fixed — SEC-01 (document content in logs, no redaction):**
+- `backend/routes/files.py` — Replaced `'supplier': supplier` with `'supplier': '[REDACTED]'` in both "Quotation saved" and "Quotation updated" log messages. The `exc_info=True` handlers in `ocr.py`, `llm.py`, and `vision.py` are left untouched — they contain developer warnings and provide essential debugging data.
+
+**Fixed — DB-04 (WAL autocheckpoint not tuned):**
+- `backend/db.py` — Added `PRAGMA wal_autocheckpoint=500` after the WAL pragma. Checkpoints every ~2 MB instead of the SQLite default 1000 pages (~4 MB), keeping checkpoint pauses smaller and more frequent.
+
+**Fixed — RF-07 (lifespan logs AI endpoint URL):**
+- `backend/main.py` — Changed startup log from `f"AI endpoint: {cfg.get('ai_endpoint', 'NOT SET')}"` to `f"AI endpoint: {'configured' if ep else 'NOT SET'}"`. Still confirms config loaded without leaking the LAN IP address.
+
+**Tests:**
+- All existing tests remain unchanged. Syntax verified on all modified files.
 
 ### v0.063.0 — Production audit fixes (P0-1 through P0-10, P1-1 through P1-4), all P0 + P1 items addressed
 
@@ -97,8 +131,8 @@ Continuing the production-readiness audit: 12 more findings addressed across P2 
 **Accepted — P2-15 (config.json secrets on volume):**
 - AI endpoint is local LAN only — no credentials, no API keys. Moving to env var would break the Settings UI pattern and require container restarts on every AI server change.
 
-**Accepted — P2-16 (lifespan logs AI endpoint):**
-- Same reasoning — local-only, never external. Stripping the URL would make debugging harder with zero security benefit.
+**Fixed — P2-16 (lifespan logs AI endpoint):**
+- Changed startup log from `f"AI endpoint: {cfg.get('ai_endpoint', 'NOT SET')}"` to `f"AI endpoint: {'configured' if ep else 'NOT SET'}"`. Confirms config loaded without leaking the LAN IP address.
 
 **Fixed — P2-6 (AI degradation UX notification):**
 - `frontend/index.html` — Added hidden `#aiFallbackWarning` banner div above the extracted data heading.
@@ -316,6 +350,15 @@ Continuing the production-readiness audit: 12 more findings addressed across P2 
 ---
 
 ## Files Changed Recently
+
+### v0.063.1
+- `backend/routes/admin.py` — `import re` added; FTS5 MATCH query sanitized with `re.sub(r'[^\w]', '', w)` to strip operators.
+- `backend/main.py` — Added `uploaded_files_lock`, made `load_upload_state()`/`save_upload_state()` async with lock. Changed `process_lock = asyncio.Lock()` → `process_lock = None` at module level, created inside `lifespan()`. AI endpoint URL redacted from startup log.
+- `backend/routes/files.py` — Made `_find_file_by_id()`, `_find_file_by_index()`, `_resolve_file()` async with `uploaded_files_lock`. Wrapped all `uploaded_files` access in route handlers (upload, clear, remove-file, queue, next-file, process-stream, confirm, skip) with lock. `/queue` returns list copy. Supplier name redacted in "Quotation saved" and "Quotation updated" logs.
+- `backend/routes/admin.py` — Wrapped `uploaded_files` iterations in `cleanup_stats` and `run_cleanup` with lock.
+- `backend/ocr.py` — `import os` added. `NamedTemporaryFile(delete=False)` → `tempfile.mkstemp()` + `os.close()` (0o600 perms). Consolidated cleanup into single `finally` covering all return paths.
+- `backend/routes/export_import.py` — `import shutil` added. `await file.read()` → `shutil.copyfileobj(file.file, f, length=1024*1024)` streaming write.
+- `backend/db.py` — Added `PRAGMA wal_autocheckpoint=500`.
 
 ### v0.063.0
 - `backend/export_import.py` — Added `encrypt_file_at_rest()`, `decrypt_file_at_rest()`, `get_encryption_key()`, `decrypt_file_to_temp()`. Reuses existing AES-256-GCM + `_derive_key()` with `iterations=0` (raw key mode).
@@ -557,7 +600,6 @@ This is a SQLite FTS5 built-in operation — it drops and recreates the internal
 ## Known Issues
 
 - **XLSX viewer column resizing** — SheetJS renders a read-only HTML table; user cannot manually resize columns. Columns are auto-sized to fit content. To revisit: consider a library with built-in column resize support (e.g., ReoGrid, Luckysheet/Univer, or custom drag handlers with better event handling)
-- **uploaded_by field not displayed in UI** — Each file entry stores `uploaded_by` (username) for queue ownership tracking, but the queue view (`upload.js:renderFileList()`) only shows filename/pages/status. If multi-user visibility is needed later, add an "Uploaded by" column to `renderFileList()` — the data is already there in `f.uploaded_by`.
 - **Login brute-force protection** — ✅ Done (v0.056.0). IP-based rate limiter on `/auth/login`. See Security Gaps section for details and known limitations.
 - **Orphaned file cleanup** — ✅ Done (v0.057.0). All three orphan sources fixed: remove-file images, clear files+images, import archive PDFs on failure.
 
@@ -604,7 +646,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 9 | Infra | Single container, no HA | Added note in README.md Data Persistence section stating single-node deployment, no failover/clustering planned. | ✅ Fixed |
 | 14 | FastAPI | No global exception handler | Added `@app.exception_handler(Exception)` — logs full traceback server-side, returns safe 500 JSON. HTTPException/422 handlers unchanged. | ✅ Fixed |
 | 15 | Crypto | config.json plaintext on volume | AI endpoint is local LAN only — no credentials. Moving to env var would break Settings UI. | ✅ Accepted |
-| 16 | Config | Lifespan logs AI endpoint URL | Local-only, never external. Stripping URL would hinder debugging with zero security benefit. | ✅ Accepted |
+| 16 | Config | Lifespan logs AI endpoint URL | Changed to `'configured' if ep else 'NOT SET'` — confirms config loaded without leaking the LAN IP | ✅ Fixed |
 | 17 | Tests | No FTS rebuild test | Added `TestFtsRebuild` test + `docker exec` one-liner in HANDOFF.md. | ✅ Fixed |
 | 18 | Docker | config.json baked into Docker image layer | Removed `COPY config.json .` from Dockerfile — config is mount-only at runtime. | ✅ Fixed |
 
@@ -618,6 +660,13 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 19 | FastAPI | No CORSMiddleware | Added `CORSMiddleware(allow_origins=["*"])` with documented intent; same-site cookie is real defense | ✅ Fixed |
 | 20 | Deploy | No Content-Security-Policy header | Added `CSPMiddleware` with `default-src 'self'` policy; `'unsafe-inline'` for existing inline handlers | ✅ Fixed |
 | 21 | Deploy | No X-Content-Type-Options header | Added `X-Content-Type-Options: nosniff` to CSPMiddleware | ✅ Fixed |
+| 22 | Search | FTS5 MATCH injection — `-` treated as NOT operator | Sanitize search terms with `re.sub(r'[^\w]', '', w)` stripping FTS5 operators | ✅ Fixed |
+| 23 | Concurrency | `uploaded_files` global list unsynchronized — race conditions on append/pop/iteration | Added `uploaded_files_lock` asyncio.Lock, wrapped all 32 access points across 3 files | ✅ Fixed |
+| 24 | Concurrency | `process_lock` created at module level — stale after event loop restart | Moved `process_lock = asyncio.Lock()` into `lifespan()` | ✅ Fixed |
+| 25 | Infra | OCR temp files world-readable (`NamedTemporaryFile` default perms) | Replaced with `tempfile.mkstemp()` (0o600 perms) + consolidated cleanup into single `finally` | ✅ Fixed |
+| 26 | Infra | Import endpoint reads entire file into memory (`await file.read()`) | Replaced with `shutil.copyfileobj()` streaming write in 1 MB chunks | ✅ Fixed |
+| 27 | Observability | Document content (supplier names) logged without redaction | Replaced `supplier` field with `'[REDACTED]'` in "Quotation saved" and "Quotation updated" logs | ✅ Fixed |
+| 28 | Config | No `wal_autocheckpoint` tuning — default 1000 pages (~4 MB) | Added `PRAGMA wal_autocheckpoint=500` for smaller, more frequent checkpoints | ✅ Fixed |
 
 ---
 
@@ -695,7 +744,8 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (274 expected)
-4. All 21 audit items addressed (P0–P3). Left as-is:
+4. All 21 original audit items (P0–P3) plus 8 additional red flags addressed in v0.063.1. Left as-is:
    - **P3-11**: CI linting (no CI pipeline)
    - **P3-12**: Container scanning (manual `docker scout quick` before releases)
    - **XLSX column resizing**: Pre-existing known issue
+   - **Vision.py output validation**: Vision LLM (vision.py) still lacks Pydantic validation that text LLM (llm.py) already has — same treatment recommended

@@ -1,11 +1,15 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
 ## v0.063.1 (2026-06-21)
-- **Infra**: Container resource limits — added `deploy.resources.limits` in `docker-compose.yml` (2 CPUs / 4 GB RAM). Docker throttles CPU on exceed and kills container on OOM; auto-restarts via `restart: unless-stopped`. Leaves resources for AI server and NPM on a typical 4-core/8 GB host (P2-8)
-- **Docs**: Added single-node deployment note to README (P2-9)
-- **UX**: AI fallback warning banner — yellow banner on review screen when `extraction_method === 'local'`, using existing SSE field (P2-6)
-- **Chore**: 274 total tests (up from 273)
-- **Chore**: VERSION → 0.063.1
+- **Security**: FTS5 MATCH injection fix — search terms sanitized with `re.sub(r'[^\w]', '', w)` to strip FTS5 operators (`-`, `+`, `AND`, `OR`, `NOT`, `NEAR`, `*`, parentheses). A search for `-701` now correctly finds items containing `701` instead of evaluating NOT (FTS-01)
+- **Security**: `uploaded_files` global list now synchronized with `asyncio.Lock` — wraps all 32 access points across 3 files. `/queue` returns a copy instead of the raw list reference. Prevents race conditions on concurrent upload/clear/remove (ST-01)
+- **Security**: `process_lock` moved from module-level creation into `lifespan()` — prevents stale lock after event loop restart in hot-reload scenarios (ST-02)
+- **Security**: OCR temp files now created with `tempfile.mkstemp()` (0o600 permissions) instead of world-readable `NamedTemporaryFile(delete=False)`. Cleanup consolidated into a single `finally` block covering all return paths (TMP-01)
+- **Security**: Import endpoint streams uploads directly to disk in 1 MB chunks via `shutil.copyfileobj()` instead of loading entire file into memory — prevents OOM on large backups (REQ-01)
+- **Security**: Supplier names redacted in log messages — replaced with `'[REDACTED]'` in "Quotation saved" and "Quotation updated" logs (SEC-01)
+- **Security**: AI endpoint URL redacted from startup log — shows `'configured'` instead of the LAN IP address (RF-07)
+- **Perf**: WAL autocheckpoint tuned to 500 pages (~2 MB) for smaller, more frequent checkpoints instead of the SQLite default 1000 (DB-04)
+- **Chore**: All 8 remaining production audit red flags addressed. Syntax verified on all modified files.
 
 ## v0.063.0 (2026-06-20)
 - **Security**: Busy timeout — added `timeout=5` to `sqlite3.connect()` in `db.py` to prevent `database is locked` errors under concurrent writes

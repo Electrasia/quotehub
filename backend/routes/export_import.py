@@ -22,6 +22,7 @@ Import supports:
 
 import logging
 import os
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -118,9 +119,8 @@ async def run_import_endpoint(
     try:
         fd, temp_path = tempfile.mkstemp(suffix=".quodb")
         os.close(fd)
-        content = await file.read()
         with open(temp_path, "wb") as f:
-            f.write(content)
+            shutil.copyfileobj(file.file, f, length=1024 * 1024)
 
         result = run_import(
             Path(temp_path),

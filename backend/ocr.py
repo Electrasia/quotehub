@@ -34,6 +34,7 @@ OCR found <5 numbers, it's probably noise.
 """
 import io
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -248,126 +249,122 @@ async def ocr_pdf_via_llm(pdf_path: str) -> dict:
     import tempfile
     image_paths = []
     try:
-        doc = fitz.open(pdf_path)
         try:
-            for page_idx in range(len(doc)):
-                page = doc[page_idx]
-                img = _render_page_to_pil(page)
-                # Compress to JPEG
-                if img.width > 1280:
-                    ratio = 1280 / img.width
-                    img = img.resize(
-                        (1280, int(img.height * ratio)),
-                        Image.LANCZOS,
-                    )
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                tmp = tempfile.NamedTemporaryFile(
-                    suffix=".jpg", delete=False,
-                )
-                img.save(tmp.name, "JPEG", quality=80, optimize=True)
-                image_paths.append(tmp.name)
-        finally:
-            doc.close()
-    except Exception as e:
-        logger.exception("PDF render failed in ocr_pdf_llm")
-        out["error"] = f"Could not render PDF: {e}"
-        out["time_ms"] = int((time.time() - t0) * 1000)
-        # Clean up any partial renders
-        for p in image_paths:
+            doc = fitz.open(pdf_path)
             try:
-                Path(p).unlink(missing_ok=True)
-            except Exception:
-                logger.warning("cleanup failed removing %s", p, exc_info=True)
-                pass
-        return out
+                for page_idx in range(len(doc)):
+                    page = doc[page_idx]
+                    img = _render_page_to_pil(page)
+                    # Compress to JPEG
+                    if img.width > 1280:
+                        ratio = 1280 / img.width
+                        img = img.resize(
+                            (1280, int(img.height * ratio)),
+                            Image.LANCZOS,
+                        )
+                    if img.mode == "RGBA":
+                        img = img.convert("RGB")
+                    fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+                    os.close(fd)
+                    img.save(tmp_path, "JPEG", quality=80, optimize=True)
+                    image_paths.append(tmp_path)
+            finally:
+                doc.close()
+        except Exception as e:
+            logger.exception("PDF render failed in ocr_pdf_llm")
+            out["error"] = f"Could not render PDF: {e}"
+            out["time_ms"] = int((time.time() - t0) * 1000)
+            return out
 
-    if not image_paths:
-        out["error"] = "PDF has no pages to OCR"
-        out["time_ms"] = int((time.time() - t0) * 1000)
-        return out
+        if not image_paths:
+            out["error"] = "PDF has no pages to OCR"
+            out["time_ms"] = int((time.time() - t0) * 1000)
+            return out
 
-    # Build prompt — ask for text per page, NOT structured JSON
-    prompt = (
-        "This is page {p} of a document (quotation, purchase order, or price list). "
-        "Read ALL the text on this page exactly as written. "
-        "CRITICAL for tables:\n"
-        "- Use pipe ' | ' between EACH column\n"
-        "- Capture ALL columns including: Item, Brand, Model, Description, Qty, Unit, Price, Total\n"
-        "- Do NOT skip columns on the right side of the table\n"
-        "- If a row has no value for a column, use empty space between the pipes\n"
-        "Return ONLY the raw text — no explanation, no markdown formatting."
-    )
+        # Build prompt — ask for text per page, NOT structured JSON
+        prompt = (
+            "This is page {p} of a document (quotation, purchase order, or price list). "
+            "Read ALL the text on this page exactly as written. "
+            "CRITICAL for tables:\n"
+            "- Use pipe ' | ' between EACH column\n"
+            "- Capture ALL columns including: Item, Brand, Model, Description, Qty, Unit, Price, Total\n"
+            "- Do NOT skip columns on the right side of the table\n"
+            "- If a row has no value for a column, use empty space between the pipes\n"
+            "Return ONLY the raw text — no explanation, no markdown formatting."
+        )
 
-    try:
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                content_parts = []
-                for i, img_path in enumerate(image_paths):
-                    if external_url and "localhost" not in external_url \
-                            and "127.0.0.1" not in external_url:
-                        # Use a relative URL (we don't have the same path
-                        # structure as main.py:compress_image uses; fall
-                        # through to base64 for safety).
-                        pass
-                    with open(img_path, "rb") as f:
-                        b64 = base64.b64encode(f.read()).decode("utf-8")
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64}",
-                        },
-                    })
-                    content_parts.append({
-                        "type": "text",
-                        "text": prompt.format(p=i + 1),
-                    })
-                messages = [{"role": "user", "content": content_parts}]
+        try:
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    content_parts = []
+                    for i, img_path in enumerate(image_paths):
+                        if external_url and "localhost" not in external_url \
+                                and "127.0.0.1" not in external_url:
+                            # Use a relative URL (we don't have the same path
+                            # structure as main.py:compress_image uses; fall
+                            # through to base64 for safety).
+                            pass
+                        with open(img_path, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("utf-8")
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{b64}",
+                            },
+                        })
+                        content_parts.append({
+                            "type": "text",
+                            "text": prompt.format(p=i + 1),
+                        })
+                    messages = [{"role": "user", "content": content_parts}]
 
-                async with httpx.AsyncClient(
-                    timeout=httpx.Timeout(timeout=timeout, connect=5.0),
-                ) as client:
-                    resp = await client.post(
-                        endpoint,
-                        json={
-                            "model": model,
-                            "messages": messages,
-                            "max_tokens": 4096,
-                            "temperature": 0.1,
-                        },
-                    )
-                if resp.status_code == 200:
-                    result = resp.json()
-                    if "choices" not in result or not result.get("choices"):
-                        last_error = "AI returned no choices"
-                        continue
-                    msg = result["choices"][0]["message"]
-                    raw = (msg.get("content") or
-                           msg.get("reasoning_content") or "").strip()
-                    if raw.startswith("```"):
-                        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-                    if raw.endswith("```"):
-                        raw = raw[:-3]
-                    raw = raw.strip()
-                    out["text"] = raw
-                    # No per-page split available; treat as single chunk
-                    out["pages"] = [{"page": 1, "text": raw}]
-                    out["time_ms"] = int((time.time() - t0) * 1000)
-                    return out
-                else:
-                    last_error = (
-                        f"AI returned HTTP {resp.status_code}: "
-                        f"{resp.text[:200]}"
-                    )
-            except httpx.ConnectError as e:
-                last_error = f"Connection error: {e}"
-            except httpx.TimeoutException:
-                last_error = "Timeout"
-            except Exception as e:
-                logger.warning("AI retry failed (caution: may contain document data)", exc_info=True)
-                last_error = f"Error: {e}"
-        out["error"] = last_error or "All retries exhausted"
+                    async with httpx.AsyncClient(
+                        timeout=httpx.Timeout(timeout=timeout, connect=5.0),
+                    ) as client:
+                        resp = await client.post(
+                            endpoint,
+                            json={
+                                "model": model,
+                                "messages": messages,
+                                "max_tokens": 4096,
+                                "temperature": 0.1,
+                            },
+                        )
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        if "choices" not in result or not result.get("choices"):
+                            last_error = "AI returned no choices"
+                            continue
+                        msg = result["choices"][0]["message"]
+                        raw = (msg.get("content") or
+                               msg.get("reasoning_content") or "").strip()
+                        if raw.startswith("```"):
+                            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                        if raw.endswith("```"):
+                            raw = raw[:-3]
+                        raw = raw.strip()
+                        out["text"] = raw
+                        # No per-page split available; treat as single chunk
+                        out["pages"] = [{"page": 1, "text": raw}]
+                        out["time_ms"] = int((time.time() - t0) * 1000)
+                        return out
+                    else:
+                        last_error = (
+                            f"AI returned HTTP {resp.status_code}: "
+                            f"{resp.text[:200]}"
+                        )
+                except httpx.ConnectError as e:
+                    last_error = f"Connection error: {e}"
+                except httpx.TimeoutException:
+                    last_error = "Timeout"
+                except Exception as e:
+                    logger.warning("AI retry failed (caution: may contain document data)", exc_info=True)
+                    last_error = f"Error: {e}"
+            out["error"] = last_error or "All retries exhausted"
+        except Exception:
+            logger.exception("Unexpected error during OCR LLM processing")
+            out["error"] = "Unexpected error during OCR processing"
     finally:
         for p in image_paths:
             try:
