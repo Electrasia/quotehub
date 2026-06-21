@@ -8,6 +8,7 @@
 - **Security**: Import endpoint streams uploads directly to disk in 1 MB chunks via `shutil.copyfileobj()` instead of loading entire file into memory — prevents OOM on large backups (REQ-01)
 - **Security**: Supplier names redacted in log messages — replaced with `'[REDACTED]'` in "Quotation saved" and "Quotation updated" logs (SEC-01)
 - **Security**: AI endpoint URL redacted from startup log — shows `'configured'` instead of the LAN IP address (RF-07)
+- **Security**: `config.json` removed from git tracking (`git rm --cached`) and added to `.gitignore` — prevents accidental commit of LAN IP or credentials. Repo copy is a development artifact; `deploy.sh` auto-copies `config.example.json` → `config.json` for fresh installs.
 - **Perf**: WAL autocheckpoint tuned to 500 pages (~2 MB) for smaller, more frequent checkpoints instead of the SQLite default 1000 (DB-04)
 - **Chore**: All 8 remaining production audit red flags addressed. Syntax verified on all modified files.
 

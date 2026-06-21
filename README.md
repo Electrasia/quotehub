@@ -46,7 +46,7 @@ git checkout main
 
 ### 2. First-time setup: create your config.json and encryption key
 
-The repo's `config.json` has empty `ai_endpoint` and `model` fields by design — these are your personal inputs. `deploy.sh` will create one from the template if missing, or copy manually:
+The `config.example.json` template has empty `ai_endpoint` and `model` fields by design — these are your personal inputs. On first run, `deploy.sh` automatically copies it to `config.json` if the file doesn't already exist. Or copy manually:
 
 ```bash
 cp config.example.json config.json
@@ -65,7 +65,7 @@ python3 -c "import os; print(os.urandom(32).hex())"
 
 **Easiest** — use the deploy script (handles config, build, restart all in one):
 ```bash
-export FILE_ENCRYPTION_KEY="your-64-hex-char-key"  # omit if not using encryption
+export FILE_ENCRYPTION_KEY="your-64-hex-char-key"  # optional — omit for plaintext storage
 ./deploy.sh
 ```
 
@@ -113,6 +113,17 @@ This will:
 2. Bake the current commit hash into the new image
 3. Stop and remove the old container
 4. Start the new container with the same persistent mounts (no data loss)
+
+## Production Deployment (Nginx Proxy Manager)
+
+When deploying to production behind **Nginx Proxy Manager** (HTTPS, domain name, client IP forwarding):
+
+1. Copy the internal `NPM-DEPLOY.md` guide from the repository — it contains step-by-step instructions for the IT team
+2. Set `"trust_proxy_headers": true` in `config.json` so the app correctly reads the real client IP and sets the `Secure` cookie flag
+3. Configure NPM to proxy requests to `http://quotehub-lan-ip:8000` with WebSocket support enabled (for SSE streaming)
+4. The app prepares itself automatically via `SecureCookieMiddleware` — no code changes needed
+
+> **Note:** NPM is optional. QuoteHub runs perfectly on plain HTTP for local/LAN development without any proxy. The `trust_proxy_headers` flag is `false` by default and only needs enabling when behind a reverse proxy.
 
 ## Versioning
 

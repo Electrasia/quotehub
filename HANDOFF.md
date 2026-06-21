@@ -39,6 +39,11 @@ Addresses the 8 remaining red flags from the production audit (FTS-01, ST-01, ST
 **Fixed — RF-07 (lifespan logs AI endpoint URL):**
 - `backend/main.py` — Changed startup log from `f"AI endpoint: {cfg.get('ai_endpoint', 'NOT SET')}"` to `f"AI endpoint: {'configured' if ep else 'NOT SET'}"`. Still confirms config loaded without leaking the LAN IP address.
 
+**Fixed — Config tracking (config.json removed from git):**
+- `config.json` removed from git tracking (`git rm --cached config.json`) and added to `.gitignore` — prevents accidental commit of credentials or LAN IPs.
+- `deploy.sh` auto-copies `config.example.json` → `config.json` on fresh installs if `config.json` doesn't exist.
+- The Docker image never contains `config.json` (P2-18 already removed `COPY config.json` from Dockerfile). Config is always mount-only at runtime.
+
 **Tests:**
 - All existing tests remain unchanged. Syntax verified on all modified files.
 
@@ -352,6 +357,8 @@ Continuing the production-readiness audit: 12 more findings addressed across P2 
 ## Files Changed Recently
 
 ### v0.063.1
+- `config.json` — Removed from git tracking (`git rm --cached`); previously committed LAN IP no longer pushed.
+- `.gitignore` — Already listed `config.json` (line 21), preventing re-addition.
 - `backend/routes/admin.py` — `import re` added; FTS5 MATCH query sanitized with `re.sub(r'[^\w]', '', w)` to strip operators.
 - `backend/main.py` — Added `uploaded_files_lock`, made `load_upload_state()`/`save_upload_state()` async with lock. Changed `process_lock = asyncio.Lock()` → `process_lock = None` at module level, created inside `lifespan()`. AI endpoint URL redacted from startup log.
 - `backend/routes/files.py` — Made `_find_file_by_id()`, `_find_file_by_index()`, `_resolve_file()` async with `uploaded_files_lock`. Wrapped all `uploaded_files` access in route handlers (upload, clear, remove-file, queue, next-file, process-stream, confirm, skip) with lock. `/queue` returns list copy. Supplier name redacted in "Quotation saved" and "Quotation updated" logs.
@@ -749,3 +756,4 @@ Items still needed before the app can be considered production-ready:
    - **P3-12**: Container scanning (manual `docker scout quick` before releases)
    - **XLSX column resizing**: Pre-existing known issue
    - **Vision.py output validation**: Vision LLM (vision.py) still lacks Pydantic validation that text LLM (llm.py) already has — same treatment recommended
+5. **config.json tracking**: Already removed from git tracking (`.gitignore` + `config.example.json` template + `deploy.sh` auto-copy). Do NOT re-flag as outstanding — the file on disk is a local dev artifact, the repo copy is a placeholder with `config.example.json` as the deployment source of truth. See v0.063.1 work log.
