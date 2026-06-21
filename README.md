@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.063.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.063.1 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -27,6 +27,7 @@ AI-powered quotation document processing system. Upload PDF or XLSX quotations, 
 - **Host Header Protection** — `TrustedHostMiddleware` prevents host header injection attacks
 - **AI Output Validation** — LLM and VLM responses validated against Pydantic models; VLM responses capped at 100 KB to prevent runaway memory usage
 - **Upload Validation Pipeline** — Content-Length check → extension filter → path traversal guard → empty-stem check → size limit → magic bytes verification → encryption → write
+- **Container Resource Limits** — Docker throttles CPU and OOM-kills on overuse (2 CPUs / 4 GB RAM); auto-restarts via `restart: unless-stopped`
 
 ## Prerequisites
 
@@ -115,9 +116,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.063.0`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.063.1`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.063.0 (commit hash)`
+- The app header displays both: `v0.063.1 (commit hash)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -245,7 +246,8 @@ The `config.json` file stores your settings and is mounted as a Docker volume so
 quotehub/
 ├── backend/
 │   ├── main.py              # FastAPI application, middleware, router registration
-│   ├── utils.py             # Shared utilities (load_config, save_config, repair_json_quotes)
+│   ├── middleware.py         # Custom middleware (CSP, SecureCookie)
+│   ├── utils.py              # Shared utilities (load_config, save_config, repair_json_quotes)
 │   ├── db.py                # Database connection manager (get_db context manager)
 │   ├── auth.py              # Authentication (password hashing, user CRUD, sessions)
 │   ├── parser.py            # PDF/XLSX parsing with OCR support

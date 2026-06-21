@@ -1,5 +1,12 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.063.1 (2026-06-21)
+- **Infra**: Container resource limits — added `deploy.resources.limits` in `docker-compose.yml` (2 CPUs / 4 GB RAM). Docker throttles CPU on exceed and kills container on OOM; auto-restarts via `restart: unless-stopped`. Leaves resources for AI server and NPM on a typical 4-core/8 GB host (P2-8)
+- **Docs**: Added single-node deployment note to README (P2-9)
+- **UX**: AI fallback warning banner — yellow banner on review screen when `extraction_method === 'local'`, using existing SSE field (P2-6)
+- **Chore**: 274 total tests (up from 273)
+- **Chore**: VERSION → 0.063.1
+
 ## v0.063.0 (2026-06-20)
 - **Security**: Busy timeout — added `timeout=5` to `sqlite3.connect()` in `db.py` to prevent `database is locked` errors under concurrent writes
 - **Security**: Path traversal prevention — `/upload` rejects filenames containing `..`, `/`, `\`
