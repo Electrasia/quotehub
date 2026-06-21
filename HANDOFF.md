@@ -70,7 +70,7 @@ This release addresses all 10 P0 findings and all 4 P1 findings from a productio
 
 ### v0.063.0 (continued) — Production audit P2 + P3 items addressed
 
-Continuing the production-readiness audit: 8 more findings addressed across P2 and P3 priorities.
+Continuing the production-readiness audit: 12 more findings addressed across P2 and P3 priorities.
 
 **Fixed — P2-14 (global exception handler):**
 - `backend/main.py` — Added `@app.exception_handler(Exception)` that logs full traceback server-side via `logger.exception()`, returns safe `500 {"detail": "Internal Server Error"}` to client. FastAPI's built-in handlers for `HTTPException` and `RequestValidationError` take precedence (more specific), so this only catches true 500-level errors.
@@ -674,7 +674,7 @@ Items still needed before the app can be considered production-ready:
 | 🟡 Medium | **Queue persistence** | 0.5 day | ✅ Done (v0.058.1). Backend persists queue on every mutation; frontend restores via `GET /queue` on page load. Queue survives container restart and browser refresh. |
 | 🟡 Medium | **Graceful shutdown** | 0.5 day | ✅ Done (v0.058.1). Analysis showed no functional gap — lock released by `finally` on cancellation, DB not touched during streaming, temp files cleaned on re-process. Shutdown log added to confirm clean stop in container logs. |
 | 🟡 Medium | **SQLite WAL mode** | 1 line | ✅ Done (v0.055.0). Enables concurrent reads without blocking. |
-| 🟡 Medium | **Expand test coverage** | 3 days | ✅ **273 tests** across all endpoint categories. |
+| 🟡 Medium | **Expand test coverage** | 3 days | ✅ **274 tests** across all endpoint categories. |
 | 🟡 Medium | **Rate limiting on upload & processing** | 0.5 day | ✅ Done (v0.055.3). Queue cap (50), processing semaphore (1 file at a time). |
 | 🟡 Medium | **Rate limiter X-Forwarded-For support** | 0.5 day | ✅ **Resolved by NPM** (v0.058.0). `trust_proxy_headers` flag + `_get_client_ip()` guard. NPM sets real client IP in `X-Forwarded-For`. |
 | 🟡 Medium | **Static file serving via reverse proxy** | 0.5 day | ✅ **Handled externally via NPM** (v0.058.0). NPM can serve `/static/` and `/images/` directly; caching headers configurable in NPM UI. |
