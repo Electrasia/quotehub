@@ -98,7 +98,19 @@ Continuing the production-readiness audit: 8 more findings addressed across P2 a
 - AI endpoint is local LAN only — no credentials, no API keys. Moving to env var would break the Settings UI pattern and require container restarts on every AI server change.
 
 **Accepted — P2-16 (lifespan logs AI endpoint):**
-- Same reasoning — local-only, never external. Stripping the path would make debugging harder with zero security benefit.
+- Same reasoning — local-only, never external. Stripping the URL would make debugging harder with zero security benefit.
+
+**Fixed — P2-6 (AI degradation UX notification):**
+- `frontend/index.html` — Added hidden `#aiFallbackWarning` banner div above the extracted data heading.
+- `frontend/style.css` — Added `.ai-fallback-warning` yellow warning style.
+- `frontend/js/review.js` — `showReview()` checks `extractedData.extraction_method` and shows banner when `'local'`.
+- When AI is unreachable and extraction falls to local rules, the review screen shows: "⚠ AI server unreachable — extraction used local rules. Results may be limited."
+
+**Fixed — P2-8 (container resource limits):**
+- `docker-compose.yml` — Added `deploy.resources.limits`: 2 CPUs / 4 GB RAM. Docker throttles CPU on exceed and kills container on OOM; auto-restarts via `restart: unless-stopped`.
+
+**Fixed — P2-9 (HA documentation):**
+- `README.md` — Added single-node deployment note to Data Persistence section stating QuoteHub is single-node, SQLite cannot cluster, no HA planned.
 
 **Tests:**
 - `tests/test_search.py` — 1 new FTS rebuild test
@@ -329,6 +341,11 @@ Continuing the production-readiness audit: 8 more findings addressed across P2 a
 - `Dockerfile` — Removed `COPY config.json .` (P2-18).
 - `backend/requirements.txt` — Pinned `cryptography==48.0.0`, `bcrypt==4.0.1` (P3-10).
 - `tests/test_search.py` — Added `TestFtsRebuild` class with `test_fts_rebuild_preserves_search` (P2-17).
+- `frontend/index.html` — Added `#aiFallbackWarning` banner div for AI degradation notification (P2-6).
+- `frontend/style.css` — Added `.ai-fallback-warning` style (P2-6).
+- `frontend/js/review.js` — `showReview()` shows/hides AI fallback warning banner based on `extraction_method` (P2-6).
+- `docker-compose.yml` — Added `deploy.resources.limits` (2 CPUs / 4 GB RAM) (P2-8).
+- `README.md` — Added single-node deployment note in Data Persistence section (P2-9).
 
 ### v0.062.0
 - `backend/auto_backup.py` — New file. Automatic backup subsystem: daily/weekly/event tiers, retention sweep, background scheduler, startup catch-up, post-upgrade check.
@@ -678,8 +695,7 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (274 expected)
-4. All audit items addressed (21/21 P0–P3 from the production-readiness audit). Left as-is:
-   - **P2-8**: Container resource limits (5 min)
+4. All 21 audit items addressed (P0–P3). Left as-is:
    - **P3-11**: CI linting (no CI pipeline)
    - **P3-12**: Container scanning (manual `docker scout quick` before releases)
    - **XLSX column resizing**: Pre-existing known issue
