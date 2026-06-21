@@ -133,3 +133,35 @@ class TestDocumentTypeFilter:
         body = resp.json()
         assert len(body["results"]) == 1
         assert body["results"][0]["supplier"] == "Acme Corp"
+
+
+class TestFtsRebuild:
+    """FTS index rebuild: verify the index survives a manual rebuild."""
+
+    def test_fts_rebuild_preserves_search(self, seed_quotations):
+        """After INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild'),
+        FTS search should still return expected results."""
+        from backend.db import get_db
+
+        with get_db() as db:
+            db.execute("INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild')")
+
+        # Log in as 'user' (created by seeded_db) and search
+        resp = seed_quotations.post("/auth/login", json={
+            "username": "user",
+            "password": "Us3r!Pass123",
+            "remember_me": False,
+        })
+        assert resp.status_code == 200
+
+        # Search for a term that exists
+        resp = seed_quotations.get("/search", params={"q": "Acme"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["results"]) == 1
+        assert body["results"][0]["supplier"] == "Acme Corp"
+
+        # Search for a term that should be empty
+        resp = seed_quotations.get("/search", params={"q": "ZZTopNonexistent"})
+        assert resp.status_code == 200
+        assert resp.json()["results"] == []

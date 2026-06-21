@@ -477,6 +477,25 @@ These rules are MANDATORY for every new migration. They prevent data corruption 
 
 ---
 
+## FTS Index Rebuild
+
+If the full-text search index gets out of sync with the `quotations` table (e.g., after a bulk SQL operation that bypasses triggers), rebuild it with:
+
+```sql
+INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild');
+```
+
+Run from inside the container:
+
+```bash
+docker exec quodb sqlite3 /app/data/quotations.db \
+  "INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild');"
+```
+
+This is a SQLite FTS5 built-in operation — it drops and recreates the internal FTS index from the content table. The command is idempotent and safe to run at any time.
+
+---
+
 ## Known Issues
 
 - **XLSX viewer column resizing** — SheetJS renders a read-only HTML table; user cannot manually resize columns. Columns are auto-sized to fit content. To revisit: consider a library with built-in column resize support (e.g., ReoGrid, Luckysheet/Univer, or custom drag handlers with better event handling)
@@ -528,7 +547,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 14 | FastAPI | No global exception handler | Added `@app.exception_handler(Exception)` that logs full traceback server-side, returns safe JSON to client | ✅ Fixed |
 | 15 | Crypto | config.json plaintext on volume | Load sensitive fields from env vars or separate secrets file with 0600 perms | 30 min |
 | 16 | Config | Lifespan startup logs AI endpoint URL to stdout — may contain API key in URL | Strip query params/creds from URL before logging | 5 min |
-| 17 | Tests | No FTS rebuild test | Add `INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild')` to docs and test | 15 min |
+| 17 | Tests | No FTS rebuild test | Added `INSERT INTO quotations_fts(quotations_fts) VALUES('rebuild')` to docs and test | ✅ Fixed |
 | 18 | Docker | config.json copied into Docker image at build time — secrets baked into layer | Remove from build; mount-only from host volume; validate at entrypoint | 10 min |
 
 #### 🟢 P3 — Low priority
@@ -615,10 +634,9 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. All 🔴 P0 items addressed. All 🟡 P1 items addressed. P2-14 (global exception handler) fixed. Remaining P2–P3 items:
-   - **P2-15**: config.json secrets in env var or separate secrets file
-   - **P2-16**: Strip credentials from AI endpoint before logging
-   - **P2-17**: FTS rebuild test & docs
+4. All 🔴 P0 items addressed. All 🟡 P1 items addressed. P2-14 (global exception handler) and P2-17 (FTS rebuild test) fixed. Remaining P2–P3 items:
+   - **P2-15**: config.json secrets in env var or separate secrets file (accepted — local-only AI endpoint, no credentials)
+   - **P2-16**: Strip credentials from AI endpoint before logging (accepted — local-only, never external)
    - **P2-18**: Remove config.json from Docker build layer
    - **P2-5 to P2-9**: DB health check, AI degradation notification, request tracing, resource limits, HA doc
    - **P3-10 to P3-12**: Version pinning, CI linting, container scanning
