@@ -8,9 +8,9 @@
 
 ## Last Completed Work
 
-### v0.063.0 — Production audit fixes (P0-1 through P0-10), all P0 items addressed
+### v0.063.0 — Production audit fixes (P0-1 through P0-10, P1-1 through P1-4), all P0 + P1 items addressed
 
-This release addresses all 10 findings from a production-readiness audit:
+This release addresses all 10 P0 findings and all 4 P1 findings from a production-readiness audit:
 
 **Fixed — P0-1 (busy timeout):**
 - `backend/db.py` — Added `timeout=5` to `sqlite3.connect()` so concurrent writes don't raise `database is locked`
@@ -55,9 +55,18 @@ This release addresses all 10 findings from a production-readiness audit:
 - **Recommendation**: If threat model changes (shared cloud VM, PII storage), use LUKS at the host level — not application-level crypto.
 
 **Tests:**
-- `tests/test_upload_validation.py` — 15 tests covering extension, path traversal, stem check, empty file, oversized file, magic bytes, mixed batches
+- `tests/test_upload_validation.py` — 15 tests covering extension, path traversal, stem check, empty file, oversized file (now expects 413), magic bytes, mixed batches
 - `tests/test_encryption_at_rest.py` — 14 tests covering crypto round-trip, key env var, disk encryption verification, backward compat without key
 - 273 total tests passing
+
+**Fixed — P1-1 / P1-2 (XSS sinks in popups):**
+- `frontend/js/utils.js` — `showBriefPopup()` and `showConfirmPopup()` changed from `innerHTML` to `textContent`. Message text is never rendered as HTML, eliminating the XSS vector.
+
+**Fixed — P1-3 (XSS in renderAutoRestoreList):**
+- `frontend/js/settings.js` — Refactored to DOM APIs (`createElement`, `textContent`, `addEventListener`). No HTML string interpolation with user data — eliminates entire class of bugs rather than relying on `escapeHtml()`.
+
+**Fixed — P1-4 (Content-Length boundary check):**
+- `backend/routes/files.py` — Early `Content-Length` header check at top of `/upload`. If the declared size exceeds `max_upload_size_mb`, returns `413 Payload Too Large` immediately before any body is buffered. Prevents resource exhaustion at the network boundary.
 
 ### v0.062.0 — Auto-backup subsystem, master-only export/import, password strengthening
 
@@ -275,6 +284,10 @@ This release addresses all 10 findings from a production-readiness audit:
 - `VERSION` — 0.062.0 → 0.063.0
 - `CHANGELOG.md` — Added v0.063.0 release notes
 - `HANDOFF.md` — Full rewrite: all 10 P0 items documented, P1-P3 findings updated to actual audit results, work log and files changed updated through P0-10
+- `frontend/js/utils.js` — `showBriefPopup()` and `showConfirmPopup()` changed from `innerHTML` to `textContent` (P1-1, P1-2).
+- `frontend/js/settings.js` — `renderAutoRestoreList()` refactored to DOM APIs — no HTML string interpolation (P1-3).
+- `backend/routes/files.py` — Added `Content-Length` header check returning 413 before body read (P1-4).
+- `tests/test_upload_validation.py` — Updated oversized test to expect 413 status code.
 
 ### v0.062.0
 - `backend/auto_backup.py` — New file. Automatic backup subsystem: daily/weekly/event tiers, retention sweep, background scheduler, startup catch-up, post-upgrade check.
@@ -597,7 +610,7 @@ Items still needed before the app can be considered production-ready:
 1. Review this HANDOFF.md for context
 2. Check `git log --oneline -10` for any commits since this session
 3. Run `pytest tests/ -v` to verify all tests pass (273 expected)
-4. All 🔴 P0 items are addressed. Next focus: 🟡 P1–P3 items from the full finding list below:
+4. All 🔴 P0 items addressed. All 🟡 P1 items addressed. Next focus: 🟡 P2–P3 items from the full finding list below:
    - **P1-1, P1-2** — ✅ Done. `showBriefPopup`/`showConfirmPopup` XSS sinks fixed.
    - **P1-3** — ✅ Done. `renderAutoRestoreList()` XSS sink fixed (DOM APIs, no innerHTML).
    - **P1-4** — ✅ Done. `Content-Length` header check at upload boundary (413 before body read).

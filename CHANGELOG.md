@@ -5,13 +5,16 @@
 - **Security**: Path traversal prevention — `/upload` rejects filenames containing `..`, `/`, `\`
 - **Security**: Magic bytes validation — `/upload` checks `%PDF` / `PK\x03\x04` before writing to disk
 - **Security**: File-at-rest encryption — AES-256-GCM on write, transparent decrypt on read, keyed by `FILE_ENCRYPTION_KEY` env var
-- **Security**: Non-root container — `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` volume for existing deployments
+- **Security**: Non-root container — `quodb` user (UID 1001), `gosu` privilege drop via entrypoint, startup `chown` of `/app/data` volume + `/app/config.json` for existing deployments
 - **Security**: API docs gated by `QUODB_DOCS_ENABLED` env var — `/docs`, `/redoc`, and `/openapi.json` disabled by default; toggle on for debugging
 - **Security**: `TrustedHostMiddleware` added with wildcard — host header injection mitigated; wildcard avoids IP/hostname churn on LAN
 - **Security**: LLM output validated against Pydantic models (`ExtractionResult` + `ExtractionItem`) — catches type errors, missing fields, and malformed structures before they reach downstream code
 - **Security**: VLM response capped at 100 KB in `extraction/vision.py` — truncated with warning if exceeded; prevents OOM on runaway model output
+- **Security**: XSS fix — `showBriefPopup()` and `showConfirmPopup()` in `utils.js` changed from `innerHTML` to `textContent`
+- **Security**: XSS fix — `renderAutoRestoreList()` in `settings.js` refactored to DOM APIs (`createElement`, `textContent`, `addEventListener`) — no HTML string interpolation with user data
+- **Security**: Content-Length check — early `413 Payload Too Large` rejection at network boundary in `/upload` if content-length exceeds `max_upload_size_mb`
 - **Decision**: Database at rest encryption accepted as risk — SQLite has no built-in encryption; SQLCipher would break the KISS deployment model. Protected by Docker volume isolation + filesystem permissions + network isolation on LAN behind NPM reverse proxy
-- **Chore**: 29 new tests (15 upload validation + 14 encryption at rest) — 273 total tests
+- **Chore**: 3 new upload validation tests; updated oversized test to expect 413 — 273 total tests
 - **Chore**: VERSION → 0.063.0
 
 ## v0.062.0 (2026-06-20)

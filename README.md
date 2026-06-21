@@ -2,7 +2,7 @@
 
 AI-powered quotation document processing system. Upload PDF or XLSX quotations, extract structured data using AI, and search across all processed documents.
 
-**Version:** v0.062.0 — the running version is shown under the "QuoteHub" header in the app.
+**Version:** v0.063.0 — the running version is shown under the "QuoteHub" header in the app.
 
 ## Features
 
@@ -21,6 +21,12 @@ AI-powered quotation document processing system. Upload PDF or XLSX quotations, 
 - **Auto-Backup** — Automatic daily encrypted backups at 03:00 with weekly promotion, event-based backups (pre-import, pre-update), and retention management
 - **Internal Backup Key** — Machine-bound HKDF-wrapped AES-256-GCM key hierarchy, rotatable via CLI
 - **CLI Interface** — Pre-update backups and key management via `python -m backend.cli`
+- **File-at-Rest Encryption** — AES-256-GCM encrypted PDF/XLSX storage, transparent decrypt on read, keyed by `FILE_ENCRYPTION_KEY` env var
+- **Non-Root Container** — Runs as `quodb` user (UID 1001) via `gosu` privilege drop; no root processes in production
+- **Locked-Down API Docs** — `/docs`, `/redoc`, `/openapi.json` disabled by default; toggle with `QUODB_DOCS_ENABLED=true`
+- **Host Header Protection** — `TrustedHostMiddleware` prevents host header injection attacks
+- **AI Output Validation** — LLM and VLM responses validated against Pydantic models; VLM responses capped at 100 KB to prevent runaway memory usage
+- **Upload Validation Pipeline** — Content-Length check → extension filter → path traversal guard → empty-stem check → size limit → magic bytes verification → encryption → write
 
 ## Prerequisites
 
@@ -37,7 +43,7 @@ cd quotehub
 git checkout main
 ```
 
-### 2. First-time setup: create your config.json
+### 2. First-time setup: create your config.json and encryption key
 
 The repo's `config.json` has empty `ai_endpoint` and `model` fields by design — these are your personal inputs. `deploy.sh` will create one from the template if missing, or copy manually:
 
@@ -46,10 +52,19 @@ cp config.example.json config.json
 # Then edit config.json with your AI server details, OR fill them in via the app's Settings
 ```
 
+**Optional (recommended):** Generate a file-encryption key for at-rest encryption of uploaded PDFs/XLSX:
+
+```bash
+python3 -c "import os; print(os.urandom(32).hex())"
+# Example output: 8f3a1c2b...
+# Set this as FILE_ENCRYPTION_KEY in your environment before running deploy.sh
+```
+
 ### 3. Build and run
 
 **Easiest** — use the deploy script (handles config, build, restart all in one):
 ```bash
+export FILE_ENCRYPTION_KEY="your-64-hex-char-key"  # omit if not using encryption
 ./deploy.sh
 ```
 
@@ -62,6 +77,8 @@ docker run -d \
   -p 8000:8000 \
   -v $(pwd)/config.json:/app/config.json \
   -v quodb_data:/app/data \
+  -e FILE_ENCRYPTION_KEY="your-64-hex-char-key" \
+  -e QUODB_DOCS_ENABLED=false \
   quodb
 ```
 
@@ -83,6 +100,13 @@ cd quotehub
 ./deploy.sh
 ```
 
+Like the first-time setup, set `FILE_ENCRYPTION_KEY` in your environment for the new container to pick it up:
+
+```bash
+export FILE_ENCRYPTION_KEY="your-64-hex-char-key"
+./deploy.sh
+```
+
 This will:
 1. Pull the latest from `main`
 2. Bake the current commit hash into the new image
@@ -91,9 +115,9 @@ This will:
 
 ## Versioning
 
-- `VERSION` file in the repo root defines the current release (e.g. `0.062.0`)
+- `VERSION` file in the repo root defines the current release (e.g. `0.063.0`)
 - The commit hash is baked into the image at build time via the `GIT_COMMIT` Docker build arg
-- The app header displays both: `v0.062.0 (commit hash)`
+- The app header displays both: `v0.063.0 (commit hash)`
 - Versioning follows [Semantic Versioning](https://semver.org/):
   - `MAJOR` — breaking changes
   - `MINOR` — new features (backwards compatible)
@@ -347,9 +371,11 @@ The system automatically creates daily encrypted backups at 03:00 (configurable)
 - **Frontend:** Vanilla HTML/CSS/JavaScript (no frameworks)
 - **AI:** Any OpenAI-compatible VLM API (LM Studio, vLLM, etc.)
 - **Extraction:** Pluggable package (local rules-based + LLM with fallback, Vision LLM for scanned PDFs)
-- **Container:** Docker with Python 3.11-slim
-- **Backup Encryption:** AES-256-GCM with optional PBKDF2-600K key derivation
+- **Container:** Docker with Python 3.11-slim, non-root `quodb` user via `gosu`
+- **File Encryption:** AES-256-GCM at rest, raw 32-byte key from `FILE_ENCRYPTION_KEY` env var
+- **Backup Encryption:** AES-256-GCM with PBKDF2-600K key derivation for `.quodb` export packages
 - **Auto-Backup Key:** Machine-bound HKDF-wrapped AES-256-GCM key hierarchy
+- **AI Validation:** Pydantic models for LLM output; 100 KB cap on VLM responses
 
 ## License
 
