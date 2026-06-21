@@ -584,7 +584,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 | 6 | AI | No graceful degradation notification when AI server is down | Extraction silently falls to local rules — no UI notification. Would improve UX but left as-is for now. | ⏸️ Open |
 | 7 | Observability | No request ID tracing across logs | Overkill for 10 users on LAN. Docker logs + structured formatter provide enough traceability. | ✅ Accepted |
 | 8 | Infra | No resource limits on containers | Not added yet — left as-is for now. | ⏸️ Open |
-| 9 | Infra | Single container, no HA | Not documented yet — left as-is for now. | ⏸️ Open |
+| 9 | Infra | Single container, no HA | Added note in README.md Data Persistence section stating single-node deployment, no failover/clustering planned. | ✅ Fixed |
 | 14 | FastAPI | No global exception handler | Added `@app.exception_handler(Exception)` — logs full traceback server-side, returns safe 500 JSON. HTTPException/422 handlers unchanged. | ✅ Fixed |
 | 15 | Crypto | config.json plaintext on volume | AI endpoint is local LAN only — no credentials. Moving to env var would break Settings UI. | ✅ Accepted |
 | 16 | Config | Lifespan logs AI endpoint URL | Local-only, never external. Stripping URL would hinder debugging with zero security benefit. | ✅ Accepted |
@@ -681,7 +681,6 @@ Items still needed before the app can be considered production-ready:
 4. All audit items addressed (21/21 P0–P3 from the production-readiness audit). Left as-is:
    - **P2-6**: AI degradation UX notification (nice-to-have)
    - **P2-8**: Container resource limits (5 min)
-   - **P2-9**: HA documentation (30 min)
    - **P3-11**: CI linting (no CI pipeline)
    - **P3-12**: Container scanning (manual `docker scout quick` before releases)
    - **XLSX column resizing**: Pre-existing known issue

@@ -326,6 +326,8 @@ docker-compose up -d
 
 ## Data Persistence
 
+> **Single-node deployment:** QuoteHub runs as one container with one SQLite database. SQLite does not support concurrent writers across processes, so horizontal scaling or clustering is not possible. No failover or high-availability is planned.
+
 - **config.json** — Mounted from host, survives rebuilds
 - **data/** — Stored in Docker named volume `quodb_data`, survives container rebuilds
 - **Database** — SQLite with FTS5 full-text search index
