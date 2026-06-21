@@ -70,18 +70,17 @@ class TestUploadValidation:
         assert len(data["errors"]) == 0
 
     def test_oversized_file_rejected(self, app_client):
-        """A file exceeding max_upload_size_mb should be rejected."""
+        """A file exceeding max_upload_size_mb should be rejected at the network boundary."""
         # Default is 5 MB = 5242880 bytes; send 6 MB of data
         big_content = b"X" * (6 * 1024 * 1024)
         resp = app_client.post(
             "/upload",
             files=[("files", ("big.pdf", io.BytesIO(big_content), "application/pdf"))],
         )
-        assert resp.status_code == 200
+        # Content-Length check rejects before reading body — returns 413
+        assert resp.status_code == 413
         data = resp.json()
-        assert data["uploaded"] == 0
-        assert len(data["errors"]) == 1
-        assert "too large" in data["errors"][0]["error"].lower()
+        assert "too large" in data["detail"].lower()
 
     def test_path_traversal_dotdot_rejected(self, app_client):
         """Filename with '..' should be rejected."""

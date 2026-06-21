@@ -324,7 +324,21 @@ async def upload(files: list[UploadFile] = File(...), request: Request = None):
     
     user = get_current_user(request)
     username = user.get("username", "unknown") if user else "unknown"
-    
+
+    # Reject oversized requests at the network boundary before reading the body.
+    # The Content-Length header tells us the total upload size; if it exceeds
+    # the configured limit we return 413 immediately without buffering.
+    content_length = request.headers.get("content-length")
+    if content_length:
+        from ..utils import get_config_data
+        cfg = get_config_data()
+        max_bytes = cfg.get("max_upload_size_mb", 5) * 1024 * 1024
+        if int(content_length) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload too large. Maximum size is {max_bytes // (1024*1024)} MB."
+            )
+
     results = []
     errors = []
     
