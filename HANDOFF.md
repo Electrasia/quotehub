@@ -554,7 +554,7 @@ A full production-readiness audit was performed covering 15 non-negotiable requi
 
 | # | Area | Finding | Suggested Fix | Effort |
 |---|------|---------|---------------|--------|
-| 10 | Build | No version pinning in `requirements.txt` (uses `>=` ranges) | Pin exact versions and use `pip freeze` or `pip-compile` | 1 hour |
+| 10 | Build | No version pinning in `requirements.txt` (uses `>=` ranges) | Pinned `cryptography==48.0.0` and `bcrypt==4.0.1` — all 15 deps now exact | ✅ Fixed |
 | 11 | CI | No linting in CI | Add `ruff` or `flake8` to CI pipeline | 1 day |
 | 12 | CI | No `docker scan` / Trivy in CI | Add container image scanning step | 1 day |
 | 19 | FastAPI | No CORSMiddleware | Same-origin app — not needed for browser use, but API open to Docker-network clients | Added `CORSMiddleware(allow_origins=["*"])` with intent documented; session cookie uses `same_site="lax"` as real defense | ✅ Fixed |
