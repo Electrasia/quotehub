@@ -234,8 +234,43 @@ def require_role(*allowed_roles: str):
             )
         return user
     return dependency
+# ─── Password validation ──────────────────────────────────
+
+_COMMON_PATTERNS = ['password', '1234', 'admin', 'export', 'quodb', 'quote', 'abc123', 'qwerty', 'letmein']
+
+
+def validate_user_password(password: str) -> list[str]:
+    """Validate user password strength. Returns list of error messages (empty = valid).
+
+    Rules (same as export passwords):
+        - At least 12 characters
+        - At least one uppercase letter
+        - At least one lowercase letter
+        - At least one digit
+        - At least one special character (non-alphanumeric)
+        - No common/guessable patterns
+    """
+    errors = []
+    if len(password) < 12:
+        errors.append("Password must be at least 12 characters long")
+    if not any(c.isupper() for c in password):
+        errors.append("Password must contain at least one uppercase letter")
+    if not any(c.islower() for c in password):
+        errors.append("Password must contain at least one lowercase letter")
+    if not any(c.isdigit() for c in password):
+        errors.append("Password must contain at least one digit")
+    if not any(not c.isalnum() for c in password):
+        errors.append("Password must contain at least one special character")
+    lower = password.lower()
+    for pattern in _COMMON_PATTERNS:
+        if pattern in lower:
+            errors.append("Password contains a common pattern and is too guessable")
+            break
+    return errors
+
 
 # ─── Pydantic models ──────────────────────────────────────
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -243,16 +278,16 @@ class LoginRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
-    new_password: str
+    new_password: str = Field(min_length=12)
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=12)
     role: str = Field(pattern="^(master|admin|user)$")
 
 class UserUpdate(BaseModel):
     role: Optional[str] = Field(default=None, pattern="^(master|admin|user)$")
-    new_password: Optional[str] = Field(default=None, min_length=1)
+    new_password: Optional[str] = Field(default=None, min_length=12)
     active: Optional[bool] = Field(default=None)
 
 class UserOut(BaseModel):

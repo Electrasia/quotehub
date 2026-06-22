@@ -12,6 +12,8 @@ from .auth import router as auth_router, users_router, init_password_router
 from .files import router as files_router
 from .ai import router as ai_router
 from .admin import router as admin_router
+from .export_import import router as export_import_router
+from .auto_backup import router as auto_backup_router
 
 __all__ = [
     "auth_router",
@@ -20,4 +22,6 @@ __all__ = [
     "files_router",
     "ai_router",
     "admin_router",
+    "export_import_router",
+    "auto_backup_router",
 ]

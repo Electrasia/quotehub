@@ -60,3 +60,59 @@ class SessionCookieMiddleware(BaseHTTPMiddleware):
     def _remove_max_age(self, cookie_header: str) -> str:
         """Remove Max-Age from the Set-Cookie header."""
         return re.sub(r';\s*Max-Age=\d+', '', cookie_header)
+
+
+class CSPMiddleware(BaseHTTPMiddleware):
+    """Add Content-Security-Policy header to every response.
+
+    Policy: default-src 'self'; script-src 'self' 'unsafe-inline';
+            img-src 'self' data:; style-src 'self' 'unsafe-inline'
+
+    'unsafe-inline' is required for script-src and style-src because the
+    frontend uses inline event handlers (onclick, onchange, etc.) pervasively
+    (78 instances) and inline <style> blocks. Refactoring all of them to
+    external handlers would be high churn with no practical security gain —
+    all XSS sinks (P1-1 through P1-3) are already fixed with DOM APIs.
+
+    The policy still provides value by restricting image, font, frame, and
+    connection sources to same-origin, preventing data exfiltration via
+    injected resource loads even if an XSS bypass were found.
+    """
+
+    CSP_HEADER = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'"
+    )
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = self.CSP_HEADER
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+class SecureCookieMiddleware(BaseHTTPMiddleware):
+    """Add Secure flag to session cookie when behind an HTTPS proxy.
+
+    Reads trust_proxy_headers from config. When enabled (deploy behind NPM),
+    ensures the quotahub_session cookie has the Secure flag so the browser
+    only sends it over HTTPS. Has no effect in dev (default: disabled).
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+
+        from .utils import get_config_data
+        cfg = get_config_data()
+        if not cfg.get("trust_proxy_headers", False):
+            return response
+
+        cookie_header = response.headers.get("set-cookie", "")
+        if "quotahub_session=" not in cookie_header:
+            return response
+        if "; Secure" not in cookie_header:
+            response.headers["set-cookie"] = cookie_header + "; Secure"
+        return response

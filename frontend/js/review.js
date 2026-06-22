@@ -37,9 +37,16 @@ function showReview(filename) {
     (extractedData.items || []).forEach(item => addRow(item));
     updateItemCount();
     updateDocumentTypeWarning();
+
+    // Show AI fallback warning if extraction fell to local rules
+    const fallbackWarn = document.getElementById('aiFallbackWarning');
+    if (fallbackWarn) {
+        fallbackWarn.style.display = (extractedData.extraction_method === 'local') ? 'block' : 'none';
+    }
+
     reviewAutoFit = true;
-    updateReviewPdf();
     goToStep(4);
+    updateReviewPdf();
 }
 
 /**
@@ -62,8 +69,13 @@ function updateDocumentTypeWarning() {
  * Applies zoom (auto-fit on first load, then manual zoom state).
  */
 function updateReviewPdf() {
+    const img = document.getElementById('reviewPdfImg');
+    const fallback = document.getElementById('reviewPdfFallback');
+    const pageInfo = document.getElementById('reviewPageInfo');
+
     if (reviewPages.length > 0) {
-        const img = document.getElementById('reviewPdfImg');
+        img.classList.remove('hidden');
+        fallback.classList.add('hidden');
         img.src = reviewPages[reviewCurrentPage];
         const finalize = () => {
             if (reviewAutoFit) {
@@ -79,7 +91,12 @@ function updateReviewPdf() {
         } else {
             img.onload = finalize;
         }
-        document.getElementById('reviewPageInfo').textContent = `Page ${reviewCurrentPage + 1} of ${reviewPages.length}`;
+        pageInfo.textContent = `Page ${reviewCurrentPage + 1} of ${reviewPages.length}`;
+        pageInfo.classList.remove('hidden');
+    } else {
+        img.classList.add('hidden');
+        fallback.classList.remove('hidden');
+        pageInfo.classList.add('hidden');
     }
 }
 
@@ -619,7 +636,7 @@ function backToUpload() {
     extractedData = null;
     reviewPages = [];
     showProcessView();
-    goToStep(1);
+    goToStep(uploadedFiles.length > 0 ? 2 : 1);
     renderFileList();
 }
 

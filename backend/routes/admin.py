@@ -13,11 +13,15 @@ This module handles:
 
 import calendar
 import json
+import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -34,9 +38,6 @@ router = APIRouter(tags=["admin"])
 async def get_config():
     """Get current configuration."""
     return load_config()
-
-
-VALID_EXTRACTION_MODES = {"llm_first", "local_first", "llm_only", "local_only"}
 
 
 def _validate_config(config: dict) -> list[str]:
@@ -61,16 +62,22 @@ def _validate_config(config: dict) -> list[str]:
         if not isinstance(popup, (int, float)) or popup < 1 or popup > 10:
             errors.append("popup_duration must be between 1 and 10 seconds")
 
-    # extraction_mode: must be one of the valid values
-    mode = config.get("extraction_mode")
-    if mode is not None and mode not in VALID_EXTRACTION_MODES:
-        errors.append(f"extraction_mode must be one of: {', '.join(sorted(VALID_EXTRACTION_MODES))}")
+    # extraction_enabled: must be boolean
+    enabled = config.get("extraction_enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        errors.append("extraction_enabled must be true or false")
 
     # ai_endpoint: must be empty or a valid URL
     endpoint = config.get("ai_endpoint")
     if endpoint is not None and endpoint != "":
         if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
             errors.append("ai_endpoint must be a URL starting with http:// or https://")
+
+    # max_upload_size_mb: integer 1-20
+    max_size = config.get("max_upload_size_mb")
+    if max_size is not None:
+        if not isinstance(max_size, int) or isinstance(max_size, bool) or max_size < 1 or max_size > 20:
+            errors.append("max_upload_size_mb must be an integer between 1 and 20")
 
     # ocr_enabled, ocr_fallback_to_llm: must be boolean
     for key in ("ocr_enabled", "ocr_fallback_to_llm"):
@@ -209,6 +216,7 @@ async def cleanup_execute(req: CleanupExecuteRequest):
             cur = db.execute(base_query, params)
             entries_deleted = cur.rowcount
     except Exception as e:
+        logger.exception("Cleanup DB operation failed")
         return JSONResponse(
             status_code=500,
             content={"success": False, "detail": f"Database error: {str(e)}"}
@@ -238,6 +246,7 @@ async def cleanup_execute(req: CleanupExecuteRequest):
         vacuum_conn.execute("VACUUM")
         vacuum_conn.close()
     except Exception:
+        logger.warning("VACUUM failed during cleanup", exc_info=True)
         pass
     
     return {
@@ -251,11 +260,11 @@ async def cleanup_execute(req: CleanupExecuteRequest):
 @router.get("/cleanup/stats", dependencies=[Depends(require_role("master"))])
 async def cleanup_stats():
     """Get current database and file statistics for cleanup overview."""
-    from ..main import ARCHIVE_DIR, IMAGES_DIR
+    from ..main import ARCHIVE_DIR, IMAGES_DIR, UPLOAD_DIR, uploaded_files, uploaded_files_lock
     
     stats = {}
     
-    # Database stats
+    # ── Database stats ──
     with get_db(readonly=True) as db:
         # Total entries
         row = db.execute("SELECT COUNT(*) as total FROM quotations").fetchone()
@@ -273,29 +282,152 @@ async def cleanup_stats():
         ).fetchone()
         stats["oldest_date"] = row["oldest"]
         stats["newest_date"] = row["newest"]
+        
+        # DB stems for orphan detection
+        db_stems = set()
+        for r in db.execute("SELECT filename FROM quotations WHERE filename IS NOT NULL AND filename != ''").fetchall():
+            db_stems.add(Path(r["filename"]).stem)
     
-    # File stats
+    # ── Archive file stats ──
     pdf_count = 0
     total_size = 0
+    archive_stems = set()
     if ARCHIVE_DIR.exists():
-        for pdf_file in ARCHIVE_DIR.glob("*.pdf"):
-            pdf_count += 1
-            try:
-                total_size += pdf_file.stat().st_size
-            except OSError:
-                pass
+        for f in ARCHIVE_DIR.iterdir():
+            if f.is_file():
+                pdf_count += 1
+                archive_stems.add(f.stem)
+                try:
+                    total_size += f.stat().st_size
+                except OSError:
+                    pass
     
+    # ── Queue reference set ──
+    async with uploaded_files_lock:
+        queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
+    queue_stems = {Path(fname).stem for fname in queue_filenames}
+    
+    # ── Active stems (anything referenced by queue, archive, or DB) ──
+    all_active_stems = queue_stems | archive_stems | db_stems
+    
+    # ── Image dir stats ──
     img_count = 0
+    image_orphan_count = 0
+    image_orphan_bytes = 0
     if IMAGES_DIR.exists():
         for item in IMAGES_DIR.iterdir():
             if item.is_dir():
                 img_count += 1
+                if item.name not in all_active_stems:
+                    image_orphan_count += 1
+                    for p in item.rglob("*"):
+                        if p.is_file():
+                            try:
+                                image_orphan_bytes += p.stat().st_size
+                            except OSError:
+                                pass
+    
+    # ── Temp file stats ──
+    temp_file_count = 0
+    temp_orphan_count = 0
+    temp_orphan_bytes = 0
+    if UPLOAD_DIR.exists():
+        for f in UPLOAD_DIR.iterdir():
+            if f.is_file():
+                temp_file_count += 1
+                if f.name not in queue_filenames:
+                    temp_orphan_count += 1
+                    try:
+                        temp_orphan_bytes += f.stat().st_size
+                    except OSError:
+                        pass
     
     stats["pdf_files"] = pdf_count
     stats["image_dirs"] = img_count
     stats["total_size"] = total_size
+    stats["temp_file_count"] = temp_file_count
+    stats["temp_orphan_count"] = temp_orphan_count
+    stats["image_orphan_count"] = image_orphan_count
+    stats["temp_orphan_bytes"] = temp_orphan_bytes
+    stats["image_orphan_bytes"] = image_orphan_bytes
     
     return stats
+
+
+@router.post("/cleanup/purge-orphans", dependencies=[Depends(require_role("master"))])
+async def cleanup_purge_orphans():
+    """Delete orphan files with no reference in queue, archive, or database.
+    
+    Orphan temp files exist in data/temp/ but have no matching queue entry.
+    Orphan image directories exist in data/images/ whose stem matches no
+    file in the queue, archive, or database.
+    
+    Returns counts and bytes freed.
+    """
+    import shutil
+    from ..main import uploaded_files, uploaded_files_lock, UPLOAD_DIR, ARCHIVE_DIR, IMAGES_DIR
+    
+    # ── Build reference sets ──
+    async with uploaded_files_lock:
+        queue_filenames = {e["filename"] for e in uploaded_files if e.get("filename")}
+    queue_stems = {Path(fname).stem for fname in queue_filenames}
+    
+    archive_stems = set()
+    if ARCHIVE_DIR.exists():
+        for f in ARCHIVE_DIR.iterdir():
+            if f.is_file():
+                archive_stems.add(f.stem)
+    
+    db_stems = set()
+    with get_db(readonly=True) as db:
+        for row in db.execute("SELECT filename FROM quotations WHERE filename IS NOT NULL AND filename != ''").fetchall():
+            db_stems.add(Path(row["filename"]).stem)
+    
+    all_active_stems = queue_stems | archive_stems | db_stems
+    
+    temp_deleted = 0
+    image_dirs_deleted = 0
+    bytes_freed = 0
+    
+    # ── Delete orphan temp files ──
+    if UPLOAD_DIR.exists():
+        for f in UPLOAD_DIR.iterdir():
+            if f.is_file() and f.name not in queue_filenames:
+                try:
+                    bytes_freed += f.stat().st_size
+                    f.unlink()
+                    temp_deleted += 1
+                except OSError:
+                    pass
+    
+    # ── Delete orphan image directories ──
+    if IMAGES_DIR.exists():
+        for item in IMAGES_DIR.iterdir():
+            if item.is_dir() and item.name not in all_active_stems:
+                try:
+                    for p in item.rglob("*"):
+                        if p.is_file():
+                            try:
+                                bytes_freed += p.stat().st_size
+                            except OSError:
+                                pass
+                    shutil.rmtree(item, ignore_errors=True)
+                    image_dirs_deleted += 1
+                except OSError:
+                    pass
+    
+    logger.info("Orphan files purged", extra={
+        'category': 'ADMIN',
+        'temp_deleted': temp_deleted,
+        'image_dirs_deleted': image_dirs_deleted,
+        'bytes_freed': bytes_freed
+    })
+    
+    return {
+        "temp_deleted": temp_deleted,
+        "image_dirs_deleted": image_dirs_deleted,
+        "bytes_freed": bytes_freed,
+    }
 
 
 # ─── Search ────────────────────────────────────────────────
@@ -308,7 +440,8 @@ async def search(q: str = "", document_type: str = ""):
     with get_db(readonly=True) as db:
         if q:
             words = q.strip().split()
-            fts_words = [w.replace('"', '""') + '*' for w in words]
+            sanitized = [re.sub(r'[^\w]', '', w) for w in words if re.sub(r'[^\w]', '', w)]
+            fts_words = [w.replace('"', '""') + '*' for w in sanitized]
             fts_query = " ".join(fts_words)
             
             # Build base query with optional document_type filter
@@ -449,20 +582,16 @@ async def get_brand_by_model(model: str = ""):
 
 @router.get("/check-duplicate", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def check_duplicate(filename: str = ""):
-    """Check if a file already exists."""
+    """Check if a file is already in the database."""
     if not filename:
-        return {"exists": False}
-    
-    from ..main import ARCHIVE_DIR
-    archive_path = ARCHIVE_DIR / filename
-    exists = archive_path.exists()
+        return {"in_database": False}
     
     with get_db(readonly=True) as db:
         db_count = db.execute(
             "SELECT COUNT(*) FROM quotations WHERE filename = ?", (filename,)
         ).fetchone()[0]
     
-    return {"exists": exists, "in_database": db_count > 0, "filename": filename}
+    return {"in_database": db_count > 0, "filename": filename}
 
 
 # ─── View archived file ──────────────────────────────────

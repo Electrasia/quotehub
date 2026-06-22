@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# app-cli — QuoteHub CLI wrapper.
+# Calls the Python CLI entry point from the project root.
+# Usage:  ./app-cli backup pre-update --version 1.4.2
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python3 "$DIR/backend/cli.py" "$@"

@@ -104,6 +104,7 @@ async function processAll() {
                         updateInlineProgress(file.filename, 'Done', 100);
                         updateOverallProgress();
                         extractedData = msg.data;
+                        uploadedFiles[fileIdx].extractedData = msg.data;
                         uploadedFiles[fileIdx].status = 'done';
                         uploadedFiles[fileIdx].progress = '';
                         renderFileList();

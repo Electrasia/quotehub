@@ -122,9 +122,6 @@ function renderSearchResults() {
             </table>
         </div>
     `;
-    container.querySelectorAll('tr[data-filename]').forEach(tr => {
-        tr.ondblclick = () => viewPdf(tr.dataset.filename);
-    });
 }
 
 async function searchQuotations() {
@@ -327,4 +324,10 @@ async function deleteSelected() {
 // Close PDF viewer on Escape
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closePdfViewer();
+});
+
+// Open PDF on double-click via event delegation (survives innerHTML changes)
+document.getElementById('searchResults').addEventListener('dblclick', (e) => {
+    const row = e.target.closest('tr[data-filename]');
+    if (row) viewPdf(row.dataset.filename);
 });

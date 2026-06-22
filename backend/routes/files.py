@@ -6,20 +6,17 @@ This module handles:
     - PDF processing (streaming)
     - Confirmation/saving
     - Skip/delete operations
-    - Export/import
 """
 
 import json
 import logging
 import os
 import shutil
-import zipfile
-import tempfile
 import asyncio
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -30,6 +27,22 @@ logger = logging.getLogger(__name__)
 
 def _count_pages(filepath: Path) -> int:
     """Count pages (PDF) or sheets (XLSX) without a full parse."""
+    # Transparently decrypt file-at-rest encryption
+    from ..export_import import get_encryption_key, decrypt_file_to_temp
+    enc_key = get_encryption_key()
+    _tmp = None
+    if enc_key:
+        _tmp = decrypt_file_to_temp(filepath)
+        filepath = _tmp
+    try:
+        return _count_pages_impl(filepath)
+    finally:
+        if _tmp:
+            _tmp.unlink(missing_ok=True)
+
+
+def _count_pages_impl(filepath: Path) -> int:
+    """Inner implementation: count pages on an already-decrypted file."""
     suffix = filepath.suffix.lower()
     if suffix == ".pdf":
         try:
@@ -37,6 +50,7 @@ def _count_pages(filepath: Path) -> int:
             with pdfplumber.open(str(filepath)) as pdf:
                 return len(pdf.pages)
         except Exception:
+            logger.warning("pdfplumber page count failed for %s", filepath, exc_info=True)
             try:
                 import fitz
                 doc = fitz.open(str(filepath))
@@ -44,6 +58,7 @@ def _count_pages(filepath: Path) -> int:
                 doc.close()
                 return n
             except Exception:
+                logger.warning("pymupdf page count also failed for %s", filepath, exc_info=True)
                 return 0
     elif suffix == ".xlsx":
         try:
@@ -53,6 +68,7 @@ def _count_pages(filepath: Path) -> int:
             wb.close()
             return n
         except Exception:
+            logger.warning("openpyxl page count failed for %s", filepath, exc_info=True)
             return 0
     return 0
 
@@ -62,6 +78,22 @@ def _generate_page_images(filepath: Path) -> list[str]:
     
     Returns a list of relative URL paths (e.g. /images/{stem}/page_1.png).
     """
+    # Transparently decrypt file-at-rest encryption
+    from ..export_import import get_encryption_key, decrypt_file_to_temp
+    enc_key = get_encryption_key()
+    _tmp = None
+    if enc_key:
+        _tmp = decrypt_file_to_temp(filepath)
+        filepath = _tmp
+    try:
+        return _generate_page_images_impl(filepath)
+    finally:
+        if _tmp:
+            _tmp.unlink(missing_ok=True)
+
+
+def _generate_page_images_impl(filepath: Path) -> list[str]:
+    """Inner implementation: generate images from an already-decrypted file."""
     from ..main import IMAGES_DIR
     
     stem = filepath.stem
@@ -83,6 +115,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
                     pages.append(f"/images/{stem}/page_{i}.png")
             return pages
         except Exception:
+            logger.warning("pdfplumber image gen failed for %s", filepath, exc_info=True)
             pass
         # Fallback: try PyMuPDF
         try:
@@ -97,6 +130,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
             doc.close()
             return pages
         except Exception:
+            logger.warning("pymupdf image gen failed for %s", filepath, exc_info=True)
             pass
     
     elif suffix == ".xlsx":
@@ -144,6 +178,7 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 try:
                     font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
                 except Exception:
+                    logger.warning("Font load failed, using default", exc_info=True)
                     font = ImageFont.load_default()
                 
                 def _wrap_text(text, max_width):
@@ -212,34 +247,37 @@ def _generate_page_images(filepath: Path) -> list[str]:
                 pages.append(f"/images/{stem}/page_{sheet_idx}.png")
             return pages
         except Exception:
+            logger.warning("openpyxl image gen failed for %s", filepath, exc_info=True)
             pass
     
     return pages
 
 
-def _find_file_by_id(file_id: str) -> tuple[int, dict] | None:
+async def _find_file_by_id(file_id: str) -> tuple[int, dict] | None:
     """Find a file entry by its stable file_id. Returns (index, entry) or None."""
-    from ..main import uploaded_files
-    for i, entry in enumerate(uploaded_files):
-        if entry.get("file_id") == file_id:
-            return i, entry
+    from ..main import uploaded_files, uploaded_files_lock
+    async with uploaded_files_lock:
+        for i, entry in enumerate(uploaded_files):
+            if entry.get("file_id") == file_id:
+                return i, entry
     return None
 
 
-def _find_file_by_index(file_index: int) -> tuple[int, dict] | None:
+async def _find_file_by_index(file_index: int) -> tuple[int, dict] | None:
     """Find a file entry by its array index (legacy). Returns (index, entry) or None."""
-    from ..main import uploaded_files
-    if 0 <= file_index < len(uploaded_files):
-        return file_index, uploaded_files[file_index]
+    from ..main import uploaded_files, uploaded_files_lock
+    async with uploaded_files_lock:
+        if 0 <= file_index < len(uploaded_files):
+            return file_index, uploaded_files[file_index]
     return None
 
 
-def _resolve_file(file_id: str | None = None, file_index: int | None = None) -> tuple[int, dict] | None:
+async def _resolve_file(file_id: str | None = None, file_index: int | None = None) -> tuple[int, dict] | None:
     """Resolve a file by file_id (preferred) or file_index (fallback)."""
     if file_id:
-        return _find_file_by_id(file_id)
+        return await _find_file_by_id(file_id)
     if file_index is not None:
-        return _find_file_by_index(file_index)
+        return await _find_file_by_index(file_index)
     return None
 
 from ..auth import require_role
@@ -280,14 +318,61 @@ class RemoveFileRequest(BaseModel):
 # ─── Upload ────────────────────────────────────────────────
 
 @router.post("/upload", dependencies=[Depends(require_role("admin", "master"))])
-async def upload(files: list[UploadFile] = File(...)):
+async def upload(files: list[UploadFile] = File(...), request: Request = None):
     """Upload PDF or XLSX files for processing."""
-    from ..main import uploaded_files, UPLOAD_DIR
+    from ..main import uploaded_files, uploaded_files_lock, UPLOAD_DIR
+    from ..auth import get_current_user
+    from collections import Counter
     
+    user = get_current_user(request)
+    username = user.get("username", "unknown") if user else "unknown"
+
+    # Reject oversized requests at the network boundary before reading the body.
+    # The Content-Length header tells us the total upload size; if it exceeds
+    # the configured limit we return 413 immediately without buffering.
+    content_length = request.headers.get("content-length")
+    if content_length:
+        from ..utils import get_config_data
+        cfg = get_config_data()
+        max_bytes = cfg.get("max_upload_size_mb", 5) * 1024 * 1024
+        if int(content_length) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload too large. Maximum size is {max_bytes // (1024*1024)} MB."
+            )
+
     results = []
     errors = []
+    
+    # Compute queue size once (non-saved files only)
+    async with uploaded_files_lock:
+        pending_count = sum(1 for f in uploaded_files if f.get("status") != "saved")
+    MAX_QUEUED = 50
+    
     for file in files:
         if not file.filename:
+            continue
+
+        # Reject if queue would exceed the limit
+        if pending_count >= MAX_QUEUED:
+            async with uploaded_files_lock:
+                owner_counts = Counter(
+                    f.get("uploaded_by", "unknown")
+                    for f in uploaded_files
+                    if f.get("status") != "saved"
+                )
+            top_user, top_count = owner_counts.most_common(1)[0]
+            logger.warning("Upload rejected: queue full", extra={
+                'category': 'PROCESS', 'file': file.filename,
+                'username': username, 'pending': pending_count
+            })
+            errors.append({
+                "filename": file.filename,
+                "error": (
+                    f"Upload queue full (limit {MAX_QUEUED}). "
+                    f"User '{top_user}' has {top_count} file(s) pending."
+                )
+            })
             continue
         
         # Validate file extension
@@ -298,21 +383,74 @@ async def upload(files: list[UploadFile] = File(...)):
             })
             errors.append({"filename": file.filename, "error": f"Unsupported file type: {ext}"})
             continue
-        
-        # Save file to temp directory
-        filepath = UPLOAD_DIR / file.filename
-        with open(filepath, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
+
+        # Validate filename — reject path traversal
+        if ".." in file.filename or "/" in file.filename or "\\" in file.filename:
+            logger.warning("Upload rejected: unsafe filename", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': "Filename contains path separators"
+            })
+            errors.append({"filename": file.filename, "error": "Unsafe filename"})
+            continue
+
+        # Validate filename has a name part before the extension
+        stem = Path(file.filename).stem
+        if not stem:
+            logger.warning("Upload rejected: no filename stem", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': "Filename without base name"
+            })
+            errors.append({"filename": file.filename, "error": "Unsafe filename"})
+            continue
+
+        # Read file into memory for validation before writing to disk
+        content = await file.read()
+
         # Reject empty files
         if len(content) == 0:
-            filepath.unlink(missing_ok=True)
             logger.warning("Upload rejected: empty file", extra={
                 'category': 'PROCESS', 'file': file.filename, 'error': 'Empty file (0 bytes)'
             })
             errors.append({"filename": file.filename, "error": "Empty file"})
             continue
+
+        # Reject oversized files (configurable, default 5 MB)
+        from ..utils import get_config_data
+        cfg = get_config_data()
+        max_bytes = cfg.get("max_upload_size_mb", 5) * 1024 * 1024
+        if len(content) > max_bytes:
+            limit_mb = cfg.get("max_upload_size_mb", 5)
+            logger.warning("Upload rejected: file too large", extra={
+                'category': 'PROCESS', 'file': file.filename,
+                'size_mb': f"{len(content) / 1024 / 1024:.1f}",
+                'max_mb': limit_mb,
+            })
+            errors.append({"filename": file.filename,
+                           "error": f"File too large ({len(content) / 1024 / 1024:.1f} MB). Maximum: {limit_mb} MB"})
+            continue
+
+        # Validate magic bytes — ensure file matches its extension
+        if ext == ".pdf" and not content[:4] == b"%PDF":
+            logger.warning("Upload rejected: invalid PDF magic bytes", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': 'Not a valid PDF file'
+            })
+            errors.append({"filename": file.filename, "error": "Invalid file content"})
+            continue
+        if ext == ".xlsx" and not content[:4] == b"PK\x03\x04":
+            logger.warning("Upload rejected: invalid XLSX magic bytes", extra={
+                'category': 'PROCESS', 'file': file.filename, 'error': 'Not a valid XLSX file'
+            })
+            errors.append({"filename": file.filename, "error": "Invalid file content"})
+            continue
+
+        # Encrypt at rest before writing to disk
+        from ..export_import import encrypt_file_at_rest, get_encryption_key
+        enc_key = get_encryption_key()
+        if enc_key:
+            content = encrypt_file_at_rest(content, enc_key)
+
+        # Save file to temp directory
+        filepath = UPLOAD_DIR / file.filename
+        with open(filepath, "wb") as f:
+            f.write(content)
         
         # Add to uploaded files list
         num_pages = _count_pages(filepath)
@@ -324,14 +462,19 @@ async def upload(files: list[UploadFile] = File(...)):
             "status": "uploaded",
             "num_pages": num_pages,
             "pages": [],
+            "uploaded_by": username,
         }
-        uploaded_files.append(entry)
+        async with uploaded_files_lock:
+            uploaded_files.append(entry)
+            file_index = len(uploaded_files) - 1
+        pending_count += 1  # Track for subsequent files in this batch
         results.append({
             "file_id": file_id,
             "filename": file.filename,
             "status": "uploaded",
-            "file_index": len(uploaded_files) - 1,
+            "file_index": file_index,
             "num_pages": num_pages,
+            "uploaded_by": username,
         })
         
         logger.info("File uploaded", extra={
@@ -341,14 +484,28 @@ async def upload(files: list[UploadFile] = File(...)):
             'pages': num_pages
         })
     
+    from ..main import save_upload_state
+    await save_upload_state()
     return {"uploaded": len(results), "files": results, "errors": errors}
 
 
 @router.post("/clear", dependencies=[Depends(require_role("admin", "master"))])
 async def clear_files():
-    """Clear all uploaded files."""
-    from ..main import uploaded_files
-    uploaded_files.clear()
+    """Clear all uploaded files and clean up files on disk."""
+    from ..main import uploaded_files, uploaded_files_lock, IMAGES_DIR
+    from pathlib import Path
+
+    async with uploaded_files_lock:
+        for entry in uploaded_files:
+            filepath = Path(entry.get("filepath", ""))
+            if filepath.is_file():
+                filepath.unlink()
+                img_dir = IMAGES_DIR / filepath.stem
+                if img_dir.exists():
+                    shutil.rmtree(str(img_dir), ignore_errors=True)
+        uploaded_files.clear()
+    from ..main import save_upload_state
+    await save_upload_state()
     logger.info("All files cleared", extra={
         'category': 'PROCESS'
     })
@@ -358,8 +515,8 @@ async def clear_files():
 @router.post("/remove-file", dependencies=[Depends(require_role("admin", "master"))])
 async def remove_file(req: RemoveFileRequest):
     """Remove a single uploaded file by its stable file_id."""
-    from ..main import uploaded_files
-    result = _find_file_by_id(req.file_id)
+    from ..main import uploaded_files, uploaded_files_lock, IMAGES_DIR
+    result = await _find_file_by_id(req.file_id)
     if result is None:
         raise HTTPException(status_code=404, detail="File not found")
     idx, entry = result
@@ -370,7 +527,14 @@ async def remove_file(req: RemoveFileRequest):
             filepath.unlink()
         except OSError:
             pass
-    uploaded_files.pop(idx)
+        # Also clean up generated page images
+        img_dir = IMAGES_DIR / filepath.stem
+        if img_dir.exists():
+            shutil.rmtree(str(img_dir), ignore_errors=True)
+    async with uploaded_files_lock:
+        uploaded_files.pop(idx)
+    from ..main import save_upload_state
+    await save_upload_state()
     logger.info("File removed", extra={
         'category': 'PROCESS',
         'file_id': req.file_id
@@ -378,14 +542,22 @@ async def remove_file(req: RemoveFileRequest):
     return {"status": "removed", "file_id": req.file_id}
 
 
+@router.get("/queue", dependencies=[Depends(require_role("admin", "master"))])
+async def get_queue():
+    """Return the current upload queue (persisted across restarts)."""
+    from ..main import uploaded_files, uploaded_files_lock
+    async with uploaded_files_lock:
+        return {"files": list(uploaded_files)}
+
+
 @router.get("/next-file", dependencies=[Depends(require_role("admin", "master"))])
 async def next_file(file_id: str | None = None, file_index: int = -1):
     """Get next file for processing, or pages for a specific file."""
-    from ..main import uploaded_files, IMAGES_DIR
+    from ..main import uploaded_files, uploaded_files_lock, IMAGES_DIR
     
     # If file_id is provided, return pages for that file (used by review step)
     if file_id:
-        result = _find_file_by_id(file_id)
+        result = await _find_file_by_id(file_id)
         if result:
             idx, entry = result
             filepath = Path(entry.get("filepath", ""))
@@ -395,20 +567,21 @@ async def next_file(file_id: str | None = None, file_index: int = -1):
                 pages = sorted([f"/images/{filepath.stem}/{p.name}" for p in img_dir.glob("page_*.png")])
             return {"file_id": file_id, "file_index": idx, "filename": entry["filename"], "pages": pages}
     
-    # Legacy: if file_index is provided, return pages for that file
-    if file_index >= 0 and file_index < len(uploaded_files):
-        entry = uploaded_files[file_index]
-        filepath = Path(entry.get("filepath", ""))
-        img_dir = IMAGES_DIR / filepath.stem
-        pages = []
-        if img_dir.is_dir():
-            pages = sorted([f"/images/{filepath.stem}/{p.name}" for p in img_dir.glob("page_*.png")])
-        return {"file_id": entry.get("file_id"), "file_index": file_index, "filename": entry["filename"], "pages": pages}
-    
-    # Otherwise, find next uploaded file
-    for i, entry in enumerate(uploaded_files):
-        if entry["status"] == "uploaded":
-            return {"file_id": entry.get("file_id"), "file_index": i, "filename": entry["filename"]}
+    async with uploaded_files_lock:
+        # Legacy: if file_index is provided, return pages for that file
+        if file_index >= 0 and file_index < len(uploaded_files):
+            entry = uploaded_files[file_index]
+            filepath = Path(entry.get("filepath", ""))
+            img_dir = IMAGES_DIR / filepath.stem
+            pages = []
+            if img_dir.is_dir():
+                pages = sorted([f"/images/{filepath.stem}/{p.name}" for p in img_dir.glob("page_*.png")])
+            return {"file_id": entry.get("file_id"), "file_index": file_index, "filename": entry["filename"], "pages": pages}
+        
+        # Otherwise, find next uploaded file
+        for i, entry in enumerate(uploaded_files):
+            if entry["status"] == "uploaded":
+                return {"file_id": entry.get("file_id"), "file_index": i, "filename": entry["filename"]}
     return {"file_id": None, "file_index": -1}
 
 
@@ -417,10 +590,10 @@ async def next_file(file_id: str | None = None, file_index: int = -1):
 @router.post("/process-stream", dependencies=[Depends(require_role("admin", "master"))])
 async def process_stream(req: ProcessRequest):
     """Process a file with streaming progress updates (SSE)."""
-    from ..main import uploaded_files
+    from ..main import uploaded_files, uploaded_files_lock
     from fastapi.responses import StreamingResponse
     
-    resolved = _resolve_file(file_id=req.file_id, file_index=req.file_index)
+    resolved = await _resolve_file(file_id=req.file_id, file_index=req.file_index)
     if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -433,6 +606,8 @@ async def process_stream(req: ProcessRequest):
         """Yield SSE messages as processing progresses."""
         from ..parser import parse_file_with_ocr
         from ..extraction import extract_items_async
+        from ..main import process_lock, IMAGES_DIR
+        from ..export_import import get_encryption_key, decrypt_file_to_temp
         
         import time
         start_time = time.time()
@@ -440,108 +615,140 @@ async def process_stream(req: ProcessRequest):
         def send(msg):
             return f"data: {json.dumps(msg)}\n\n"
         
-        # Signal parsing started
-        yield send({"type": "progress", "percent": 0, "page": 0, "total": 1, "message": "Parsing file..."})
+        # Try to acquire the processing lock (non-blocking)
+        # Only one file can be processed at a time across all users
+        if process_lock.locked():
+            yield send({"type": "error", "message": "Another user is currently processing a file. Try again later."})
+            return
         
+        await process_lock.acquire()
+
+        # Pre-decrypt file-at-rest encryption (if active) so parser and
+        # vision extraction receive a readable file path.
+        _enc_key = get_encryption_key()
+        _tmp_decrypted = None
+        active_path = Path(filepath)
+        if _enc_key and active_path.exists():
+            _tmp_decrypted = decrypt_file_to_temp(active_path)
+            active_path = _tmp_decrypted
+
         try:
-            parse_result = await parse_file_with_ocr(filepath)
-        except Exception as e:
-            logger.error("Parse failed", extra={
+            # Signal parsing started
+            yield send({"type": "progress", "percent": 0, "page": 0, "total": 1, "message": "Parsing file..."})
+
+            try:
+                parse_result = await parse_file_with_ocr(str(active_path))
+            except Exception as e:
+                logger.error("Parse failed", extra={
+                    'category': 'PROCESS',
+                    'file': entry["filename"],
+                    'file_id': entry.get("file_id"),
+                    'error': str(e)
+                })
+                yield send({"type": "error", "message": f"Parse failed: {e}"})
+                return
+
+            if parse_result.get("error"):
+                logger.error("Parse failed", extra={
+                    'category': 'PROCESS',
+                    'file': entry["filename"],
+                    'file_id': entry.get("file_id"),
+                    'error': parse_result["error"]
+                })
+                yield send({"type": "error", "message": parse_result["error"]})
+                return
+
+            # Pass pdf_path so extraction router can use Vision LLM for scanned PDFs
+            parse_result["pdf_path"] = str(active_path)
+
+            num_pages = parse_result.get("num_pages", 1)
+
+            # Clean up stale page images from a previous (cancelled) run
+            # Use the original filename stem (not the random temp name)
+            img_dir = IMAGES_DIR / Path(filepath).stem
+            if img_dir.is_dir():
+                shutil.rmtree(img_dir)
+
+            # Generate page images for the review PDF viewer
+            # _generate_page_images has its own transparent decryption wrapper
+            try:
+                page_images = _generate_page_images(Path(filepath))
+                async with uploaded_files_lock:
+                    entry["pages"] = page_images
+            except Exception:
+                logger.warning("Page image generation failed for %s", entry.get("filename"), exc_info=True)
+                page_images = []
+
+            # Send progress for each page (synthetic since parsing is already done)
+            for page in range(1, num_pages + 1):
+                percent = int((page / num_pages) * 80)
+                yield send({"type": "progress", "percent": percent, "page": page, "total": num_pages, "message": f"Processing page {page}/{num_pages}..."})
+                await asyncio.sleep(0.05)
+
+            # Extraction
+            yield send({"type": "progress", "percent": 80, "page": num_pages, "total": num_pages, "message": "Extracting items..."})
+
+            try:
+                from ..utils import get_config_data
+                cfg = get_config_data()
+                extraction_enabled = cfg.get("extraction_enabled", True)
+
+                result = await extract_items_async(
+                    parse_result,
+                )
+            except Exception as e:
+                logger.error("Extraction failed", extra={
+                    'category': 'PROCESS',
+                    'file': entry["filename"],
+                    'file_id': entry.get("file_id"),
+                    'error': str(e)
+                })
+                yield send({"type": "error", "message": f"Extraction failed: {e}"})
+                return
+
+            # Calculate processing time
+            processing_time = round(time.time() - start_time, 2)
+
+            # Log successful processing
+            logger.info("Processing complete", extra={
                 'category': 'PROCESS',
                 'file': entry["filename"],
                 'file_id': entry.get("file_id"),
-                'error': str(e)
+                'method': result.extraction_method,
+                'items': len(result.items),
+                'time': f"{processing_time}s",
+                'warnings': len(result.warnings)
             })
-            yield send({"type": "error", "message": f"Parse failed: {e}"})
-            return
-        
-        if parse_result.get("error"):
-            logger.error("Parse failed", extra={
-                'category': 'PROCESS',
-                'file': entry["filename"],
-                'file_id': entry.get("file_id"),
-                'error': parse_result["error"]
+
+            # Send page_done for each page with item counts
+            items_per_page = {}
+            for item in result.items:
+                page = item.get("page", 1)
+                items_per_page[page] = items_per_page.get(page, 0) + 1
+
+            for page in range(1, num_pages + 1):
+                items_found = items_per_page.get(page, 0)
+                percent = int((page / num_pages) * 100)
+                yield send({"type": "page_done", "percent": percent, "page": page, "total": num_pages, "items_found": items_found})
+
+            # Send done message with full result
+            yield send({
+                "type": "done",
+                "data": {
+                    "filename": entry["filename"],
+                    "items": result.items,
+                    "supplier": result.supplier,
+                    "date": result.date,
+                    "currency": result.currency,
+                    "document_type": result.document_type,
+                    "extraction_method": result.extraction_method,
+                    "warnings": result.warnings,
+                }
             })
-            yield send({"type": "error", "message": parse_result["error"]})
-            return
-        
-        num_pages = parse_result.get("num_pages", 1)
-        
-        # Generate page images for the review PDF viewer
-        try:
-            page_images = _generate_page_images(Path(filepath))
-            entry["pages"] = page_images
-        except Exception:
-            page_images = []
-        
-        # Send progress for each page (synthetic since parsing is already done)
-        for page in range(1, num_pages + 1):
-            percent = int((page / num_pages) * 80)
-            yield send({"type": "progress", "percent": percent, "page": page, "total": num_pages, "message": f"Processing page {page}/{num_pages}..."})
-            await asyncio.sleep(0.05)  # Brief pause so frontend can render progress
-        
-        # Extraction
-        yield send({"type": "progress", "percent": 80, "page": num_pages, "total": num_pages, "message": "Extracting items..."})
-        
-        try:
-            from ..utils import get_config_data
-            cfg = get_config_data()
-            extraction_mode = cfg.get("extraction_mode", "llm_first")
-            
-            result = await extract_items_async(
-                parse_result,
-                mode=extraction_mode,
-            )
-        except Exception as e:
-            logger.error("Extraction failed", extra={
-                'category': 'PROCESS',
-                'file': entry["filename"],
-                'file_id': entry.get("file_id"),
-                'error': str(e)
-            })
-            yield send({"type": "error", "message": f"Extraction failed: {e}"})
-            return
-        
-        # Calculate processing time
-        processing_time = round(time.time() - start_time, 2)
-        
-        # Log successful processing
-        logger.info("Processing complete", extra={
-            'category': 'PROCESS',
-            'file': entry["filename"],
-            'file_id': entry.get("file_id"),
-            'method': result.extraction_method,
-            'items': len(result.items),
-            'time': f"{processing_time}s",
-            'warnings': len(result.warnings) + len(result.llm_warnings)
-        })
-        
-        # Send page_done for each page with item counts
-        items_per_page = {}
-        for item in result.items:
-            page = item.get("page", 1)
-            items_per_page[page] = items_per_page.get(page, 0) + 1
-        
-        for page in range(1, num_pages + 1):
-            items_found = items_per_page.get(page, 0)
-            percent = int((page / num_pages) * 100)
-            yield send({"type": "page_done", "percent": percent, "page": page, "total": num_pages, "items_found": items_found})
-        
-        # Send done message with full result
-        yield send({
-            "type": "done",
-            "data": {
-                "filename": entry["filename"],
-                "items": result.items,
-                "supplier": result.supplier,
-                "date": result.date,
-                "currency": result.currency,
-                "document_type": result.document_type,
-                "extraction_method": result.extraction_method,
-                "warnings": result.warnings,
-                "llm_warnings": result.llm_warnings,
-            }
-        })
+        finally:
+            if _tmp_decrypted:
+                _tmp_decrypted.unlink(missing_ok=True)
+            process_lock.release()
     
     return StreamingResponse(
         generate(),
@@ -559,9 +766,9 @@ async def process_stream(req: ProcessRequest):
 @router.post("/confirm", dependencies=[Depends(require_role("admin", "master"))])
 async def confirm(req: ConfirmRequest):
     """Save processed data to database."""
-    from ..main import uploaded_files, ARCHIVE_DIR, IMAGES_DIR
+    from ..main import uploaded_files, uploaded_files_lock, ARCHIVE_DIR, IMAGES_DIR
     
-    resolved = _resolve_file(file_id=req.file_id, file_index=req.file_index)
+    resolved = await _resolve_file(file_id=req.file_id, file_index=req.file_index)
     if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -598,14 +805,17 @@ async def confirm(req: ConfirmRequest):
     if img_dir.exists():
         shutil.rmtree(str(img_dir))
     
-    entry["status"] = "saved"
+    async with uploaded_files_lock:
+        entry["status"] = "saved"
+    from ..main import save_upload_state
+    await save_upload_state()
     
     logger.info("Quotation saved", extra={
         'category': 'PROCESS',
         'file': entry["filename"],
         'file_id': req.file_id,
         'db_id': last_id,
-        'supplier': supplier,
+        'supplier': '[REDACTED]',
         'document_type': document_type,
         'items': len(items)
     })
@@ -616,12 +826,15 @@ async def confirm(req: ConfirmRequest):
 @router.post("/skip", dependencies=[Depends(require_role("admin", "master"))])
 async def skip(req: ProcessRequest):
     """Skip current file."""
-    from ..main import uploaded_files
-    resolved = _resolve_file(file_id=req.file_id, file_index=req.file_index)
+    from ..main import uploaded_files, uploaded_files_lock
+    resolved = await _resolve_file(file_id=req.file_id, file_index=req.file_index)
     if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
     idx, entry = resolved
-    entry["status"] = "skipped"
+    async with uploaded_files_lock:
+        entry["status"] = "skipped"
+    from ..main import save_upload_state
+    await save_upload_state()
     logger.info("File skipped", extra={
         'category': 'PROCESS',
         'file': entry["filename"],
@@ -712,135 +925,8 @@ async def update(req: UpdateRequest):
     logger.info("Quotation updated", extra={
         'category': 'PROCESS',
         'quotation_id': req.id,
-        'supplier': supplier
+        'supplier': '[REDACTED]'
     })
     
     return {"status": "updated"}
 
-
-# ─── Export / Import ──────────────────────────────────────
-
-@router.get("/export", dependencies=[Depends(require_role("admin", "master"))])
-async def export_db():
-    """Export all quotations as a zip file."""
-    from ..main import ARCHIVE_DIR
-    
-    with get_db(readonly=True) as db:
-        rows = db.execute("SELECT * FROM quotations ORDER BY created_at DESC").fetchall()
-    
-    data = []
-    for r in rows:
-        d = dict(r)
-        if isinstance(d.get("items"), str):
-            try:
-                d["items"] = json.loads(d["items"])
-            except (json.JSONDecodeError, TypeError):
-                d["items"] = []
-        data.append(d)
-    
-    # Create zip file
-    zip_fd, zip_path = tempfile.mkstemp(suffix='.zip')
-    os.close(zip_fd)
-    try:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("quotations.json", json.dumps({"quotations": data, "count": len(data)}, indent=2))
-            if ARCHIVE_DIR.exists():
-                for pdf_file in ARCHIVE_DIR.glob("*.pdf"):
-                    zf.write(pdf_file, f"archive/{pdf_file.name}")
-        
-        zip_size = os.path.getsize(zip_path)
-        filename = f"quodb_backup_{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}.zip"
-        
-        logger.info("Database exported", extra={
-            'category': 'ADMIN',
-            'row_count': len(data),
-            'zip_size': f"{zip_size / 1024:.1f}KB"
-        })
-        
-        def stream_file():
-            with open(zip_path, "rb") as f:
-                while chunk := f.read(65536):
-                    yield chunk
-            os.unlink(zip_path)
-        
-        return StreamingResponse(
-            stream_file(),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Length": str(zip_size)
-            }
-        )
-    except Exception:
-        if os.path.exists(zip_path):
-            os.unlink(zip_path)
-        raise
-
-
-@router.post("/import/upload", dependencies=[Depends(require_role("admin", "master"))])
-async def import_upload(file: UploadFile = File(...)):
-    """Import quotations from a JSON or ZIP file."""
-    content = await file.read()
-    quotations = []
-    pdf_restored = 0
-    
-    if file.filename.endswith(".zip"):
-        import io
-        try:
-            with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
-                if "quotations.json" in zf.namelist():
-                    data = json.loads(zf.read("quotations.json"))
-                    quotations = data.get("quotations", [])
-                from ..main import ARCHIVE_DIR
-                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-                for name in zf.namelist():
-                    if name.startswith("archive/") and name.endswith(".pdf"):
-                        pdf_name = Path(name.split("/", 1)[1]).name
-                        pdf_data = zf.read(name)
-                        pdf_path = ARCHIVE_DIR / pdf_name
-                        with open(pdf_path, "wb") as f:
-                            f.write(pdf_data)
-                        pdf_restored += 1
-        except zipfile.BadZipFile:
-            return JSONResponse(status_code=400, content={"error": "Invalid zip file"})
-    elif file.filename.endswith(".json"):
-        try:
-            data = json.loads(content)
-            quotations = data.get("quotations", [])
-        except json.JSONDecodeError:
-            return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
-    else:
-        return JSONResponse(status_code=400, content={"error": "Use .zip or .json"})
-    
-    if not quotations:
-        return JSONResponse(status_code=400, content={"error": "No quotations found"})
-    
-    imported = 0
-    with get_db() as db:
-        for q in quotations:
-            supplier = q.get("supplier", "")
-            quotation_date = q.get("quotation_date", "")
-            document_type = q.get("document_type", "unknown")
-            items = q.get("items", [])
-            if isinstance(items, str):
-                try:
-                    items = json.loads(items)
-                except (json.JSONDecodeError, TypeError):
-                    items = []
-            if not quotation_date and items:
-                quotation_date = items[0].get("date", "")
-            db.execute(
-                "INSERT INTO quotations (filename, supplier, quotation_date, items, document_type) VALUES (?, ?, ?, ?, ?)",
-                (q.get("filename", "imported.pdf"), supplier, quotation_date,
-                 json.dumps(items), document_type)
-            )
-            imported += 1
-    
-    logger.info("Database imported", extra={
-        'category': 'ADMIN',
-        'file': file.filename,
-        'imported': imported,
-        'pdfs_restored': pdf_restored
-    })
-    
-    return {"status": "imported", "count": imported, "pdfs_restored": pdf_restored}

@@ -14,12 +14,16 @@ Modules:
 import os
 import json
 import secrets
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import auth
 from .auth import DATA_DIR
@@ -52,6 +56,8 @@ CONFIG = load_config()
 
 ai_connected = False
 uploaded_files = []
+uploaded_files_lock = asyncio.Lock()
+process_lock = None
 
 # ─── Log Buffer ───────────────────────────────────────────
 
@@ -62,6 +68,7 @@ from datetime import datetime, timezone, timedelta
 from io import StringIO
 
 log_buffer = collections.deque(maxlen=500)
+logger = logging.getLogger(__name__)
 
 # Hong Kong/Macau timezone (UTC+8)
 HK_TZ = timezone(timedelta(hours=8))
@@ -84,7 +91,11 @@ class StructuredFormatter(logging.Formatter):
         'db_id', 'supplier', 'document_type', 'ids', 'count',
         'quotation_id', 'months', 'entries_deleted', 'files_deleted',
         'bytes_freed', 'row_count', 'zip_size', 'imported', 'pdfs_restored',
-        'mode', 'fallback', 'keys_changed'
+        'mode', 'fallback', 'keys_changed',
+        # Export/import
+        'export_id', 'records', 'files', 'package_bytes',
+        'importId', 'record_count', 'file_count',
+        'sequence_number', 'package_size_bytes', 'package_path',
     ]
     
     def formatTime(self, record, datefmt=None):
@@ -181,7 +192,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_STATE_PATH = Path(__file__).parent.parent / "data" / "upload_state.json"
 
 
-def load_upload_state():
+async def load_upload_state():
     """Restore uploaded files from previous session."""
     global uploaded_files
     if UPLOAD_STATE_PATH.exists():
@@ -201,29 +212,34 @@ def load_upload_state():
                     entry["pages"] = [f"/images/{filepath.stem}/{p.name}" for p in page_files]
                     entry["num_pages"] = len(page_files)
                     restored.append(entry)
-            uploaded_files = restored
+            async with uploaded_files_lock:
+                uploaded_files = restored
             print(f"Restored {len(restored)} file(s) from previous session")
         except Exception as e:
+            logger.warning("Failed to load upload state: %s", e, exc_info=True)
             print(f"Failed to load upload state: {e}")
 
 
-def save_upload_state():
+async def save_upload_state():
     """Save uploaded files state for persistence."""
     try:
-        to_save = []
-        for entry in uploaded_files:
-            to_save.append({
-                "file_id": entry.get("file_id"),
-                "filename": entry["filename"],
-                "filepath": entry["filepath"],
-                "status": entry["status"],
-                "pages": entry.get("pages", []),
-                "num_pages": entry.get("num_pages", 0),
-                "progress": entry.get("progress", "")
-            })
+        async with uploaded_files_lock:
+            to_save = []
+            for entry in uploaded_files:
+                to_save.append({
+                    "file_id": entry.get("file_id"),
+                    "filename": entry["filename"],
+                    "filepath": entry["filepath"],
+                    "status": entry["status"],
+                    "pages": entry.get("pages", []),
+                    "num_pages": entry.get("num_pages", 0),
+                    "progress": entry.get("progress", ""),
+                    "uploaded_by": entry.get("uploaded_by", "unknown"),
+                })
         with open(UPLOAD_STATE_PATH, "w") as f:
             json.dump(to_save, f, indent=2)
     except Exception as e:
+        logger.warning("Failed to save upload state: %s", e, exc_info=True)
         print(f"Failed to save upload state: {e}")
 
 
@@ -260,15 +276,41 @@ SECRET_KEY = _get_or_create_secret_key()
 async def lifespan(app: FastAPI):
     """App startup and shutdown events."""
     cfg = load_config()
-    print(f"QuoDB starting. AI endpoint: {cfg.get('ai_endpoint', 'NOT SET')}")
+    ep = cfg.get('ai_endpoint', '')
+    print(f"QuoDB starting. AI endpoint: {'configured' if ep else 'NOT SET'}")
     print(f"QuoDB starting. AI model: {cfg.get('model', 'NOT SET')}")
     print(f"QuoDB starting. AI connected: {ai_connected}")
     auth.bootstrap_master()
-    load_upload_state()
+    await load_upload_state()
+
+    # Start the auto-backup subsystem (key init, catch-up, background scheduler)
+    try:
+        from .auto_backup import start_auto_backup_subsystem
+        start_auto_backup_subsystem()
+    except Exception:
+        logger.warning("Auto-backup subsystem failed to start — continuing without it",
+                       extra={'category': 'SYSTEM'})
+
+    global process_lock
+    process_lock = asyncio.Lock()
+
     yield
+    logger.info("QuoDB shutting down", extra={'category': 'SYSTEM'})
+    print("QuoDB stopped.")
 
 
-app = FastAPI(lifespan=lifespan)
+# ─── Docs environment toggle ──────────────────────────────
+# In production, API docs (Swagger UI, ReDoc, OpenAPI schema) are disabled
+# by default to avoid leaking API surface.  Set QUODB_DOCS_ENABLED=true in
+# the environment or .env file to re-enable them for debugging.
+__docs_enabled = os.environ.get("QUODB_DOCS_ENABLED", "false").lower() in ("1", "true", "yes")
+
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if __docs_enabled else None,
+    redoc_url="/redoc" if __docs_enabled else None,
+    openapi_url="/openapi.json" if __docs_enabled else None,
+)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
@@ -277,14 +319,52 @@ app.add_middleware(
     https_only=False,
     max_age=14 * 24 * 60 * 60,  # 14 days for signature validation
 )
-from .middleware import SessionCookieMiddleware
+from .middleware import SessionCookieMiddleware, SecureCookieMiddleware, CSPMiddleware
 app.add_middleware(SessionCookieMiddleware)
+app.add_middleware(SecureCookieMiddleware)
+
+# CSP — defense-in-depth content security policy.
+# See CSPMiddleware docstring in middleware.py for rationale.
+app.add_middleware(CSPMiddleware)
+
+# Host header validation — accept all origins.
+# On a LAN behind NPM with session auth this is defense-in-depth;
+# the wildcard avoids operational churn when server IPs or hostnames change.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+# CORS — open to all origins.
+# The frontend is served same-origin (FastAPI serves index.html), so CORS
+# is not exercised in normal use. The wildcard is safe because the session
+# cookie uses same_site="lax", which blocks cross-origin requests regardless
+# of CORS policy. The open policy prevents operational issues (port changes,
+# reverse proxy, etc.) with no practical attack surface.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                   allow_methods=["*"], allow_headers=["*"])
+
+# ─── Global Exception Handler ──────────────────────────────
+# Logs the full traceback server-side for any unhandled exception,
+# then returns a safe generic 500 response to the client.
+# FastAPI's built-in HTTPException and RequestValidationError handlers
+# take precedence (they're more specific), so this only catches true
+# 500-level errors that would otherwise disappear silently.
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+    )
+
 
 # ─── Register Routes ──────────────────────────────────────
 
 from .routes import (
     auth_router, users_router, init_password_router,
     files_router, ai_router, admin_router,
+    export_import_router,
+    auto_backup_router,
 )
 
 app.include_router(auth_router)
@@ -293,6 +373,8 @@ app.include_router(init_password_router)
 app.include_router(files_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+app.include_router(export_import_router)
+app.include_router(auto_backup_router)
 
 # ─── Static Files ─────────────────────────────────────────
 
@@ -308,3 +390,15 @@ async def root():
     if html_path.exists():
         return HTMLResponse(html_path.read_text())
     return HTMLResponse("<h1>QuoteHub</h1><p>Frontend not found.</p>")
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for Docker HEALTHCHECK and monitoring."""
+    return {"status": "ok"}
+
+
+@app.get("/{path:path}")
+async def catch_all(path: str):
+    """SPA fallback: serve index.html for any unmatched route."""
+    return await root()

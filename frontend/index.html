@@ -20,7 +20,10 @@
                 </div>
                 <div class="form-group">
                     <label for="loginPassword">Password</label>
-                    <input type="password" id="loginPassword" autocomplete="current-password" required>
+                    <div style="position:relative">
+                        <input type="password" id="loginPassword" autocomplete="current-password" required style="width:100%;padding-right:36px">
+                        <span class="password-toggle" onclick="togglePassword('loginPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                 </div>
                 <div id="loginError" class="login-error hidden"></div>
                 <label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;font-size:13px;cursor:pointer">
@@ -44,11 +47,21 @@
                 </div>
                 <div class="form-group">
                     <label for="cpNew">New Password</label>
-                    <input type="password" id="cpNew" autocomplete="new-password" minlength="6" required>
+                    <div style="position:relative">
+                        <input type="password" id="cpNew" autocomplete="new-password" minlength="12" required style="width:100%;padding-right:36px" oninput="updateChangePassword()">
+                        <span class="password-toggle" onclick="togglePassword('cpNew', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
+                    <div id="cpStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                        <div id="cpStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                    </div>
+                    <div id="cpStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
                 </div>
                 <div class="form-group">
                     <label for="cpConfirm">Confirm New Password</label>
-                    <input type="password" id="cpConfirm" autocomplete="new-password" minlength="6" required>
+                    <div style="position:relative">
+                        <input type="password" id="cpConfirm" autocomplete="new-password" minlength="12" required style="width:100%;padding-right:36px" oninput="updateChangePassword()">
+                        <span class="password-toggle" onclick="togglePassword('cpConfirm', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                 </div>
                 <div id="changePasswordError" class="login-error hidden"></div>
                 <button type="submit" class="btn btn-primary login-btn" id="changePasswordBtn">Change Password</button>
@@ -117,11 +130,11 @@
                 </div>
             </div>
 
-            <!-- Extraction Mode Indicator -->
+            <!-- AI Extraction Status -->
             <div class="extraction-mode-badge" id="extractionModeBadge">
-                <span class="extraction-mode-label">Extraction Method:</span>
-                <span id="extractionModeIcon">🤖</span>
-                <span id="extractionModeText">LLM First (AI)</span>
+                <span class="extraction-mode-label">AI Extraction:</span>
+                <span id="extractionModeIcon">✅</span>
+                <span id="extractionModeText">Auto (ON)</span>
             </div>
 
             <!-- Step 1: Upload -->
@@ -194,6 +207,10 @@
                         </div>
                         <div class="review-pdf-image-wrap" id="reviewPdfScroll">
                             <img id="reviewPdfImg" src="" alt="PDF Page">
+                            <p id="reviewPdfFallback" class="hidden" style="text-align:center;padding:40px 20px;color:#888;font-size:14px">
+                                Page preview unavailable. Use
+                                <strong>↗ New Window</strong> above to view the original file.
+                            </p>
                         </div>
                         <div class="page-nav">
                             <button class="btn btn-sm btn-secondary" onclick="reviewPrevPage()">◀</button>
@@ -205,6 +222,7 @@
                     <!-- Extracted data on the right -->
                     <div class="review-data">
                         <div class="preview">
+                            <div id="aiFallbackWarning" class="ai-fallback-warning" style="display:none">⚠ AI server unreachable — extraction used local rules. Results may be limited.</div>
                             <h2>Extracted Data — <span id="reviewFilename"></span></h2>
                             <div class="meta">
                                 <div class="meta-item">
@@ -261,11 +279,12 @@
                             <div class="actions">
                                 <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
                                 <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
-                            </div>
-                        </div>
                     </div>
                 </div>
+
             </div>
+        </div>
+        </div>
         </div>
 
         <!-- ═══════════════ SEARCH VIEW ═══════════════ -->
@@ -339,19 +358,16 @@
 
             <!-- Extraction Preferences -->
             <div class="settings-card ai-admin-master ai-master-hidden">
-                <h3>📦 Extraction Preferences</h3>
-                <div class="settings-field">
-                    <label>Extraction Mode</label>
-                    <select id="settingsExtractionMode" class="ai-master-only">
-                        <option value="local_first">Local first (fast, no AI cost)</option>
-                        <option value="llm_first">LLM first (best quality, uses AI)</option>
-                        <option value="llm_only">LLM only (no fallback)</option>
-                        <option value="local_only">Local only (no AI)</option>
-                    </select>
-                    <p style="font-size:12px;color:#888;margin-top:4px">
-                        Controls which extraction method is tried first. LLM produces better results but costs AI credits.
-                    </p>
+                <h3>📦 Extraction</h3>
+                <div class="settings-field" style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" id="settingsExtractionEnabled" class="ai-master-only" style="cursor:pointer;width:16px;height:16px" checked>
+                    <label for="settingsExtractionEnabled" style="cursor:pointer;margin:0">
+                        Enable AI extraction (auto-detects scanned vs text PDFs)
+                    </label>
                 </div>
+                <p style="font-size:12px;color:#888;margin-top:4px;margin-left:24px">
+                    When enabled, the system automatically selects the best method: Vision LLM for scanned PDFs, Text LLM for documents with extractable text. Falls back to local rules if the AI is unavailable.
+                </p>
 
                 <h4 style="margin-top:18px">OCR (scanned PDFs)</h4>
                 <p style="font-size:12px;color:#666;margin:0 0 8px 0">
@@ -372,27 +388,77 @@
                         Use vision LLM as fallback when OCR quality is low
                     </label>
                 </div>
+
+                <h4 style="margin-top:18px">Upload Limits</h4>
+                <div class="settings-field">
+                    <label>Max Upload Size (MB)</label>
+                    <input type="number" id="settingsMaxUploadSizeMb" class="ai-master-only" value="5" min="1" max="20">
+                    <p style="font-size:12px;color:#888;margin-top:4px">
+                        Files larger than this limit will be rejected. Range: 1–20 MB.
+                    </p>
+                </div>
+
                 <div class="actions">
                     <button class="btn btn-primary ai-master-only" id="saveSettingsBtn3" onclick="saveSettings()">Save Settings</button>
                 </div>
             </div>
 
             <!-- Backup / Restore Section -->
-            <div class="settings-card backup-restore-section ai-admin-master">
+            <div class="settings-card backup-restore-section ai-admin-master ai-master-hidden">
                 <h3>💾 Backup / Restore</h3>
+
                 <div style="margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📤 Export (Backup)</h4>
-                    <p style="font-size:13px;color:#666;margin-bottom:10px">Download all quotations and PDF files as a ZIP archive.</p>
-                    <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportDatabase()">Export Backup</button>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px">All data is encrypted with a password you choose. The password is not stored anywhere. You will need it to restore.</p>
+                    <button class="btn btn-primary btn-sm" id="exportBtn" onclick="showExportModal()">Export Backup</button>
                     <span id="exportProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Preparing...</span>
                 </div>
                 <div class="ai-master-hidden" style="padding:16px;background:#f8f9fa;border-radius:8px">
                     <h4 style="margin-bottom:8px;font-size:14px">📥 Import (Restore)</h4>
-                    <p style="font-size:13px;color:#666;margin-bottom:10px">Upload a ZIP backup or JSON file to restore quotations and PDFs.</p>
+                    <p style="font-size:13px;color:#666;margin-bottom:10px">Restore from a <code>.quodb</code> backup file. You will need the password used when it was created.</p>
                     <button class="btn btn-primary btn-sm" id="importBtn" onclick="document.getElementById('importFile').click()">Choose File to Import</button>
-                    <input type="file" id="importFile" accept=".zip,.json" style="display:none" onchange="importDatabase(this)">
+                    <input type="file" id="importFile" accept=".quodb" style="display:none" onchange="importDatabase(this)">
                     <span id="importProgress" class="hidden" style="font-size:13px;color:#3498db;margin-left:8px">Importing...</span>
                     <div id="importResult" class="hidden" style="margin-top:8px;font-size:13px;color:#27ae60"></div>
+                    <!-- Import form (shown when a .quodb file is selected) -->
+                    <div id="quodbImportForm" class="hidden" style="margin-top:12px;padding:12px;background:#fff;border:1px solid #ddd;border-radius:6px">
+                        <div id="quodbAttribution" class="hidden" style="margin-bottom:10px;font-size:13px;color:#333;background:#f0f7ff;padding:8px;border-radius:4px"></div>
+                        <div style="margin-bottom:10px">
+                            <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Password</label>
+                            <div style="position:relative">
+                                <input type="password" id="quodbImportPassword" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="off">
+                                <span class="password-toggle" onclick="togglePassword('quodbImportPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                            </div>
+                        </div>
+                        <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px">
+                            <input type="checkbox" id="quodbImportDryRun">
+                            <label for="quodbImportDryRun" style="font-size:13px;color:#666">Show me what will be restored before applying</label>
+                        </div>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn-primary btn-sm" id="quodbImportBtn" onclick="runQuodbImport()">Restore</button>
+                            <button class="btn btn-secondary btn-sm" onclick="resetQuodbImport()">Cancel</button>
+                        </div>
+                        <div id="quodbImportError" class="hidden" style="margin-top:8px;font-size:13px;color:#e74c3c"></div>
+                        <div id="quodbImportReport" class="hidden" style="margin-top:8px;font-size:12px;color:#333;background:#f8f9fa;padding:8px;border-radius:4px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:monospace"></div>
+                    </div>
+                </div>
+
+                <!-- Auto backup section -->
+                <div id="autoBackupSection" class="hidden" style="padding:16px;background:#eefaf5;border-radius:8px">
+                    <h4 style="margin-bottom:8px;font-size:14px">🔄 Automatic backups</h4>
+                    <div style="font-size:13px;color:#555">
+                        <div style="margin-bottom:4px">
+                            Last automatic backup: <span id="autoBackupLast">—</span>
+                            <span id="autoBackupStatus" class="hidden" style="font-weight:600;margin-left:4px"></span>
+                        </div>
+                        <div style="margin-bottom:8px">
+                            Next scheduled: <span id="autoBackupNext">—</span>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap">
+                            <button class="btn btn-primary btn-sm" onclick="showAutoRestoreModal()">Restore from automatic backup…</button>
+                            <span id="autoBackupStatusLine" style="display:none;font-size:13px;color:#e74c3c;align-self:center">Last automatic backup failed — see logs</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -520,7 +586,7 @@
                 <h3>⬆️ Upload Documents</h3>
                 <ol style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
                     <li>Go to <strong>Process</strong></li>
-                    <li>Drag &amp; drop or select one or more PDF files</li>
+                    <li>Drag &amp; drop or select one or more PDF or XLSX files</li>
                     <li>Click <strong>Upload</strong></li>
                 </ol>
             </div>
@@ -539,7 +605,8 @@
             <div class="settings-card">
                 <h3>⚙️ Processing</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
-                    <li>The AI extracts data from each page automatically</li>
+                    <li>The AI extracts data from each page/sheet automatically</li>
+                    <li>PDF and XLSX files are both supported</li>
                     <li>Wait for the current file to complete (or click <strong>Cancel</strong> to stop)</li>
                 </ul>
             </div>
@@ -587,27 +654,42 @@
                 <p style="font-size:13px;color:#e74c3c;margin-top:12px"><strong>⚠ Warning:</strong> This action is irreversible. Once deleted, data cannot be recovered.</p>
             </div>
 
-            <!-- 9. User Roles -->
+            <!-- 9. 🔄 Automatic Backups -->
+            <div class="settings-card">
+                <h3>🔄 Automatic Backups</h3>
+                <p style="font-size:14px;color:#444;line-height:1.6">The system automatically creates daily encrypted backups at 03:00. Weekly snapshots are promoted on Sundays. Event backups are taken before imports and app updates.</p>
+                <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
+                    <li>Settings → <strong>Backup / Restore</strong> shows the last and next backup time</li>
+                    <li>Click <strong>Restore from automatic backup</strong> to browse and restore a previous snapshot</li>
+                    <li>Retention: 7 daily, 4 weekly, 45 days for event backups</li>
+                    <li>Automatic backups are encrypted with a machine-bound internal key (no password needed to restore)</li>
+                </ul>
+            </div>
+
+            <!-- 10. User Roles -->
             <div class="settings-card">
                 <h3>👤 User Roles</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
                     <li><strong>User</strong> — search and browse existing data</li>
-                    <li><strong>Admin</strong> — upload, process, edit, export backup, view logs, read AI settings (no changes). Cannot access General, Extraction Mode, Import, Cleanup, or User Management</li>
-                    <li><strong>Master</strong> — full control, including all settings, import, cleanup, and user management</li>
+                    <li><strong>Admin</strong> — upload, process, edit, export backup, view logs, read AI settings (no changes). Cannot access General, AI Settings, Import, Cleanup, User Management, or restore automatic backups</li>
+                    <li><strong>Master</strong> — full control, including all settings, import/export, cleanup, user management, and backup restore</li>
                 </ul>
             </div>
 
-            <!-- 10. Important Notes -->
+            <!-- 11. Important Notes -->
             <div class="settings-card">
                 <h3>⚠️ Important Notes</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
                     <li>Always review extracted data before saving</li>
                     <li>System Cleanup is permanent and cannot be undone</li>
                     <li>Processing time depends on file size and number of pages</li>
+                    <li>Passwords must be at least 12 characters — use the strength meter as a guide</li>
+                    <li>Exported backups are encrypted per-file. <strong>The password is never stored.</strong> If you lose it, the backup is permanently unrecoverable</li>
+                    <li>Export and Import are <strong>master-only</strong> operations</li>
                 </ul>
             </div>
 
-            <!-- 11. Support & Contacts -->
+            <!-- 12. Support & Contacts -->
             <div class="settings-card">
                 <h3>📞 Support &amp; Contacts</h3>
                 <ul style="font-size:14px;color:#444;line-height:1.8;padding-left:20px">
@@ -657,7 +739,10 @@
                 <h4 style="margin-bottom:8px;font-size:14px">Add new user</h4>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                     <input type="text" id="newUsername" placeholder="Username" style="flex:1;min-width:140px;padding:8px;border:1px solid #ddd;border-radius:6px">
-                    <input type="password" id="newPassword" placeholder="Password (min 6 chars)" style="flex:1;min-width:160px;padding:8px;border:1px solid #ddd;border-radius:6px">
+                    <div style="position:relative;flex:1;min-width:160px">
+                        <input type="password" id="newPassword" placeholder="Password (min 12 chars)" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateNewUserPassword()">
+                        <span class="password-toggle" onclick="togglePassword('newPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                     <select id="newRole" style="padding:8px;border:1px solid #ddd;border-radius:6px">
                         <option value="user">user</option>
                         <option value="admin" selected>admin</option>
@@ -666,6 +751,10 @@
                     <button class="btn btn-success btn-sm" onclick="submitAddUser()">Create</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideAddUserForm()">Cancel</button>
                 </div>
+                <div id="newPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                    <div id="newPasswordStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                </div>
+                <div id="newPasswordStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
             </div>
 
             <!-- Edit User sub-form (hidden by default) -->
@@ -688,10 +777,17 @@
                         <option value="master">master</option>
                     </select>
                     <label style="font-size:13px;margin-left:8px">New Password (optional):</label>
-                    <input type="password" id="editPassword" placeholder="leave blank to keep" style="flex:1;min-width:160px;padding:8px;border:1px solid #ddd;border-radius:6px">
+                    <div style="position:relative;flex:1;min-width:160px">
+                        <input type="password" id="editPassword" placeholder="leave blank to keep" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateEditUserPassword()">
+                        <span class="password-toggle" onclick="togglePassword('editPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
                     <button class="btn btn-success btn-sm" onclick="submitEditUser()">Save</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideEditUserForm()">Cancel</button>
                 </div>
+                <div id="editPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                    <div id="editPasswordStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                </div>
+                <div id="editPasswordStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
             </div>
 
             <!-- Hard Delete confirmation sub-form (hidden by default) -->
@@ -807,6 +903,48 @@
         </div>
     </div>
 
+    <!-- Export Modal (password entry, no stored hash) -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal" style="max-width:480px;text-align:left">
+            <div id="exportModalBody">
+                <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px;color:#856404">
+                    <strong>⚠ Write this password down.</strong> It will not be stored anywhere. Without it, this backup cannot be opened.
+                </div>
+                <div style="margin-bottom:12px">
+                    <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Password</label>
+                    <div style="position:relative">
+                        <input type="password" id="exportPassword" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="new-password" oninput="updateExportButton()">
+                        <span class="password-toggle" onclick="togglePassword('exportPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
+                </div>
+                <div style="margin-bottom:12px">
+                    <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Confirm Password</label>
+                    <div style="position:relative">
+                        <input type="password" id="exportPasswordConfirm" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="new-password" oninput="updateExportButton()">
+                        <span class="password-toggle" onclick="togglePassword('exportPasswordConfirm', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
+                    </div>
+                </div>
+                <div id="exportStrengthBar" class="hidden" style="margin-bottom:8px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                    <div id="exportStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
+                </div>
+                <div id="exportStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-bottom:8px"></div>
+                <div style="font-size:12px;color:#999;margin-bottom:12px">Minimum 12 characters with uppercase, lowercase, digit, and a symbol.</div>
+                <div id="exportError" class="hidden" style="font-size:13px;color:#e74c3c;margin-bottom:8px"></div>
+                <div class="actions" style="justify-content:flex-end;gap:8px">
+                    <button class="btn btn-secondary" onclick="closeModal('exportModal')">Cancel</button>
+                    <button class="btn btn-primary" id="exportSubmitBtn" onclick="submitExport()" disabled>Export</button>
+                </div>
+            </div>
+            <div id="exportProgressBody" class="hidden">
+                <div style="margin-bottom:12px;font-size:13px;color:#666">Exporting backup...</div>
+                <div style="margin-bottom:8px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
+                    <div id="exportProgressFill" style="height:100%;width:0%;background:#3498db;border-radius:2px;transition:width 0.3s"></div>
+                </div>
+                <div id="exportProgressText" style="font-size:12px;color:#999">Checking files...</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Save Logs Modal (kept for backward compatibility) -->
     <div class="modal-overlay" id="logsModal">
         <div class="modal" style="max-width:450px;text-align:left">
@@ -815,6 +953,23 @@
             <div class="actions" style="justify-content:center">
                 <button class="btn btn-primary" onclick="showSettings(); closeModal('logsModal')">Go to Settings</button>
                 <button class="btn btn-secondary" onclick="closeModal('logsModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto-restore Modal -->
+    <div class="modal-overlay" id="autoRestoreModal">
+        <div class="modal" style="max-width:700px;width:90%;text-align:left">
+            <h3 style="margin-bottom:16px">🔄 Restore from Automatic Backup</h3>
+            <div id="autoRestoreBody">
+                <div id="autoRestoreLoading" style="text-align:center;padding:24px;font-size:14px;color:#666">Loading backups…</div>
+                <div id="autoRestoreList" class="hidden"></div>
+                <div id="autoRestoreReport" class="hidden"></div>
+                <div id="autoRestoreError" class="hidden" style="margin-top:12px;font-size:13px;color:#e74c3c"></div>
+            </div>
+            <div class="actions" style="justify-content:space-between;margin-top:16px">
+                <button class="btn btn-secondary" onclick="closeModal('autoRestoreModal')">Cancel</button>
+                <button class="btn btn-primary hidden" id="autoRestoreConfirmBtn" onclick="autoRestoreConfirm()">Confirm & Restore</button>
             </div>
         </div>
     </div>

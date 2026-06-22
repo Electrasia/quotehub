@@ -53,7 +53,30 @@ function showLoginError(msg) {
 function showChangePassword(subtitle) {
     document.getElementById('changePasswordSubtitle').textContent = subtitle || 'You must change your password before continuing.';
     document.getElementById('changePasswordModal').classList.remove('hidden');
+    document.getElementById('cpStrengthBar').classList.add('hidden');
+    document.getElementById('cpStrengthLabel').classList.add('hidden');
+    document.getElementById('changePasswordError').classList.add('hidden');
     setTimeout(() => document.getElementById('cpOld').focus(), 50);
+}
+
+function updateChangePassword() {
+    const pw = document.getElementById('cpNew').value;
+    const barEl = document.getElementById('cpStrengthBar');
+    const fillEl = document.getElementById('cpStrengthFill');
+    const labelEl = document.getElementById('cpStrengthLabel');
+    if (pw.length > 0) {
+        const score = calcPasswordStrength(pw);
+        const info = strengthLabel(score);
+        barEl.classList.remove('hidden');
+        fillEl.style.width = score + '%';
+        fillEl.style.background = info.color;
+        labelEl.classList.remove('hidden');
+        labelEl.textContent = info.label;
+        labelEl.style.color = info.color;
+    } else {
+        barEl.classList.add('hidden');
+        labelEl.classList.add('hidden');
+    }
 }
 
 function hideChangePassword() {
@@ -96,6 +119,7 @@ function applyAdminSettingsLock() {
         'settingsEndpoint', 'settingsModel', 'settingsExternalUrl',
         'settingsTimeout', 'settingsRetries', 'settingsPopupDuration',
         'settingsOcrEnabled', 'settingsOcrLlmFallback',
+        'settingsMaxUploadSizeMb',
     ];
     inputs.forEach(id => {
         const el = document.getElementById(id);
@@ -168,8 +192,13 @@ async function doChangePassword() {
         showChangePasswordError('New passwords do not match');
         return;
     }
-    if (newP.length < 6) {
-        showChangePasswordError('New password must be at least 6 characters');
+    if (newP.length < 12) {
+        showChangePasswordError('New password must be at least 12 characters');
+        return;
+    }
+    const pwErr = validateExportPassword(newP);
+    if (pwErr) {
+        showChangePasswordError(pwErr);
         return;
     }
     const btn = document.getElementById('changePasswordBtn');
@@ -185,6 +214,7 @@ async function doChangePassword() {
         });
         if (r.ok) {
             hideChangePassword();
+            showBriefPopup('Password changed');
             document.getElementById('cpOld').value = '';
             document.getElementById('cpNew').value = '';
             document.getElementById('cpConfirm').value = '';

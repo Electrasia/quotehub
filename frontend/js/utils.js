@@ -68,9 +68,11 @@ function showBriefPopup(message) {
     overlay.className = 'modal-overlay active';
     overlay.innerHTML = `
         <div class="modal" style="max-width:350px">
-            <p style="font-size:15px;margin:0">${message}</p>
+            <p style="font-size:15px;margin:0"></p>
         </div>
     `;
+    // Use textContent to prevent XSS — message is never rendered as HTML
+    overlay.querySelector('p').textContent = message;
     document.body.appendChild(overlay);
     setTimeout(() => {
         overlay.classList.remove('active');
@@ -89,13 +91,15 @@ function showConfirmPopup(message, onConfirm) {
     overlay.className = 'modal-overlay active';
     overlay.innerHTML = `
         <div class="modal" style="max-width:400px">
-            <p style="font-size:15px;margin:0 0 16px 0">${message}</p>
+            <p style="font-size:15px;margin:0 0 16px 0"></p>
             <div class="actions" style="justify-content:center">
                 <button class="btn btn-danger btn-sm" id="confirmYes">Yes, Delete</button>
                 <button class="btn btn-secondary btn-sm" id="confirmNo">Cancel</button>
             </div>
         </div>
     `;
+    // Use textContent to prevent XSS — message is never rendered as HTML
+    overlay.querySelector('p').textContent = message;
     document.body.appendChild(overlay);
     overlay.querySelector('#confirmYes').onclick = () => {
         overlay.remove();

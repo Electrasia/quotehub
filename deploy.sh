@@ -45,24 +45,15 @@ GIT_COMMIT=$(git rev-parse --short HEAD)
 export GIT_COMMIT
 echo ">> Current commit: $GIT_COMMIT"
 
-# Build the image with commit hash baked in
-echo ">> Building Docker image..."
-docker build --build-arg GIT_COMMIT=$GIT_COMMIT -t quodb .
-
-# Stop and remove the old container (if it exists)
-echo ">> Stopping old container (if any)..."
+# Remove any previous container (works whether it was created by old
+# `docker run` or by a previous compose run — needed to avoid port conflicts)
 docker stop quodb 2>/dev/null || true
 docker rm quodb 2>/dev/null || true
 
-# Start the new container with persistent mounts
-echo ">> Starting new container..."
-docker run -d \
-    --name quodb \
-    --restart unless-stopped \
-    -p 8000:8000 \
-    -v $(pwd)/config.json:/app/config.json \
-    -v quodb_data:/app/data \
-    quodb
+# Build and start using docker compose (handles image build, healthcheck,
+# and volume mounts from docker-compose.yml)
+echo ">> Building and starting via docker compose..."
+docker compose up -d --build
 
 # Show the running version
 echo ""

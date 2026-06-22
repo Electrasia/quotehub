@@ -128,7 +128,9 @@ async function submitAddUser() {
     const password = document.getElementById('newPassword').value;
     const role = document.getElementById('newRole').value;
     if (!username) { showUsersError('Username is required'); return; }
-    if (password.length < 6) { showUsersError('Password must be at least 6 characters'); return; }
+    if (password.length < 12) { showUsersError('Password must be at least 12 characters'); return; }
+    const pwErr = validateExportPassword(password);
+    if (pwErr) { showUsersError(pwErr); return; }
     try {
         const r = await apiFetch('/users', {
             method: 'POST',
@@ -142,6 +144,7 @@ async function submitAddUser() {
         hideAddUserForm();
         closeModal('usersModal');
         await loadUsersTable();
+        showBriefPopup('Saved');
     } catch (e) {
         showUsersError(e.message);
     }
@@ -152,9 +155,13 @@ async function submitEditUser() {
     const role = document.getElementById('editRole').value;
     const newPassword = document.getElementById('editPassword').value;
     const active = document.getElementById('editActive').checked;
-    if (newPassword && newPassword.length < 6) {
-        showUsersError('New password must be at least 6 characters');
-        return;
+    if (newPassword) {
+        if (newPassword.length < 12) {
+            showUsersError('New password must be at least 12 characters');
+            return;
+        }
+        const pwErr = validateExportPassword(newPassword);
+        if (pwErr) { showUsersError(pwErr); return; }
     }
     try {
         const body = { role, active };
@@ -171,9 +178,40 @@ async function submitEditUser() {
         hideEditUserForm();
         closeModal('usersModal');
         await loadUsersTable();
+        showBriefPopup('Saved');
     } catch (e) {
         showUsersError(e.message);
     }
+}
+
+// ─── Password strength helpers ──────────────────────────
+
+function _updatePasswordStrength(inputId, barId, fillId, labelId) {
+    const pw = document.getElementById(inputId).value;
+    const barEl = document.getElementById(barId);
+    const fillEl = document.getElementById(fillId);
+    const labelEl = document.getElementById(labelId);
+    if (pw.length > 0) {
+        const score = calcPasswordStrength(pw);
+        const info = strengthLabel(score);
+        barEl.classList.remove('hidden');
+        fillEl.style.width = score + '%';
+        fillEl.style.background = info.color;
+        labelEl.classList.remove('hidden');
+        labelEl.textContent = info.label;
+        labelEl.style.color = info.color;
+    } else {
+        barEl.classList.add('hidden');
+        labelEl.classList.add('hidden');
+    }
+}
+
+function updateNewUserPassword() {
+    _updatePasswordStrength('newPassword', 'newPasswordStrengthBar', 'newPasswordStrengthFill', 'newPasswordStrengthLabel');
+}
+
+function updateEditUserPassword() {
+    _updatePasswordStrength('editPassword', 'editPasswordStrengthBar', 'editPasswordStrengthFill', 'editPasswordStrengthLabel');
 }
 
 // Hard delete state + functions (master only, irreversible)

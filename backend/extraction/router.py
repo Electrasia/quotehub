@@ -1,149 +1,42 @@
 """
-backend/extraction/router.py — Extraction mode router for QuoteHub.
+backend/extraction/router.py — Unified extraction router for QuoteHub.
 
-Handles mode selection and fallback logic between local and LLM extractors.
+Single "auto" mode that selects the best extraction path:
 
-Extraction Modes:
-  - llm_first: Try LLM first, fall back to local if LLM fails or returns 0 items
-  - local_first: Try local first, fall back to LLM if local returns 0 items
-  - llm_only: Only use LLM (no fallback)
-  - local_only: Only use local rules (no fallback)
+  PDF with text → Text LLM (fast, no images)
+  Scanned PDF → Vision LLM (image → JSON, 1 call/page)
+  XLSX         → Text LLM (openpyxl text)
+  Any fail     → Local rules (fallback)
 
-The router provides a unified async interface that can be called from
-any endpoint (process-stream, etc.).
+No user-facing mode selection. The system decides.
 """
-
 import logging
-import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 from .local import extract_items as local_extract
 from .llm import normalize_pages_with_llm
+from .vision import extract_with_vision
 
 logger = logging.getLogger(__name__)
 
 
-# ─── Date & Currency Fallback Detection ──────────────────────
-
-_CURRENCY_RE = re.compile(
-    r"\b(HKD|USD|EUR|GBP|JPY|CNY|RMB|MOP|AUD|CAD|SGD|TWD|KRW|THB|MYR|PHP|IDR|VND|NZD|CHF|SEK|NOK|DKK|INR|PKR|BDT|LKR|NPR|MMK|KHR|LAK)\b",
-    re.IGNORECASE,
-)
-
-_DATE_PATTERNS = [
-    # YYYY-MM-DD
-    (re.compile(r"\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b"), "%Y-%m-%d"),
-    # DD/MM/YYYY or DD-MM-YYYY
-    (re.compile(r"\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b"), "dmy"),
-    # Month DD, YYYY
-    (re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b", re.IGNORECASE), "mdy"),
-    # DD Month YYYY
-    (re.compile(r"\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(20\d{2})\b", re.IGNORECASE), "dmy_alt"),
-]
-
-
-def _detect_currency(text: str) -> str:
-    """Detect currency code from text using regex."""
-    m = _CURRENCY_RE.search(text)
-    if m:
-        return m.group(1).upper()
-    return ""
-
-
-def _detect_date(text: str) -> str:
-    """Detect date from text and normalize to YYYY-MM-DD."""
-    for pattern, fmt in _DATE_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            raw = m.group(1) if m.lastindex else m.group(0)
-            return _normalize_date_str(raw, fmt)
-    return ""
-
-
-def _normalize_date_str(raw: str, fmt: str) -> str:
-    """Convert a detected date string to YYYY-MM-DD."""
-    try:
-        from datetime import datetime
-        raw = raw.strip().rstrip(",")
-        if fmt == "%Y-%m-%d":
-            # Already ISO-ish, just fix separators
-            raw = raw.replace("/", "-")
-            parts = raw.split("-")
-            if len(parts) == 3:
-                y, mo, d = int(parts[0]), int(parts[1]), int(parts[2])
-                return f"{y:04d}-{mo:02d}-{d:02d}"
-        elif fmt == "dmy":
-            raw = raw.replace("/", "-")
-            parts = raw.split("-")
-            if len(parts) == 3:
-                d, mo, y = int(parts[0]), int(parts[1]), int(parts[2])
-                return f"{y:04d}-{mo:02d}-{d:02d}"
-        elif fmt == "dmy_alt":
-            # "21 June 2025" or "21 Jun 2025"
-            parts = raw.split()
-            if len(parts) == 3:
-                d = int(parts[0])
-                mo_str = parts[1][:3]
-                y = int(parts[2])
-                dt = datetime.strptime(f"{d} {mo_str} {y}", "%d %b %Y")
-                return dt.strftime("%Y-%m-%d")
-        elif fmt == "mdy":
-            dt = datetime.strptime(raw, "%B %d, %Y")
-            return dt.strftime("%Y-%m-%d")
-    except Exception:
-        pass
-    return ""
-
-
-def _fallback_date_currency(pages_text: list, result) -> None:
-    """Fill empty date/currency from text using regex detection.
-    
-    Scans ALL pages (not just first 2) to find date and currency.
-    Mutates the ExtractionResult in-place.
-    """
-    # Combine all pages of text for detection
-    combined = "\n".join(pages_text)
-    
-    # Treat "unknown" as empty for date and currency
-    if result.date and result.date.lower() == "unknown":
-        result.date = ""
-    if result.currency and result.currency.lower() == "unknown":
-        result.currency = ""
-    
-    if not result.date:
-        detected = _detect_date(combined)
-        if detected:
-            result.date = detected
-            result.warnings.append(f"Date detected from text: {detected}")
-    
-    if not result.currency:
-        detected = _detect_currency(combined)
-        if detected:
-            result.currency = detected
-            result.warnings.append(f"Currency detected from text: {detected}")
-    
-    # Also check per-item currency if result still empty
-    if not result.currency:
-        for item in result.items:
-            if item.get("currency"):
-                result.currency = item["currency"]
-                break
+# Threshold: if avg text chars per page > this, use Text LLM
+# (pdfplumber found real content). Below this → scanned → Vision LLM.
+SCANNED_PDF_THRESHOLD = 50
 
 
 @dataclass
 class ExtractionResult:
     """Unified result from any extraction method.
-    
+
     Attributes:
         items: List of extracted items
         supplier: Detected supplier name
-        date: Detected quotation date (YYYY-MM-DD)
+        date: Detected date (YYYY-MM-DD, normalized)
         currency: Detected currency code
         document_type: Document type (QUO/PO/PL/unknown)
-        extraction_method: Which method was used (local/llm)
+        extraction_method: Which method was used (vision/llm/local)
         warnings: Any warnings from the extraction process
-        llm_warnings: LLM-specific warnings
     """
     items: list = field(default_factory=list)
     supplier: str = ""
@@ -152,133 +45,125 @@ class ExtractionResult:
     document_type: str = "unknown"
     extraction_method: str = "local"
     warnings: list = field(default_factory=list)
-    llm_warnings: list = field(default_factory=list)
 
 
-async def extract_items_async(
-    parse_result: dict,
-    mode: str = "llm_first",
-) -> ExtractionResult:
-    """Extract items from a parse result using the specified mode.
-    
+async def extract_items_async(parse_result: dict) -> ExtractionResult:
+    """Extract items from a parse result using auto-selected method.
+
     Args:
         parse_result: Output from parse_file_with_ocr()
-        mode: Extraction mode (llm_first/local_first/llm_only/local_only)
-        
+
     Returns:
         ExtractionResult with extracted items and metadata
     """
-    # Extract text pages for LLM
-    pages = parse_result.get("parsers", {}).get("pdfplumber", {}).get("pages", [])
-    pages_text = [p.get("text", "") for p in pages]
-    
-    # Try local extraction
-    local_result = local_extract(parse_result)
-    local_items = local_result.get("items", [])
-    
-    # Route based on mode, then apply date/currency fallback
-    result = None
-    
-    if mode == "local_only":
-        result = ExtractionResult(
-            items=local_items,
-            supplier=local_result.get("supplier", ""),
-            date=local_result.get("date", ""),
-            currency=local_result.get("currency", ""),
-            document_type=local_result.get("document_type", "unknown"),
-            extraction_method="local",
-            warnings=local_result.get("extraction_warnings", []),
-        )
-    
-    elif mode == "llm_only":
-        llm_result = await normalize_pages_with_llm(pages_text)
-        if llm_result and llm_result.get("items"):
-            result = ExtractionResult(
-                items=llm_result["items"],
-                supplier=llm_result.get("supplier", ""),
-                date=llm_result.get("date", ""),
-                currency=llm_result.get("currency", ""),
-                document_type=llm_result.get("document_type", "unknown"),
-                extraction_method="llm",
-                llm_warnings=llm_result.get("llm_warnings", []),
-            )
-        else:
-            result = ExtractionResult(
-                extraction_method="llm",
-                llm_warnings=["LLM extraction failed or returned no items"],
-            )
-    
-    elif mode == "llm_first":
-        llm_result = await normalize_pages_with_llm(pages_text)
-        if llm_result and llm_result.get("items"):
-            result = ExtractionResult(
-                items=llm_result["items"],
-                supplier=llm_result.get("supplier", ""),
-                date=llm_result.get("date", ""),
-                currency=llm_result.get("currency", ""),
-                document_type=llm_result.get("document_type", "unknown"),
-                extraction_method="llm",
-                llm_warnings=llm_result.get("llm_warnings", []),
-            )
-        else:
-            # LLM failed, fall back to local
-            result = ExtractionResult(
-                items=local_items,
-                supplier=local_result.get("supplier", ""),
-                date=local_result.get("date", ""),
-                currency=local_result.get("currency", ""),
-                document_type=local_result.get("document_type", "unknown"),
-                extraction_method="local",
-                warnings=local_result.get("extraction_warnings", []),
-                llm_warnings=["LLM failed, using local extraction"],
-            )
-    
-    else:  # mode == "local_first"
-        if local_items:
-            result = ExtractionResult(
-                items=local_items,
-                supplier=local_result.get("supplier", ""),
-                date=local_result.get("date", ""),
-                currency=local_result.get("currency", ""),
-                document_type=local_result.get("document_type", "unknown"),
-                extraction_method="local",
-                warnings=local_result.get("extraction_warnings", []),
-            )
-        else:
-            # Local returned 0 items, try LLM as fallback
-            llm_result = await normalize_pages_with_llm(pages_text)
-            if llm_result and llm_result.get("items"):
-                result = ExtractionResult(
-                    items=llm_result["items"],
-                    supplier=llm_result.get("supplier", ""),
-                    date=llm_result.get("date", ""),
-                    currency=llm_result.get("currency", ""),
-                    document_type=llm_result.get("document_type", "unknown"),
-                    extraction_method="llm",
-                    llm_warnings=llm_result.get("llm_warnings", []),
-                )
-            else:
-                result = ExtractionResult(
-                    items=local_items,
-                    supplier=local_result.get("supplier", ""),
-                    date=local_result.get("date", ""),
-                    currency=local_result.get("currency", ""),
-                    document_type=local_result.get("document_type", "unknown"),
-                    extraction_method="local",
-                    warnings=local_result.get("extraction_warnings", []),
-                    llm_warnings=["Both local and LLM extraction failed"],
-                )
-    
-    # Post-processing: detect date/currency from text if still empty
-    _fallback_date_currency(pages_text, result)
-    
-    # Log extraction result
-    logger.info("Extraction routed", extra={
+    from ..utils import load_config
+
+    cfg = load_config()
+    extraction_enabled = cfg.get("extraction_enabled", True)
+
+    if not extraction_enabled:
+        logger.info("Extraction disabled by config, using local-only")
+        return _run_local(parse_result)
+
+    # ── Detect file type and available text ──────────────────
+    pdf_path = parse_result.get("pdf_path", "")
+    is_xlsx = parse_result.get("parsers", {}).get("xlsx", {}).get("available", False)
+
+    pages_text = _get_pages_text(parse_result)
+    total_chars = sum(len(t) for t in pages_text)
+    num_pages = parse_result.get("num_pages", 1)
+    avg_chars = total_chars / num_pages if num_pages else 0
+
+    is_scanned = avg_chars < SCANNED_PDF_THRESHOLD
+
+    logger.info("Extraction auto-detect", extra={
         'category': 'AI',
-        'mode': mode,
+        'type': 'xlsx' if is_xlsx else ('scanned' if is_scanned else 'text'),
+        'pages': num_pages,
+        'avg_chars': round(avg_chars, 1),
+    })
+
+    # ── Route ────────────────────────────────────────────────
+    result = None
+
+    if is_xlsx or not is_scanned:
+        # Text-mode: XLSX or PDF with extractable text
+        result = await _try_text_llm(pages_text, cfg, is_xlsx=is_xlsx)
+
+    if result is None:
+        # Scanned PDF or text LLM failed → try Vision LLM
+        result = await _try_vision_llm(pdf_path, cfg)
+
+    if result is None:
+        # Both AI methods failed → fall back to local
+        result = _run_local(parse_result)
+
+    # Log result
+    logger.info("Extraction complete", extra={
+        'category': 'AI',
         'method': result.extraction_method,
         'items': len(result.items),
-        'fallback': len(result.llm_warnings) > 0
     })
-    
+
     return result
+
+
+# ─── Internal helpers ─────────────────────────────────────────
+
+
+def _get_pages_text(parse_result: dict) -> list[str]:
+    """Extract per-page text from parse result."""
+    pages = parse_result.get("parsers", {}).get("pdfplumber", {}).get("pages", [])
+    return [p.get("text", "") for p in pages]
+
+
+def _run_local(parse_result: dict) -> ExtractionResult:
+    """Run local rules-based extraction."""
+    local_result = local_extract(parse_result)
+    return ExtractionResult(
+        items=local_result.get("items", []),
+        supplier=local_result.get("supplier", ""),
+        date=local_result.get("date", ""),
+        currency=local_result.get("currency", ""),
+        document_type=local_result.get("document_type", "unknown"),
+        extraction_method="local",
+        warnings=local_result.get("extraction_warnings", []),
+    )
+
+
+async def _try_text_llm(pages_text: list, cfg: dict, is_xlsx: bool = False) -> ExtractionResult | None:
+    """Try Text LLM extraction. Returns None if it fails."""
+    if not pages_text or not any(t.strip() for t in pages_text):
+        return None
+
+    result = await normalize_pages_with_llm(pages_text, cfg, is_xlsx=is_xlsx)
+    if result and result.get("items"):
+        return ExtractionResult(
+            items=result["items"],
+            supplier=result.get("supplier", ""),
+            date=result.get("date", ""),
+            currency=result.get("currency", ""),
+            document_type=result.get("document_type", "unknown"),
+            extraction_method="llm",
+            warnings=result.get("llm_warnings", []),
+        )
+    return None
+
+
+async def _try_vision_llm(pdf_path: str, cfg: dict) -> ExtractionResult | None:
+    """Try Vision LLM extraction. Returns None if it fails."""
+    if not pdf_path:
+        return None
+
+    result = await extract_with_vision(pdf_path, cfg)
+    if result and result.get("items"):
+        return ExtractionResult(
+            items=result["items"],
+            supplier=result.get("supplier", ""),
+            date=result.get("date", ""),
+            currency=result.get("currency", ""),
+            document_type=result.get("document_type", "unknown"),
+            extraction_method="vision",
+            warnings=result.get("warnings", []),
+        )
+    return None

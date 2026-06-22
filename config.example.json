@@ -7,5 +7,7 @@
   "popup_duration": 3,
   "ocr_enabled": true,
   "ocr_fallback_to_llm": true,
-  "extraction_mode": "llm_first"
+  "extraction_enabled": true,
+  "max_upload_size_mb": 5,
+  "trust_proxy_headers": false
 }
