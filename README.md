@@ -118,7 +118,7 @@ This will:
 
 When deploying to production behind **Nginx Proxy Manager** (HTTPS, domain name, client IP forwarding):
 
-1. Copy the internal `NPM-DEPLOY.md` guide from the repository — it contains step-by-step instructions for the IT team
+1. Copy the internal `NPM-DEPLOY-INTERNAL.md` guide from the repository — it contains step-by-step instructions for the IT team
 2. Set `"trust_proxy_headers": true` in `config.json` so the app correctly reads the real client IP and sets the `Secure` cookie flag
 3. Configure NPM to proxy requests to `http://quotehub-lan-ip:8000` with WebSocket support enabled (for SSE streaming)
 4. The app prepares itself automatically via `SecureCookieMiddleware` — no code changes needed
