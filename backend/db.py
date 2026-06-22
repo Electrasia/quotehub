@@ -22,6 +22,7 @@ import logging
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -578,7 +579,7 @@ def _v3_suppliers_backfill(db):
                         """INSERT OR IGNORE INTO supplier_audit_log
                            (supplier_id, action, actor, details)
                            VALUES (?, 'auto_created_backfill', 'system', ?)""",
-                        (sid, '{"normalized_name": "' + norm + '", "raw_name": "' + raw.replace('"', '\\"') + '"}'),
+                        (sid, json.dumps({"normalized_name": norm, "raw_name": raw}, ensure_ascii=False)),
                     )
 
             seen_suppliers[raw] = sid
