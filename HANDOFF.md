@@ -2,7 +2,7 @@
 
 ## Current Version
 
-**v0.063.1** (dev branch)
+**v0.063.2** (dev branch)
 
 ---
 
@@ -46,6 +46,14 @@ Addresses the 8 remaining red flags from the production audit (FTS-01, ST-01, ST
 
 **Tests:**
 - All existing tests remain unchanged. Syntax verified on all modified files.
+
+### v0.063.2 — Search edit button fix
+
+**Fixed — Search edit button not opening modal:**
+- `frontend/js/search.js` — `editSelected()` now correctly unwraps the search API response: changed `const results = await resp.json()` to `const data = await resp.json(); const results = data.results || []`. The API returns `{"results": [...], "limited": bool}`, but the code was calling `.find()` on the entire response object (always undefined), causing the "Quotation not found." popup to appear instead of opening the edit modal.
+
+**Tests:**
+- All existing tests remain unchanged.
 
 ### v0.063.0 — Production audit fixes (P0-1 through P0-10, P1-1 through P1-4), all P0 + P1 items addressed
 
