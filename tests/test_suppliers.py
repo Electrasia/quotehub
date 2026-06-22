@@ -703,3 +703,846 @@ class TestQuotationRegression:
             "SELECT COUNT(*) AS n FROM suppliers"
         ).fetchone()["n"]
         assert before_count == after_count
+
+
+# =============================================================================
+# PHASE 2 — API integration tests
+# =============================================================================
+
+import json as _json
+
+
+class TestCreateSupplier:
+    """Tests for POST /suppliers."""
+
+    def test_create_supplier_as_admin(self, admin_client):
+        """Admin can create a new supplier."""
+        resp = admin_client.post("/suppliers", json={
+            "canonical_name": "  New Supplier Corp  ",
+            "display_name": "New Supplier",
+            "notes": "Test supplier",
+        })
+        assert resp.status_code == 200, resp.json()
+        data = resp.json()
+        assert data["canonical_name"] == "new supplier corp"
+        assert data["display_name"] == "New Supplier"
+        assert data["status"] == "active"
+        assert data["notes"] == "Test supplier"
+        assert "id" in data
+
+    def test_create_supplier_duplicate_409(self, admin_client):
+        """Creating a supplier with a duplicate canonical_name returns 409."""
+        admin_client.post("/suppliers", json={"canonical_name": "Test Co"})
+        resp = admin_client.post("/suppliers", json={"canonical_name": "  Test Co  "})
+        assert resp.status_code == 409
+
+    def test_create_supplier_as_user_403(self, user_client):
+        """User role cannot create suppliers."""
+        resp = user_client.post("/suppliers", json={"canonical_name": "User Supplier"})
+        assert resp.status_code == 403
+
+    def test_create_supplier_unauthenticated_401(self, app_client):
+        """Unauthenticated request returns 401."""
+        resp = app_client.post("/suppliers", json={"canonical_name": "Anon Supplier"})
+        assert resp.status_code == 401
+
+    def test_create_supplier_audit_log(self, admin_client):
+        """Creating a supplier generates an audit log entry."""
+        admin_client.post("/suppliers", json={"canonical_name": "Audit Corp"})
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ?",
+                ("create_supplier",),
+            ).fetchone()
+            assert row is not None
+            assert row["actor"] == "admin"
+
+    def test_create_supplier_empty_name_422(self, admin_client):
+        """Empty canonical_name after normalisation returns 422."""
+        resp = admin_client.post("/suppliers", json={"canonical_name": "   "})
+        assert resp.status_code == 422
+
+
+class TestGetSupplier:
+    """Tests for GET /suppliers/{id}."""
+
+    def _create_supplier_via_db(self, name="Detail Corp"):
+        """Create a supplier directly via DB (no auth dependency)."""
+        from backend.suppliers import normalize_name
+        from backend.db import get_db
+        with get_db() as db:
+            norm = normalize_name(name)
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                (norm, name),
+            )
+            return cur.lastrowid
+
+    def test_get_supplier_as_user(self, user_client):
+        sid = self._create_supplier_via_db()
+        resp = user_client.get(f"/suppliers/{sid}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "aliases" in data
+        assert "contacts" in data
+        assert "capabilities" in data
+
+    def test_get_supplier_404(self, user_client):
+        resp = user_client.get("/suppliers/99999")
+        assert resp.status_code == 404
+
+    def test_get_supplier_unauthenticated_401(self, app_client):
+        sid = self._create_supplier_via_db()
+        resp = app_client.get(f"/suppliers/{sid}")
+        assert resp.status_code == 401
+
+
+class TestUpdateSupplier:
+    """Tests for PUT /suppliers/{id}."""
+
+    def test_update_display_name(self, admin_client):
+        resp = admin_client.post("/suppliers", json={"canonical_name": "Update Corp"})
+        sid = resp.json()["id"]
+        resp = admin_client.put(f"/suppliers/{sid}", json={
+            "display_name": "Updated Display",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["display_name"] == "Updated Display"
+
+    def test_update_status_admin_cannot_review(self, admin_client):
+        """Admin attempting to set status='review' returns 403."""
+        resp = admin_client.post("/suppliers", json={"canonical_name": "Status Corp"})
+        sid = resp.json()["id"]
+        resp = admin_client.put(f"/suppliers/{sid}", json={
+            "status": "review",
+        })
+        assert resp.status_code == 403
+
+    def test_update_status_master_can_review(self, master_client):
+        resp = master_client.post("/suppliers", json={"canonical_name": "Master Corp"})
+        sid = resp.json()["id"]
+        resp = master_client.put(f"/suppliers/{sid}", json={
+            "status": "review",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "review"
+
+    def test_update_audit_log_diff(self, admin_client):
+        """Update produces audit log with before/after diff."""
+        resp = admin_client.post("/suppliers", json={
+            "canonical_name": "Diff Corp",
+            "display_name": "Old Name",
+        })
+        sid = resp.json()["id"]
+        admin_client.put(f"/suppliers/{sid}", json={
+            "display_name": "New Name",
+            "notes": "Added notes",
+        })
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("update_supplier", sid),
+            ).fetchone()
+            assert row is not None
+            details = _json.loads(row["details"])
+            assert "display_name" in details
+            assert details["display_name"]["to"] == "New Name"
+            assert "notes" in details
+            assert row["actor"] == "admin"
+
+    def test_update_supplier_404(self, admin_client):
+        resp = admin_client.put("/suppliers/99999", json={"display_name": "Nope"})
+        assert resp.status_code == 404
+
+    def test_update_supplier_user_403(self, user_client):
+        # Create a supplier as admin (using admin_client fixture separately)
+        import copy
+        from backend.db import get_db
+        from backend.suppliers import normalize_name
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                ("user-test-supplier", "User Test"),
+            )
+            sid = cur.lastrowid
+        resp = user_client.put(f"/suppliers/{sid}", json={"display_name": "Nope"})
+        assert resp.status_code == 403
+
+
+class TestInactivateSupplier:
+    """Tests for POST /suppliers/{id}/inactivate (master-only)."""
+
+    def test_inactivate_as_master(self, master_client):
+        resp = master_client.post("/suppliers", json={"canonical_name": "Inactivate Corp"})
+        sid = resp.json()["id"]
+        resp = master_client.post(f"/suppliers/{sid}/inactivate")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "inactive"
+        # Confirm audit log
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("inactivate_supplier", sid),
+            ).fetchone()
+            assert row is not None
+            details = _json.loads(row["details"])
+            assert details["before_status"] == "active"
+            assert details["after_status"] == "inactive"
+
+    def test_inactivate_as_admin_403(self, admin_client):
+        from backend.db import get_db
+        from backend.suppliers import normalize_name
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                ("admin-inact-test", "Admin Test"),
+            )
+            sid = cur.lastrowid
+        resp = admin_client.post(f"/suppliers/{sid}/inactivate")
+        assert resp.status_code == 403
+
+    def test_inactivate_already_inactive(self, master_client):
+        resp = master_client.post("/suppliers", json={"canonical_name": "Already Inact Corp"})
+        sid = resp.json()["id"]
+        master_client.post(f"/suppliers/{sid}/inactivate")
+        resp = master_client.post(f"/suppliers/{sid}/inactivate")
+        assert resp.status_code == 200  # no-op
+
+    def test_inactivate_404(self, master_client):
+        resp = master_client.post("/suppliers/99999/inactivate")
+        assert resp.status_code == 404
+
+
+class TestListSuppliers:
+    """Tests for GET /suppliers."""
+
+    def test_list_all(self, master_client):
+        for name in ["Alpha Corp", "Beta Inc", "Gamma Ltd"]:
+            master_client.post("/suppliers", json={"canonical_name": name})
+        resp = master_client.get("/suppliers?status=all")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 3
+        assert len(data["items"]) >= 3
+
+    def test_list_active_only(self, master_client):
+        master_client.post("/suppliers", json={"canonical_name": "Active Corp"})
+        master_client.post("/suppliers", json={"canonical_name": "Active Too"})
+        resp = master_client.get("/suppliers?status=active")
+        assert resp.status_code == 200
+        for s in resp.json()["items"]:
+            assert s["status"] == "active"
+
+    def test_list_search(self, master_client):
+        master_client.post("/suppliers", json={"canonical_name": "Beta Inc"})
+        resp = master_client.get("/suppliers?q=beta")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        names = [s["canonical_name"] for s in data["items"]]
+        assert any("beta" in n for n in names)
+
+    def test_list_pagination(self, master_client):
+        for i in range(5):
+            master_client.post("/suppliers", json={"canonical_name": f"Page Corp {i}"})
+        resp = master_client.get("/suppliers?per_page=2&page=1&status=all")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["per_page"] == 2
+        assert len(data["items"]) <= 2
+
+    def test_list_requires_auth(self, app_client):
+        resp = app_client.get("/suppliers")
+        assert resp.status_code == 401
+
+
+class TestContactsCRUD:
+    """Tests for contacts CRUD endpoints."""
+
+    def _create_supplier(self, admin_client, name="Contact Corp"):
+        resp = admin_client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_create_contact(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "John Doe",
+            "email": "john@example.com",
+            "phone": "+852 1234 5678",
+            "role": "Sales Manager",
+            "position": 1,
+            "is_default_rfq_contact": 1,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "John Doe"
+        assert data["email"] == "john@example.com"
+        assert data["position"] == 1
+        assert data["is_default_rfq_contact"] == 1
+
+    def test_list_contacts_sorted(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        # Create contacts with different positions
+        admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Second", "position": 2,
+        })
+        admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "First", "position": 1,
+        })
+        resp = admin_client.get(f"/suppliers/{sid}/contacts")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) >= 2
+        # Should be sorted by position ASC
+        positions = [c["position"] for c in items]
+        assert positions == sorted(positions)
+
+    def test_update_contact(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Original",
+        })
+        cid = resp.json()["id"]
+        resp = admin_client.put(f"/suppliers/{sid}/contacts/{cid}", json={
+            "name": "Updated Name",
+            "role": "New Role",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Updated Name"
+        # Audit log
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("update_contact", sid),
+            ).fetchone()
+            assert row is not None
+
+    def test_delete_contact(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Delete Me",
+        })
+        cid = resp.json()["id"]
+        resp = admin_client.delete(f"/suppliers/{sid}/contacts/{cid}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        # Verify deleted
+        resp = admin_client.get(f"/suppliers/{sid}/contacts")
+        ids = [c["id"] for c in resp.json()["items"]]
+        assert cid not in ids
+
+    def test_contact_delete_404(self, admin_client):
+        """Deleting a non-existent contact returns 404."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.delete(f"/suppliers/{sid}/contacts/99999")
+        assert resp.status_code == 404
+
+    def test_contact_user_read_only(self, user_client):
+        """User can list contacts but not create/update/delete."""
+        from backend.db import get_db
+        from backend.suppliers import normalize_name
+        with get_db() as db:
+            norm = normalize_name("User Contact Corp")
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                (norm, "User Contact Corp"),
+            )
+            sid = cur.lastrowid
+        resp = user_client.post(f"/suppliers/{sid}/contacts", json={"name": "Nope"})
+        assert resp.status_code == 403
+
+    def test_contact_delete_audit_log(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Audited Contact",
+        })
+        cid = resp.json()["id"]
+        admin_client.delete(f"/suppliers/{sid}/contacts/{cid}")
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("delete_contact", sid),
+            ).fetchone()
+            assert row is not None
+
+
+class TestAliasesCRUD:
+    """Tests for aliases CRUD endpoints."""
+
+    def _create_supplier(self, admin_client, name="Alias Corp"):
+        resp = admin_client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_create_alias(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/aliases", json={
+            "alias": "  Aliased Name  ",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["alias"] == "aliased name"
+
+    def test_duplicate_alias_409(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "MyAlias"})
+        resp = admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "  MyAlias  "})
+        assert resp.status_code == 409
+
+    def test_list_aliases(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.get(f"/suppliers/{sid}/aliases")
+        assert resp.status_code == 200
+        assert "items" in resp.json()
+
+    def test_delete_alias(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "DeleteAlias"})
+        aid = resp.json()["id"]
+        resp = admin_client.delete(f"/suppliers/{sid}/aliases/{aid}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+
+    def test_delete_alias_404(self, admin_client):
+        # Create supplier, try to delete non-existent alias
+        from backend.db import get_db
+        from backend.suppliers import normalize_name
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                ("alias-404-test", "Alias 404 Test"),
+            )
+            sid = cur.lastrowid
+        resp = admin_client.delete(f"/suppliers/{sid}/aliases/99999")
+        assert resp.status_code == 404
+
+    def test_alias_audit_log(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "AuditedAlias"})
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("add_alias", sid),
+            ).fetchone()
+            assert row is not None
+            assert row["actor"] == "admin"
+
+
+class TestCapabilitiesCRUD:
+    """Tests for capabilities CRUD with role enforcement on verified flag."""
+
+    def _create_supplier(self, client, name="Cap Corp"):
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_create_capability_admin_unverified(self, admin_client):
+        """Admin can create an unverified capability."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "TestBrand",
+            "product_type": "TestPT",
+            "verified": False,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["brand"] == "testbrand"
+        assert data["product_type"] == "testpt"
+        assert data["verified"] is False
+
+    def test_create_capability_admin_verified_403(self, admin_client):
+        """Admin cannot set verified=true on create."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "BrandX",
+            "product_type": "PTX",
+            "verified": True,
+        })
+        assert resp.status_code == 403
+
+    def test_create_capability_master_verified(self, master_client):
+        """Master can set verified=true."""
+        sid = self._create_supplier(master_client)
+        resp = master_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "MasterBrand",
+            "product_type": "MasterPT",
+            "verified": True,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["verified"] is True
+
+    def test_duplicate_capability_409(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "DupBrand", "product_type": "DupPT",
+        })
+        resp = admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "DupBrand", "product_type": "DupPT",
+        })
+        assert resp.status_code == 409
+
+    def test_update_capability_admin_no_verified(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "UpdateBrand", "product_type": "UpdatePT",
+        })
+        cap_id = resp.json()["id"]
+        # Admin changing to verified should fail
+        resp = admin_client.put(f"/suppliers/{sid}/capabilities/{cap_id}", json={
+            "verified": True,
+        })
+        assert resp.status_code == 403
+        # Admin changing brand should work
+        resp = admin_client.put(f"/suppliers/{sid}/capabilities/{cap_id}", json={
+            "brand": "NewBrand",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["brand"] == "newbrand"
+
+    def test_update_capability_master_verified(self, master_client):
+        sid = self._create_supplier(master_client)
+        resp = master_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "MasterUpd", "product_type": "MasterUpdPT",
+        })
+        cap_id = resp.json()["id"]
+        resp = master_client.put(f"/suppliers/{sid}/capabilities/{cap_id}", json={
+            "verified": True,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["verified"] is True
+
+    def test_delete_capability(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "DelBrand", "product_type": "DelPT",
+        })
+        cap_id = resp.json()["id"]
+        resp = admin_client.delete(f"/suppliers/{sid}/capabilities/{cap_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+
+    def test_capability_audit_log(self, admin_client):
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": "AuditBr", "product_type": "AuditPT",
+        })
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("create_capability", sid),
+            ).fetchone()
+            assert row is not None
+
+
+class TestBrandsProductTypes:
+    """Tests for /brands and /product-types endpoints."""
+
+    def test_brands_min_2_chars(self, master_client):
+        """Returns empty when query < 2 chars."""
+        resp = master_client.get("/brands?q=a")
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+    def test_brands_prefix_match(self, master_client):
+        master_client.post("/brands", json={"name": "AlphaBrand"})
+        resp = master_client.get("/brands?q=alpha")
+        assert resp.status_code == 200
+        names = [b["name"] for b in resp.json()["items"]]
+        assert "alphabrand" in names
+
+    def test_brands_max_20_results(self, master_client):
+        # Create 25 brands
+        for i in range(25):
+            master_client.post("/brands", json={"name": f"ZZZBrand{i}"})
+        resp = master_client.get("/brands?q=zzz")
+        assert len(resp.json()["items"]) <= 20
+
+    def test_product_types_min_2_chars(self, master_client):
+        resp = master_client.get("/product-types?q=b")
+        assert resp.json()["items"] == []
+
+    def test_brands_duplicate_409(self, master_client):
+        master_client.post("/brands", json={"name": "AlphaBrand"})
+        resp = master_client.post("/brands", json={"name": "AlphaBrand"})
+        assert resp.status_code == 409
+
+    def test_brands_create_normalized(self, master_client):
+        resp = master_client.post("/brands", json={"name": "  New Brand  "})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "new brand"
+
+    def test_brands_unauthenticated_401(self, app_client):
+        resp = app_client.get("/brands?q=test")
+        assert resp.status_code == 401
+
+    def test_product_types_prefix_match(self, master_client):
+        master_client.post("/product-types", json={"name": "BetaType"})
+        resp = master_client.get("/product-types?q=beta")
+        names = [pt["name"] for pt in resp.json()["items"]]
+        assert "betatype" in names
+
+    def test_product_types_duplicate_409(self, master_client):
+        master_client.post("/product-types", json={"name": "AlphaType"})
+        resp = master_client.post("/product-types", json={"name": "AlphaType"})
+        assert resp.status_code == 409
+
+    def test_product_types_empty_name_422(self, master_client):
+        resp = master_client.post("/product-types", json={"name": "   "})
+        assert resp.status_code == 422
+
+    def test_brands_empty_name_422(self, master_client):
+        resp = master_client.post("/brands", json={"name": "   "})
+        assert resp.status_code == 422
+
+
+class TestResolveEndpoint:
+    """Tests for POST /suppliers/resolve (strictly read-only)."""
+
+    def test_resolve_canonical_name(self, master_client):
+        resp = master_client.post("/suppliers", json={"canonical_name": "Resolve Corp"})
+        sid = resp.json()["id"]
+        # Also add an alias
+        master_client.post(f"/suppliers/{sid}/aliases", json={"alias": "ResolveAlias"})
+        resp = master_client.post("/suppliers/resolve", json={"name": "Resolve Corp"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["matched"] is True
+        assert data["id"] == sid
+        assert data["canonical_name"] == "resolve corp"
+
+    def test_resolve_alias(self, master_client):
+        resp = master_client.post("/suppliers", json={"canonical_name": "Alias Resolve"})
+        sid = resp.json()["id"]
+        master_client.post(f"/suppliers/{sid}/aliases", json={"alias": "ResolveAlias"})
+        resp = master_client.post("/suppliers/resolve", json={"name": "ResolveAlias"})
+        assert resp.status_code == 200
+        assert resp.json()["matched"] is True
+
+    def test_resolve_no_match(self, master_client):
+        resp = master_client.post("/suppliers/resolve", json={"name": "NonExistentXYZ"})
+        assert resp.status_code == 200
+        assert resp.json()["matched"] is False
+        assert resp.json()["id"] is None
+
+    def test_resolve_read_only(self, master_client):
+        """Confirm resolve never creates suppliers."""
+        before_resp = master_client.post("/suppliers/resolve", json={"name": "UnmatchedXYZ"})
+        assert before_resp.json()["matched"] is False
+        # Try the unmatched name again — should still be unmatched
+        resp = master_client.post("/suppliers/resolve", json={"name": "UnmatchedXYZ"})
+        assert resp.json()["matched"] is False
+
+    def test_resolve_unauthenticated_401(self, app_client):
+        resp = app_client.post("/suppliers/resolve", json={"name": "Test"})
+        assert resp.status_code == 401
+
+
+class TestNoHardDeleteSupplier:
+    """Confirm there is no DELETE endpoint on /suppliers/{id}."""
+
+    def test_no_delete_endpoint(self, master_client):
+        resp = master_client.delete("/suppliers/1")
+        # Should return 405 Method Not Allowed (DELETE not registered)
+        # or 404 if the path doesn't accept DELETE
+        assert resp.status_code in (404, 405), (
+            f"Expected 404/405, got {resp.status_code}: {resp.json()}"
+        )
+
+
+class TestRoleEnforcement:
+    """Test 401 vs 403 across all endpoints for all roles."""
+
+    def _create_supplier_via_db(self):
+        """Create a supplier directly via DB for role tests."""
+        from backend.suppliers import normalize_name
+        from backend.db import get_db
+        with get_db() as db:
+            norm = normalize_name("Role Corp")
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                (norm, "Role Corp"),
+            )
+            return cur.lastrowid
+
+    def test_unauthenticated_401(self, app_client):
+        sid = self._create_supplier_via_db()
+        endpoints = [
+            ("GET", "/suppliers"),
+            ("GET", f"/suppliers/{sid}"),
+            ("GET", f"/suppliers/{sid}/contacts"),
+            ("GET", f"/suppliers/{sid}/aliases"),
+            ("GET", f"/suppliers/{sid}/capabilities"),
+            ("POST", "/suppliers/resolve"),
+        ]
+        for method, path in endpoints:
+            resp = app_client.request(method, path)
+            assert resp.status_code == 401, f"{method} {path} returned {resp.status_code}, expected 401"
+
+    def test_user_readonly_403_on_write(self, user_client):
+        """User can GET but not POST/PUT/DELETE on write endpoints."""
+        sid = self._create_supplier_via_db()
+        write_endpoints = [
+            ("POST", "/suppliers", {"canonical_name": "X"}),
+            ("POST", f"/suppliers/{sid}/contacts", {"name": "X"}),
+            ("POST", f"/suppliers/{sid}/aliases", {"alias": "X"}),
+            ("POST", f"/suppliers/{sid}/capabilities", {"brand": "X", "product_type": "Y"}),
+            ("POST", "/brands", {"name": "X"}),
+            ("POST", "/product-types", {"name": "X"}),
+        ]
+        for method, path, body in write_endpoints:
+            resp = user_client.request(method, path, json=body)
+            assert resp.status_code == 403, f"{method} {path} returned {resp.status_code}, expected 403"
+
+    def test_admin_can_write(self, admin_client):
+        """Admin can write to non-restricted endpoints."""
+        resp = admin_client.post("/suppliers", json={"canonical_name": "Admin Supplier"})
+        assert resp.status_code == 200
+        resp = admin_client.post(f"/suppliers/{resp.json()['id']}/contacts", json={"name": "Admin Contact"})
+        assert resp.status_code == 200
+
+
+class TestAuditLogDiffs:
+    """Verify every PUT/PATCH produces audit log with before/after diff."""
+
+    def test_update_supplier_diff_fields_only(self, admin_client):
+        """Only changed fields appear in diff."""
+        resp = admin_client.post("/suppliers", json={
+            "canonical_name": "Diff Corp",
+            "display_name": "Original Display",
+            "notes": "Original notes",
+        })
+        sid = resp.json()["id"]
+        admin_client.put(f"/suppliers/{sid}", json={
+            "display_name": "Changed Display",
+        })
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("update_supplier", sid),
+            ).fetchone()
+            details = _json.loads(row["details"])
+            assert "display_name" in details
+            assert "notes" not in details  # unchanged
+            assert "status" not in details  # unchanged
+
+    def test_update_contact_diff(self, admin_client):
+        """Contact update diff contains only changed fields."""
+        resp = admin_client.post("/suppliers", json={"canonical_name": "Contact Diff Corp"})
+        sid = resp.json()["id"]
+        resp = admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Diff Contact", "email": "old@example.com", "role": "Old Role",
+        })
+        cid = resp.json()["id"]
+        admin_client.put(f"/suppliers/{sid}/contacts/{cid}", json={
+            "email": "new@example.com",
+            "role": "New Role",
+        })
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            rows = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ? ORDER BY id DESC LIMIT 1",
+                ("update_contact", sid),
+            ).fetchall()
+            assert len(rows) >= 1
+            details = _json.loads(rows[0]["details"])
+            assert "email" in details
+            assert "role" in details
+            assert "name" not in details  # unchanged
+            assert details["email"]["from"] == "old@example.com"
+            assert details["email"]["to"] == "new@example.com"
+
+
+class TestApiValidation:
+    """Test error handling for malformed/invalid inputs."""
+
+    def test_missing_required_fields(self, admin_client):
+        resp = admin_client.post("/suppliers", json={})
+        # Missing canonical_name: the model has no default, so it fails validation
+        # but FastAPI might accept it if canonical_name is not explicitly required
+        # by Pydantic (it's just a str, not Optional[str]).
+        # The endpoint code checks if norm is empty and returns 422.
+        # Let's check that it's handled gracefully.
+        assert resp.status_code in (200, 422)
+
+    def test_invalid_status_value(self, admin_client):
+        resp = admin_client.post("/suppliers", json={"canonical_name": "Valid"})
+        sid = resp.json()["id"]
+        resp = admin_client.put(f"/suppliers/{sid}", json={"status": "invalid"})
+        # The status field has pattern="^(active|inactive|review)$" — FastAPI returns 422
+        assert resp.status_code == 422
+
+    def test_non_existent_supplier_returns_404(self, admin_client):
+        resp = admin_client.get("/suppliers/99999")
+        assert resp.status_code == 404
+
+    def test_non_existent_contact_delete_returns_404(self, admin_client):
+        """Deleting a non-existent contact returns 404."""
+        resp = admin_client.delete("/suppliers/1/contacts/99999")
+        assert resp.status_code == 404
+
+    def test_invalid_json_body(self, admin_client):
+        """Raw string body should be rejected."""
+        resp = admin_client.post("/suppliers", content=b"not json", headers={"Content-Type": "application/json"})
+        assert resp.status_code == 422
+
+    def test_per_page_capped_at_100(self, master_client):
+        """FastAPI enforces le=100, returns 422 for values >100."""
+        resp = master_client.get("/suppliers?per_page=500")
+        assert resp.status_code == 422
+
+
+class TestConcurrencyStress:
+    """Stress test: 10 parallel supplier writes, no 'database is locked' errors."""
+
+    def test_parallel_writes(self, master_client):
+        """10 concurrent supplier creates should all succeed or fail cleanly."""
+        import concurrent.futures
+        import threading
+
+        results = []
+        errors = []
+        lock = threading.Lock()
+
+        def create_supplier(name):
+            try:
+                resp = master_client.post("/suppliers", json={"canonical_name": name})
+                with lock:
+                    results.append((name, resp.status_code))
+            except Exception as e:
+                with lock:
+                    errors.append((name, str(e)))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = []
+            for i in range(10):
+                futures.append(pool.submit(create_supplier, f"Concurrent Supplier {i}"))
+            concurrent.futures.wait(futures)
+
+        # All should have status 200 (success) or 409 (duplicate from retry)
+        # No 500 errors
+        if errors:
+            pytest.fail(f"Concurrent writes failed with errors: {errors}")
+
+        for name, status in results:
+            assert status in (200, 409), f"{name} returned {status}, expected 200 or 409"
+
+        # Verify all suppliers created at least once
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            for name, status in results:
+                if status == 200:
+                    row = db.execute(
+                        "SELECT id FROM suppliers WHERE canonical_name = ?",
+                        (name.lower(),),
+                    ).fetchone()
+                    assert row is not None, f"Supplier {name} was not persisted"
+

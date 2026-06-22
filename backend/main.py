@@ -365,6 +365,9 @@ from .routes import (
     files_router, ai_router, admin_router,
     export_import_router,
     auto_backup_router,
+    suppliers_router,
+    brands_router,
+    product_types_router,
 )
 
 app.include_router(auth_router)
@@ -375,6 +378,9 @@ app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(export_import_router)
 app.include_router(auto_backup_router)
+app.include_router(suppliers_router)
+app.include_router(brands_router)
+app.include_router(product_types_router)
 
 # ─── Static Files ─────────────────────────────────────────
 
