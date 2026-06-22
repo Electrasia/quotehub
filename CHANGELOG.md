@@ -1,5 +1,9 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.063.2 (2026-06-22)
+- **Fix**: Search page edit button — `editSelected()` now correctly unwraps the API response (`data.results` instead of treating the whole response object as an array). Selecting one item and pressing Edit now opens the modal.
+- **Chore**: VERSION → 0.063.2
+
 ## v0.063.1 (2026-06-21)
 - **Security**: FTS5 MATCH injection fix — search terms sanitized with `re.sub(r'[^\w]', '', w)` to strip FTS5 operators (`-`, `+`, `AND`, `OR`, `NOT`, `NEAR`, `*`, parentheses). A search for `-701` now correctly finds items containing `701` instead of evaluating NOT (FTS-01)
 - **Security**: `uploaded_files` global list now synchronized with `asyncio.Lock` — wraps all 32 access points across 3 files. `/queue` returns a copy instead of the raw list reference. Prevents race conditions on concurrent upload/clear/remove (ST-01)

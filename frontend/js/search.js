@@ -185,7 +185,8 @@ async function editSelected() {
     editQuotationId = ids[0];
     // Fetch the quotation data
     const resp = await fetch(`/search?q=`);
-    const results = await resp.json();
+    const data = await resp.json();
+    const results = data.results || [];
     const quotation = results.find(r => r.id === editQuotationId);
     if (!quotation) { showBriefPopup('Quotation not found.'); return; }
 
