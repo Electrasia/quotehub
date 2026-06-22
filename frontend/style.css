@@ -305,5 +305,195 @@ th.sort-desc::after { content: ' ▼'; color: #3498db; }
 .edit-modal-data tbody tr:nth-child(even) { background: #fafbfc; }
 .edit-modal-data tbody tr:nth-child(even):hover { background: #f0f5fa; }
 
+/* Role-based visibility for suppliers */
+body.role-user #navSuppliers { display: none !important; }
+body.role-admin #suppliersNewBtn,
+body.role-master #suppliersNewBtn { display: inline-block !important; }
+
+/* ─── Supplier-specific styles ────────────────────────── */
+
+/* Status badges */
+.supplier-status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+.supplier-status-badge.active { background: #eafaf1; color: #27ae60; }
+.supplier-status-badge.inactive { background: #fdedec; color: #e74c3c; }
+.supplier-status-badge.review { background: #fef5e7; color: #e67e22; }
+
+/* Tag chips (aliases, brands, product types) */
+.tag-chip-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+}
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: #e8f0fe;
+    border-radius: 16px;
+    font-size: 13px;
+    color: #1a56db;
+    white-space: nowrap;
+}
+.tag-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: #666;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    border-radius: 50%;
+}
+.tag-chip-remove:hover {
+    background: rgba(0,0,0,0.1);
+    color: #c0392b;
+}
+
+/* Input wrapper for tag autocomplete */
+.tag-input-wrapper {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    position: relative;
+}
+.tag-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+/* Supplier detail sections */
+.supplier-detail-section {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #eee;
+}
+.supplier-detail-section:last-of-type {
+    border-bottom: none;
+}
+.supplier-section-title {
+    font-size: 15px;
+    color: #444;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+/* Form fields within supplier detail */
+.supplier-field-label {
+    display: block;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+    margin-top: 12px;
+    font-weight: 500;
+}
+.supplier-text-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.supplier-text-input:focus {
+    border-color: #3498db;
+}
+
+/* Contact rows */
+.supplier-contact-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+.supplier-contact-row:last-child {
+    border-bottom: none;
+}
+.supplier-contact-label {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 2px;
+    font-weight: 500;
+}
+
+/* Capability rows */
+.supplier-capability-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+.supplier-capability-row:last-child {
+    border-bottom: none;
+}
+
+/* Supplier detail save actions */
+.supplier-detail-actions {
+    position: sticky;
+    bottom: 0;
+    padding: 12px 0;
+    background: #f5f5f5;
+    border-top: 1px solid #eee;
+    margin-top: 16px;
+}
+
+/* Autocomplete dropdown */
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 50;
+}
+.autocomplete-item {
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+}
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+.autocomplete-item:hover {
+    background: #ebf5fb;
+    color: #3498db;
+}
+
+/* Supplier error inline message */
+.supplier-error {
+    background: #fdedec;
+    color: #c0392b;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
 /* Hidden */
 .hidden { display: none !important; }

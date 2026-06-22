@@ -1546,3 +1546,50 @@ class TestConcurrencyStress:
                     ).fetchone()
                     assert row is not None, f"Supplier {name} was not persisted"
 
+
+# =============================================================================
+# TestFrontendRenderingSafety — static analysis of frontend JS (no browser)
+# =============================================================================
+
+class TestFrontendRenderingSafety:
+    """Static file-content checks for suppliers.js frontend safety."""
+
+    SUPPLIERS_PATH = "frontend/js/suppliers.js"
+
+    def _read_suppliers_js(self):
+        with open(self.SUPPLIERS_PATH) as f:
+            return f.read()
+
+    def test_zero_innerHTML_with_untrusted_data(self):
+        """Confirm no innerHTML assignments exist in suppliers.js."""
+        source = self._read_suppliers_js()
+        lines = source.split("\n")
+        offending = []
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            # Skip comment lines and template literal lines
+            if stripped.startswith("//") or stripped.startswith("*") or stripped.startswith("/*"):
+                continue
+            if "innerHTML" in stripped:
+                # Allow innerHTML on <td>, <tr>, <div>, etc. ONLY when the
+                # assigned value is a literal empty string '' or a known-safe
+                # assignment (e.g. clearing a container before re-building
+                # with createElement). Check that no innerHTML assignment uses
+                # a variable that could contain user data.
+                offending.append((i, stripped))
+        if offending:
+            msg = "\n".join(f"  Line {n}: {s}" for n, s in offending)
+            pytest.fail(f"innerHTML found in suppliers.js — potential XSS:\n{msg}")
+
+    def test_renderTextSafe_defined(self):
+        """Confirm renderTextSafe is defined and exported in window.Suppliers."""
+        source = self._read_suppliers_js()
+        # Check function definition
+        assert "function renderTextSafe" in source, (
+            "renderTextSafe function definition not found in suppliers.js"
+        )
+        # Check it's exported in the return object
+        assert "renderTextSafe: renderTextSafe" in source or "renderTextSafe:renderTextSafe" in source, (
+            "renderTextSafe not found in window.Suppliers export (return object)"
+        )
+

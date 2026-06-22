@@ -1,0 +1,1562 @@
+/**
+ * frontend/js/suppliers.js — Suppliers management UI module.
+ *
+ * Exposes window.Suppliers namespace.
+ *
+ * SECURITY:
+ *   - Zero innerHTML with untrusted user data.
+ *   - All user data rendered via renderTextSafe() + createElement + appendChild.
+ *   - No eval, no Function constructor, no new Function().
+ *   - Role-based UI hiding is UX only; server enforces all permissions.
+ *   - Confirm dialogs for all destructive actions.
+ */
+
+"use strict";
+
+window.Suppliers = (function () {
+
+  // ─── Constants ────────────────────────────────────────────
+  const DEBOUNCE_MS = 300;
+  const AUTOCOMPLETE_MIN_CHARS = 2;
+  const AUTOCOMPLETE_MAX_RESULTS = 20;
+  const PER_PAGE = 25;
+
+  // ─── State ────────────────────────────────────────────────
+  let currentSupplierId = null;
+  let dirty = false;
+  let listCache = null;            // { suppliers: [], total: number, page: number }
+  let autocompleteControllers = {};  // { brands: AbortController, productTypes: AbortController }
+
+  // Original data loaded from server (for save diffing)
+  let _originalSupplier = null;
+  let _originalContacts = [];
+  let _originalAliases = [];
+  let _originalBrands = [];
+  let _originalProductTypes = [];
+  let _originalCapabilities = [];
+
+  // Current form data (kept in sync with DOM)
+  let _currentContacts = [];
+  let _currentAliases = [];
+  let _currentBrands = [];
+  let _currentProductTypes = [];
+  let _currentCapabilities = [];
+
+  // Pagination
+  let _currentPage = 1;
+  let _totalPages = 1;
+
+  // ─── Shared Safe Render Helper ────────────────────────────
+
+  /**
+   * Render text safely — always use this for user-supplied data.
+   * Returns a TextNode, safe to append to the DOM.
+   * @param {*} text - The value to render
+   * @returns {Text} A DOM Text node
+   */
+  function renderTextSafe(text) {
+    return document.createTextNode(text == null ? '' : String(text));
+  }
+
+  // ─── Error Helpers ────────────────────────────────────────
+
+  /**
+   * Show inline error message in a container element.
+   * @param {string} containerId - Element ID to show the error in
+   * @param {string} message - Error message text
+   */
+  function _showError(containerId, message) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.textContent = message;
+    el.classList.remove('hidden');
+  }
+
+  function _clearError(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.textContent = '';
+    el.classList.add('hidden');
+  }
+
+  /**
+   * Show success flash message
+   * @param {string} message
+   */
+  function _showSuccess(message) {
+    // Reuse existing showBriefPopup from utils.js
+    if (typeof showBriefPopup === 'function') {
+      showBriefPopup(message);
+    }
+  }
+
+  // ─── Dirty Flag ───────────────────────────────────────────
+
+  function _setDirty() {
+    if (dirty) return;
+    dirty = true;
+    _updateSaveButton();
+  }
+
+  function _clearDirty() {
+    dirty = false;
+    _updateSaveButton();
+  }
+
+  function _updateSaveButton() {
+    const btn = document.getElementById('supplierSaveBtn');
+    if (btn) {
+      btn.disabled = !dirty;
+    }
+  }
+
+  // ─── API Client Wrappers ──────────────────────────────────
+
+  /**
+   * Generic fetch wrapper with auth + error handling.
+   * Uses apiFetch() from auth.js if available, otherwise fallback.
+   * Returns parsed JSON or throws with a user-friendly message.
+   */
+  async function _api(method, url, body) {
+    const opts = { method, credentials: 'include' };
+    if (body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    try {
+      // Use apiFetch if available (handles 401 redirect)
+      const fetcher = (typeof apiFetch === 'function') ? apiFetch : fetch;
+      const resp = await fetcher(url, opts);
+      if (resp.status === 204) return null; // No content
+      const data = await resp.json();
+      if (!resp.ok) {
+        const msg = data.detail || `HTTP ${resp.status}`;
+        const err = new Error(msg);
+        err.status = resp.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    } catch (e) {
+      if (e.status) throw e; // Already wrapped
+      // Network error or other
+      if (e.message === 'Not authenticated') {
+        if (typeof showLogin === 'function') showLogin();
+      }
+      throw new Error('Something went wrong. Please try again.');
+    }
+  }
+
+  async function _apiGet(url) { return _api('GET', url); }
+  async function _apiPost(url, body) { return _api('POST', url, body); }
+  async function _apiPut(url, body) { return _api('PUT', url, body); }
+  async function _apiDelete(url) { return _api('DELETE', url); }
+
+  // ─── List Panel ───────────────────────────────────────────
+
+  /**
+   * Load supplier list and render.
+   * Called on first navigation to suppliers view.
+   */
+  async function loadList() {
+    _clearError('suppliersListError');
+    const listEl = document.getElementById('suppliersListBody');
+    if (listEl) {
+      listEl.textContent = '';
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.setAttribute('colspan', '6');
+      td.style.textAlign = 'center';
+      td.style.padding = '24px';
+      td.style.color = '#888';
+      td.appendChild(renderTextSafe('Loading...'));
+      tr.appendChild(td);
+      listEl.appendChild(tr);
+    }
+
+    const searchEl = document.getElementById('suppliersSearchInput');
+    const statusEl = document.getElementById('suppliersStatusFilter');
+    const q = searchEl ? searchEl.value.trim() : '';
+    const status = statusEl ? statusEl.value : '';
+
+    let url = `/suppliers?page=${_currentPage}&per_page=${PER_PAGE}`;
+    if (q) url += `&q=${encodeURIComponent(q)}`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+
+    try {
+      const data = await _apiGet(url);
+      listCache = data;
+      _totalPages = Math.ceil(data.total / PER_PAGE) || 1;
+      _renderList(data.suppliers || []);
+      _renderPagination(data.total);
+    } catch (e) {
+      listCache = null;
+      _showError('suppliersListError', e.message || 'Failed to load suppliers');
+      if (listEl) {
+        listEl.textContent = '';
+      }
+    }
+  }
+
+  /**
+   * Render the supplier list table body.
+   * @param {Array} suppliers
+   */
+  function _renderList(suppliers) {
+    const tbody = document.getElementById('suppliersListBody');
+    if (!tbody) return;
+    tbody.textContent = '';
+
+    if (!suppliers || suppliers.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.setAttribute('colspan', '6');
+      td.style.textAlign = 'center';
+      td.style.padding = '24px';
+      td.style.color = '#888';
+      td.appendChild(renderTextSafe('No suppliers found.'));
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    for (const s of suppliers) {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', () => loadDetail(s.id));
+
+      // Display Name
+      const tdName = document.createElement('td');
+      tdName.appendChild(renderTextSafe(s.display_name || s.canonical_name));
+      tr.appendChild(tdName);
+
+      // Canonical Name
+      const tdCanon = document.createElement('td');
+      tdCanon.appendChild(renderTextSafe(s.canonical_name));
+      tdCanon.style.fontSize = '12px';
+      tdCanon.style.color = '#888';
+      tr.appendChild(tdCanon);
+
+      // Status badge
+      const tdStatus = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'supplier-status-badge ' + (s.status || 'active');
+      badge.appendChild(renderTextSafe(s.status || 'active'));
+      tdStatus.appendChild(badge);
+      tr.appendChild(tdStatus);
+
+      // Alias count
+      const tdAliases = document.createElement('td');
+      tdAliases.style.textAlign = 'center';
+      tdAliases.appendChild(renderTextSafe(s.alias_count != null ? s.alias_count : 0));
+      tr.appendChild(tdAliases);
+
+      // Contact count
+      const tdContacts = document.createElement('td');
+      tdContacts.style.textAlign = 'center';
+      tdContacts.appendChild(renderTextSafe(s.contact_count != null ? s.contact_count : 0));
+      tr.appendChild(tdContacts);
+
+      // Created date
+      const tdCreated = document.createElement('td');
+      tdCreated.style.fontSize = '12px';
+      tdCreated.style.color = '#888';
+      if (s.created_at) {
+        try {
+          const d = new Date(s.created_at + (s.created_at.endsWith('Z') ? '' : 'Z'));
+          tdCreated.appendChild(renderTextSafe(d.toLocaleDateString()));
+        } catch (_) {
+          tdCreated.appendChild(renderTextSafe(s.created_at));
+        }
+      } else {
+        tdCreated.appendChild(renderTextSafe('—'));
+      }
+      tr.appendChild(tdCreated);
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  /**
+   * Render pagination controls.
+   * @param {number} total - Total number of results
+   */
+  function _renderPagination(total) {
+    const container = document.getElementById('suppliersPagination');
+    if (!container) return;
+    container.textContent = '';
+
+    if (total <= PER_PAGE && _currentPage <= 1) {
+      // No pagination needed
+      return;
+    }
+
+    const inner = document.createElement('div');
+    inner.style.display = 'flex';
+    inner.style.alignItems = 'center';
+    inner.style.gap = '8px';
+    inner.style.justifyContent = 'center';
+    inner.style.marginTop = '12px';
+
+    // Prev button
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'btn btn-sm btn-secondary';
+    prevBtn.disabled = _currentPage <= 1;
+    prevBtn.appendChild(renderTextSafe('← Prev'));
+    prevBtn.addEventListener('click', () => {
+      if (_currentPage > 1) {
+        _currentPage--;
+        loadList();
+      }
+    });
+    inner.appendChild(prevBtn);
+
+    // Page indicator
+    const pageInfo = document.createElement('span');
+    pageInfo.style.fontSize = '13px';
+    pageInfo.style.color = '#666';
+    pageInfo.appendChild(renderTextSafe(`Page ${_currentPage} of ${_totalPages}`));
+    inner.appendChild(pageInfo);
+
+    // Next button
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'btn btn-sm btn-secondary';
+    nextBtn.disabled = _currentPage >= _totalPages;
+    nextBtn.appendChild(renderTextSafe('Next →'));
+    nextBtn.addEventListener('click', () => {
+      if (_currentPage < _totalPages) {
+        _currentPage++;
+        loadList();
+      }
+    });
+    inner.appendChild(nextBtn);
+
+    container.appendChild(inner);
+  }
+
+  // ─── Debounced Search ─────────────────────────────────────
+
+  let _searchTimer = null;
+
+  function _onSearchInput() {
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      _currentPage = 1;
+      loadList();
+    }, DEBOUNCE_MS);
+  }
+
+  // ─── Detail Panel ─────────────────────────────────────────
+
+  /**
+   * Load a supplier's full detail and render the detail panel.
+   * @param {number} id - Supplier ID
+   */
+  async function loadDetail(id) {
+    // Check dirty before navigating away from current detail
+    if (currentSupplierId !== null && dirty) {
+      if (!confirm('You have unsaved changes. Discard them and view another supplier?')) {
+        return;
+      }
+    }
+
+    _clearError('supplierDetailError');
+    _clearDirty();
+
+    const listPanel = document.getElementById('suppliersListPanel');
+    const detailPanel = document.getElementById('supplierDetailPanel');
+    if (listPanel) listPanel.classList.add('hidden');
+    if (detailPanel) detailPanel.classList.remove('hidden');
+
+    // Show loading state
+    const content = document.getElementById('supplierDetailContent');
+    if (content) {
+      content.textContent = '';
+      const loadingDiv = document.createElement('div');
+      loadingDiv.style.textAlign = 'center';
+      loadingDiv.style.padding = '40px';
+      loadingDiv.style.color = '#888';
+      loadingDiv.appendChild(renderTextSafe('Loading supplier details...'));
+      content.appendChild(loadingDiv);
+    }
+
+    // Reset state
+    currentSupplierId = id;
+    _originalSupplier = null;
+    _originalContacts = [];
+    _originalAliases = [];
+    _originalBrands = [];
+    _originalProductTypes = [];
+    _originalCapabilities = [];
+    _currentContacts = [];
+    _currentAliases = [];
+    _currentBrands = [];
+    _currentProductTypes = [];
+    _currentCapabilities = [];
+
+    try {
+      const [supplier, contacts, aliases, capabilities] = await Promise.all([
+        _apiGet(`/suppliers/${id}`),
+        _apiGet(`/suppliers/${id}/contacts`),
+        _apiGet(`/suppliers/${id}/aliases`),
+        _apiGet(`/suppliers/${id}/capabilities`),
+      ]);
+
+      _originalSupplier = supplier;
+      _originalContacts = Array.isArray(contacts) ? contacts : [];
+      _originalAliases = Array.isArray(aliases) ? aliases : [];
+      _originalCapabilities = Array.isArray(capabilities) ? capabilities : [];
+
+      // Clone current state
+      _currentContacts = _originalContacts.map(c => ({ ...c }));
+      _currentAliases = _originalAliases.map(a => ({ ...a }));
+      _currentCapabilities = _originalCapabilities.map(c => ({ ...c }));
+
+      // Load brands and product types from the supplier (embedded)
+      _originalBrands = Array.isArray(supplier.brands) ? supplier.brands : [];
+      _originalProductTypes = Array.isArray(supplier.product_types) ? supplier.product_types : [];
+      _currentBrands = _originalBrands.map(b => ({ ...b }));
+      _currentProductTypes = _originalProductTypes.map(pt => ({ ...pt }));
+
+      _renderDetail(supplier);
+    } catch (e) {
+      if (e.status === 401 && typeof showLogin === 'function') {
+        showLogin();
+        return;
+      }
+      _showError('supplierDetailError', e.message || 'Failed to load supplier details');
+    }
+  }
+
+  /**
+   * Render the full detail form for a supplier.
+   * @param {Object} supplier
+   */
+  function _renderDetail(supplier) {
+    const content = document.getElementById('supplierDetailContent');
+    if (!content) return;
+    content.textContent = '';
+
+    // ── Back link ──
+    const backLink = document.createElement('a');
+    backLink.href = '#';
+    backLink.style.cssText = 'display:inline-block;margin-bottom:16px;font-size:13px;color:#3498db;cursor:pointer';
+    backLink.appendChild(renderTextSafe('← Back to list'));
+    backLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      _showListPanel();
+    });
+    content.appendChild(backLink);
+
+    // ── Display Name ──
+    const dnLabel = document.createElement('label');
+    dnLabel.className = 'supplier-field-label';
+    dnLabel.appendChild(renderTextSafe('Display Name *'));
+    content.appendChild(dnLabel);
+
+    const dnInput = document.createElement('input');
+    dnInput.type = 'text';
+    dnInput.id = 'supplierDisplayName';
+    dnInput.className = 'supplier-text-input';
+    dnInput.value = supplier.display_name || '';
+    dnInput.required = true;
+    dnInput.addEventListener('input', () => _setDirty());
+    content.appendChild(dnInput);
+
+    // ── Canonical Name (read-only) ──
+    const cnLabel = document.createElement('label');
+    cnLabel.className = 'supplier-field-label';
+    cnLabel.appendChild(renderTextSafe('Canonical Name'));
+    content.appendChild(cnLabel);
+
+    const cnInput = document.createElement('input');
+    cnInput.type = 'text';
+    cnInput.className = 'supplier-text-input';
+    cnInput.value = supplier.canonical_name || '';
+    cnInput.readOnly = true;
+    cnInput.style.background = '#f5f5f5';
+    cnInput.style.color = '#888';
+    content.appendChild(cnInput);
+
+    // ── Status ──
+    const stLabel = document.createElement('label');
+    stLabel.className = 'supplier-field-label';
+    stLabel.appendChild(renderTextSafe('Status'));
+    content.appendChild(stLabel);
+
+    const stSelect = document.createElement('select');
+    stSelect.id = 'supplierStatus';
+    stSelect.className = 'supplier-text-input';
+
+    const statuses = ['active', 'inactive'];
+    // Master sees 'review' option
+    if (typeof isMaster === 'function' && isMaster()) {
+      statuses.push('review');
+    }
+
+    for (const s of statuses) {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.appendChild(renderTextSafe(s.charAt(0).toUpperCase() + s.slice(1)));
+      if (s === (supplier.status || 'active')) opt.selected = true;
+      stSelect.appendChild(opt);
+    }
+    stSelect.addEventListener('change', () => _setDirty());
+    content.appendChild(stSelect);
+
+    // ── Aliases Section ──
+    const aliasesSection = document.createElement('div');
+    aliasesSection.className = 'supplier-detail-section';
+
+    const aliasesTitle = document.createElement('h4');
+    aliasesTitle.className = 'supplier-section-title';
+    aliasesTitle.appendChild(renderTextSafe('Aliases'));
+    aliasesSection.appendChild(aliasesTitle);
+
+    const aliasesContainer = document.createElement('div');
+    aliasesContainer.id = 'supplierAliasesContainer';
+    aliasesContainer.className = 'tag-chip-container';
+    aliasesSection.appendChild(aliasesContainer);
+
+    // Alias input + add button
+    const aliasInputRow = document.createElement('div');
+    aliasInputRow.style.display = 'flex';
+    aliasInputRow.style.gap = '8px';
+    aliasInputRow.style.marginTop = '8px';
+
+    const aliasInput = document.createElement('input');
+    aliasInput.type = 'text';
+    aliasInput.id = 'supplierAliasInput';
+    aliasInput.className = 'supplier-text-input';
+    aliasInput.style.flex = '1';
+    aliasInput.placeholder = 'Add alias...';
+    aliasInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        _addAlias();
+      }
+    });
+    aliasInputRow.appendChild(aliasInput);
+
+    if (canModify()) {
+      const addAliasBtn = document.createElement('button');
+      addAliasBtn.className = 'btn btn-sm btn-primary';
+      addAliasBtn.appendChild(renderTextSafe('Add'));
+      addAliasBtn.addEventListener('click', _addAlias);
+      aliasInputRow.appendChild(addAliasBtn);
+    }
+    aliasesSection.appendChild(aliasInputRow);
+
+    content.appendChild(aliasesSection);
+
+    // ── Contacts Section ──
+    const contactsSection = document.createElement('div');
+    contactsSection.className = 'supplier-detail-section';
+
+    const contactsTitle = document.createElement('h4');
+    contactsTitle.className = 'supplier-section-title';
+    contactsTitle.appendChild(renderTextSafe('Contacts'));
+    contactsSection.appendChild(contactsTitle);
+
+    const contactsContainer = document.createElement('div');
+    contactsContainer.id = 'supplierContactsContainer';
+    contactsSection.appendChild(contactsContainer);
+
+    if (canModify()) {
+      const addContactBtn = document.createElement('button');
+      addContactBtn.className = 'btn btn-sm btn-secondary';
+      addContactBtn.appendChild(renderTextSafe('+ Add Contact'));
+      addContactBtn.addEventListener('click', () => {
+        _currentContacts.push({
+          id: null,
+          name: '',
+          email: '',
+          phone: '',
+          role: '',
+          position: (_currentContacts.length + 1) * 10,
+          is_default_rfq: false,
+        });
+        _renderContacts();
+        _setDirty();
+      });
+      contactsSection.appendChild(addContactBtn);
+    }
+
+    content.appendChild(contactsSection);
+
+    // ── Brands Section ──
+    const brandsSection = document.createElement('div');
+    brandsSection.className = 'supplier-detail-section';
+
+    const brandsTitle = document.createElement('h4');
+    brandsTitle.className = 'supplier-section-title';
+    brandsTitle.appendChild(renderTextSafe('Brands'));
+    brandsSection.appendChild(brandsTitle);
+
+    const brandsContainer = document.createElement('div');
+    brandsContainer.id = 'supplierBrandsContainer';
+    brandsContainer.className = 'tag-chip-container';
+    brandsSection.appendChild(brandsContainer);
+
+    const brandInputRow = document.createElement('div');
+    brandInputRow.style.display = 'flex';
+    brandInputRow.style.gap = '8px';
+    brandInputRow.style.marginTop = '8px';
+    brandInputRow.style.position = 'relative';
+
+    const brandInput = document.createElement('input');
+    brandInput.type = 'text';
+    brandInput.id = 'supplierBrandInput';
+    brandInput.className = 'supplier-text-input';
+    brandInput.style.flex = '1';
+    brandInput.placeholder = 'Type to search brands...';
+    brandInput.autocomplete = 'off';
+    brandInput.addEventListener('input', () => _debouncedAutocomplete('brands'));
+    brandInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        _addBrandFromInput();
+      }
+    });
+    brandInputRow.appendChild(brandInput);
+
+    const brandDropdown = document.createElement('div');
+    brandDropdown.id = 'supplierBrandAutocomplete';
+    brandDropdown.className = 'autocomplete-dropdown hidden';
+    brandInputRow.appendChild(brandDropdown);
+
+    brandsSection.appendChild(brandInputRow);
+    content.appendChild(brandsSection);
+
+    // ── Product Types Section ──
+    const ptSection = document.createElement('div');
+    ptSection.className = 'supplier-detail-section';
+
+    const ptTitle = document.createElement('h4');
+    ptTitle.className = 'supplier-section-title';
+    ptTitle.appendChild(renderTextSafe('Product Types'));
+    ptSection.appendChild(ptTitle);
+
+    const ptContainer = document.createElement('div');
+    ptContainer.id = 'supplierProductTypesContainer';
+    ptContainer.className = 'tag-chip-container';
+    ptSection.appendChild(ptContainer);
+
+    const ptInputRow = document.createElement('div');
+    ptInputRow.style.display = 'flex';
+    ptInputRow.style.gap = '8px';
+    ptInputRow.style.marginTop = '8px';
+    ptInputRow.style.position = 'relative';
+
+    const ptInput = document.createElement('input');
+    ptInput.type = 'text';
+    ptInput.id = 'supplierProductTypeInput';
+    ptInput.className = 'supplier-text-input';
+    ptInput.style.flex = '1';
+    ptInput.placeholder = 'Type to search product types...';
+    ptInput.autocomplete = 'off';
+    ptInput.addEventListener('input', () => _debouncedAutocomplete('productTypes'));
+    ptInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        _addProductTypeFromInput();
+      }
+    });
+    ptInputRow.appendChild(ptInput);
+
+    const ptDropdown = document.createElement('div');
+    ptDropdown.id = 'supplierProductTypeAutocomplete';
+    ptDropdown.className = 'autocomplete-dropdown hidden';
+    ptInputRow.appendChild(ptDropdown);
+
+    ptSection.appendChild(ptInputRow);
+    content.appendChild(ptSection);
+
+    // ── Capabilities Section ──
+    const capSection = document.createElement('div');
+    capSection.className = 'supplier-detail-section';
+
+    const capTitle = document.createElement('h4');
+    capTitle.className = 'supplier-section-title';
+    capTitle.appendChild(renderTextSafe('Capabilities'));
+    capSection.appendChild(capTitle);
+
+    const capContainer = document.createElement('div');
+    capContainer.id = 'supplierCapabilitiesContainer';
+    capSection.appendChild(capContainer);
+
+    if (canModify()) {
+      const addCapBtn = document.createElement('button');
+      addCapBtn.className = 'btn btn-sm btn-secondary';
+      addCapBtn.appendChild(renderTextSafe('+ Add Capability'));
+      addCapBtn.addEventListener('click', () => {
+        _currentCapabilities.push({
+          id: null,
+          brand: '',
+          product_type: '',
+          verified: false,
+        });
+        _renderCapabilities();
+        _setDirty();
+      });
+      capSection.appendChild(addCapBtn);
+    }
+
+    content.appendChild(capSection);
+
+    // ── Notes ──
+    const notesSection = document.createElement('div');
+    notesSection.className = 'supplier-detail-section';
+
+    const notesTitle = document.createElement('h4');
+    notesTitle.className = 'supplier-section-title';
+    notesTitle.appendChild(renderTextSafe('Notes'));
+    notesSection.appendChild(notesTitle);
+
+    const notesTextarea = document.createElement('textarea');
+    notesTextarea.id = 'supplierNotes';
+    notesTextarea.className = 'supplier-text-input';
+    notesTextarea.style.minHeight = '80px';
+    notesTextarea.style.resize = 'vertical';
+    notesTextarea.value = supplier.notes || '';
+    notesTextarea.addEventListener('input', () => _setDirty());
+    notesSection.appendChild(notesTextarea);
+
+    content.appendChild(notesSection);
+
+    // ── Error container ──
+    const errContainer = document.createElement('div');
+    errContainer.id = 'supplierDetailError';
+    errContainer.className = 'supplier-error hidden';
+    content.appendChild(errContainer);
+
+    // ── Save button ──
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'supplier-detail-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.id = 'supplierSaveBtn';
+    saveBtn.className = 'btn btn-success';
+    saveBtn.disabled = true;
+    saveBtn.appendChild(renderTextSafe('Save'));
+    saveBtn.addEventListener('click', _saveSupplier);
+    actionsDiv.appendChild(saveBtn);
+
+    content.appendChild(actionsDiv);
+
+    // Render sub-components
+    _renderAliases();
+    _renderContacts();
+    _renderBrands();
+    _renderProductTypes();
+    _renderCapabilities();
+  }
+
+  // ─── Aliases ──────────────────────────────────────────────
+
+  function _addAlias() {
+    const input = document.getElementById('supplierAliasInput');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) return;
+    _currentAliases.push({ id: null, alias_name: name });
+    _renderAliases();
+    _setDirty();
+    input.value = '';
+    input.focus();
+  }
+
+  function _removeAlias(index) {
+    if (!confirm('Remove this alias?')) return;
+    _currentAliases.splice(index, 1);
+    _renderAliases();
+    _setDirty();
+  }
+
+  function _renderAliases() {
+    const container = document.getElementById('supplierAliasesContainer');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_currentAliases.length === 0) {
+      const empty = document.createElement('span');
+      empty.style.cssText = 'font-size:13px;color:#999';
+      empty.appendChild(renderTextSafe('No aliases.'));
+      container.appendChild(empty);
+      return;
+    }
+
+    for (let i = 0; i < _currentAliases.length; i++) {
+      const alias = _currentAliases[i];
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.appendChild(renderTextSafe(alias.alias_name || alias.name || ''));
+
+      if (canModify()) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'tag-chip-remove';
+        removeBtn.appendChild(renderTextSafe('×'));
+        removeBtn.title = 'Remove alias';
+        removeBtn.addEventListener('click', () => _removeAlias(i));
+        chip.appendChild(removeBtn);
+      }
+
+      container.appendChild(chip);
+    }
+  }
+
+  // ─── Contacts ─────────────────────────────────────────────
+
+  function _renderContacts() {
+    const container = document.getElementById('supplierContactsContainer');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_currentContacts.length === 0) {
+      const empty = document.createElement('p');
+      empty.style.cssText = 'font-size:13px;color:#999';
+      empty.appendChild(renderTextSafe('No contacts.'));
+      container.appendChild(empty);
+      return;
+    }
+
+    // Sort by position ASC
+    const sorted = [..._currentContacts].sort((a, b) => (a.position || 0) - (b.position || 0));
+
+    for (let i = 0; i < sorted.length; i++) {
+      // Find original index
+      const origIndex = _currentContacts.indexOf(sorted[i]);
+      if (origIndex === -1) continue;
+
+      const contact = sorted[i];
+      const row = document.createElement('div');
+      row.className = 'supplier-contact-row';
+
+      // Name
+      const nameGroup = document.createElement('div');
+      nameGroup.style.flex = '2';
+      const nameLabel = document.createElement('label');
+      nameLabel.className = 'supplier-contact-label';
+      nameLabel.appendChild(renderTextSafe('Name'));
+      nameGroup.appendChild(nameLabel);
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'supplier-text-input';
+      nameInput.value = contact.name || '';
+      nameInput.placeholder = 'Name';
+      nameInput.addEventListener('input', () => {
+        _currentContacts[origIndex].name = nameInput.value;
+        _setDirty();
+      });
+      nameGroup.appendChild(nameInput);
+      row.appendChild(nameGroup);
+
+      // Email
+      const emailGroup = document.createElement('div');
+      emailGroup.style.flex = '2';
+      const emailLabel = document.createElement('label');
+      emailLabel.className = 'supplier-contact-label';
+      emailLabel.appendChild(renderTextSafe('Email'));
+      emailGroup.appendChild(emailLabel);
+      const emailInput = document.createElement('input');
+      emailInput.type = 'email';
+      emailInput.className = 'supplier-text-input';
+      emailInput.value = contact.email || '';
+      emailInput.placeholder = 'Email';
+      emailInput.addEventListener('input', () => {
+        _currentContacts[origIndex].email = emailInput.value;
+        _setDirty();
+      });
+      emailGroup.appendChild(emailInput);
+      row.appendChild(emailGroup);
+
+      // Phone
+      const phoneGroup = document.createElement('div');
+      phoneGroup.style.flex = '1.5';
+      const phoneLabel = document.createElement('label');
+      phoneLabel.className = 'supplier-contact-label';
+      phoneLabel.appendChild(renderTextSafe('Phone'));
+      phoneGroup.appendChild(phoneLabel);
+      const phoneInput = document.createElement('input');
+      phoneInput.type = 'text';
+      phoneInput.className = 'supplier-text-input';
+      phoneInput.value = contact.phone || '';
+      phoneInput.placeholder = 'Phone';
+      phoneInput.addEventListener('input', () => {
+        _currentContacts[origIndex].phone = phoneInput.value;
+        _setDirty();
+      });
+      phoneGroup.appendChild(phoneInput);
+      row.appendChild(phoneGroup);
+
+      // Role
+      const roleGroup = document.createElement('div');
+      roleGroup.style.flex = '1.5';
+      const roleLabel = document.createElement('label');
+      roleLabel.className = 'supplier-contact-label';
+      roleLabel.appendChild(renderTextSafe('Role'));
+      roleGroup.appendChild(roleLabel);
+      const roleInput = document.createElement('input');
+      roleInput.type = 'text';
+      roleInput.className = 'supplier-text-input';
+      roleInput.value = contact.role || '';
+      roleInput.placeholder = 'Role';
+      roleInput.addEventListener('input', () => {
+        _currentContacts[origIndex].role = roleInput.value;
+        _setDirty();
+      });
+      roleGroup.appendChild(roleInput);
+      row.appendChild(roleGroup);
+
+      // Position
+      const posGroup = document.createElement('div');
+      posGroup.style.flex = '0.8';
+      const posLabel = document.createElement('label');
+      posLabel.className = 'supplier-contact-label';
+      posLabel.appendChild(renderTextSafe('Position'));
+      posGroup.appendChild(posLabel);
+      const posInput = document.createElement('input');
+      posInput.type = 'number';
+      posInput.className = 'supplier-text-input';
+      posInput.value = contact.position || 0;
+      posInput.style.width = '60px';
+      posInput.addEventListener('input', () => {
+        _currentContacts[origIndex].position = parseInt(posInput.value) || 0;
+        _setDirty();
+      });
+      posGroup.appendChild(posInput);
+      row.appendChild(posGroup);
+
+      // Default RFQ checkbox
+      const rfqGroup = document.createElement('div');
+      rfqGroup.style.flex = '0.8';
+      rfqGroup.style.display = 'flex';
+      rfqGroup.style.alignItems = 'center';
+      rfqGroup.style.gap = '4px';
+      const rfqCb = document.createElement('input');
+      rfqCb.type = 'checkbox';
+      rfqCb.id = `contactDefaultRfq_${origIndex}`;
+      rfqCb.checked = !!contact.is_default_rfq;
+      rfqCb.addEventListener('change', () => {
+        _currentContacts[origIndex].is_default_rfq = rfqCb.checked;
+        _setDirty();
+      });
+      rfqGroup.appendChild(rfqCb);
+      const rfqLabel = document.createElement('label');
+      rfqLabel.htmlFor = rfqCb.id;
+      rfqLabel.className = 'supplier-contact-label';
+      rfqLabel.style.marginBottom = '0';
+      rfqLabel.appendChild(renderTextSafe('RFQ'));
+      rfqGroup.appendChild(rfqLabel);
+      row.appendChild(rfqGroup);
+
+      // Remove button
+      if (canModify()) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-sm btn-danger';
+        removeBtn.appendChild(renderTextSafe('Remove'));
+        removeBtn.style.alignSelf = 'flex-end';
+        removeBtn.addEventListener('click', () => {
+          if (!confirm('Remove this contact?')) return;
+          _currentContacts.splice(origIndex, 1);
+          _renderContacts();
+          _setDirty();
+        });
+        row.appendChild(removeBtn);
+      }
+
+      container.appendChild(row);
+    }
+  }
+
+  // ─── Brands ───────────────────────────────────────────────
+
+  function _renderBrands() {
+    const container = document.getElementById('supplierBrandsContainer');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_currentBrands.length === 0) {
+      const empty = document.createElement('span');
+      empty.style.cssText = 'font-size:13px;color:#999';
+      empty.appendChild(renderTextSafe('No brands.'));
+      container.appendChild(empty);
+      return;
+    }
+
+    for (let i = 0; i < _currentBrands.length; i++) {
+      const brand = _currentBrands[i];
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.appendChild(renderTextSafe(brand.name || brand.brand_name || ''));
+
+      if (canModify()) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'tag-chip-remove';
+        removeBtn.appendChild(renderTextSafe('×'));
+        removeBtn.title = 'Remove brand';
+        removeBtn.addEventListener('click', () => {
+          if (!confirm('Remove this brand?')) return;
+          _currentBrands.splice(i, 1);
+          _renderBrands();
+          _setDirty();
+        });
+        chip.appendChild(removeBtn);
+      }
+
+      container.appendChild(chip);
+    }
+  }
+
+  function _addBrandFromInput() {
+    const input = document.getElementById('supplierBrandInput');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) return;
+
+    // Check for duplicate
+    const exists = _currentBrands.some(b =>
+      (b.name || b.brand_name || '').toLowerCase() === name.toLowerCase()
+    );
+    if (exists) return;
+
+    _currentBrands.push({ id: null, name: name });
+    _renderBrands();
+    _setDirty();
+    input.value = '';
+    input.focus();
+    _hideAutocomplete('brands');
+  }
+
+  // ─── Product Types ────────────────────────────────────────
+
+  function _renderProductTypes() {
+    const container = document.getElementById('supplierProductTypesContainer');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_currentProductTypes.length === 0) {
+      const empty = document.createElement('span');
+      empty.style.cssText = 'font-size:13px;color:#999';
+      empty.appendChild(renderTextSafe('No product types.'));
+      container.appendChild(empty);
+      return;
+    }
+
+    for (let i = 0; i < _currentProductTypes.length; i++) {
+      const pt = _currentProductTypes[i];
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.appendChild(renderTextSafe(pt.name || pt.product_type_name || ''));
+
+      if (canModify()) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'tag-chip-remove';
+        removeBtn.appendChild(renderTextSafe('×'));
+        removeBtn.title = 'Remove product type';
+        removeBtn.addEventListener('click', () => {
+          if (!confirm('Remove this product type?')) return;
+          _currentProductTypes.splice(i, 1);
+          _renderProductTypes();
+          _setDirty();
+        });
+        chip.appendChild(removeBtn);
+      }
+
+      container.appendChild(chip);
+    }
+  }
+
+  function _addProductTypeFromInput() {
+    const input = document.getElementById('supplierProductTypeInput');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) return;
+
+    const exists = _currentProductTypes.some(pt =>
+      (pt.name || pt.product_type_name || '').toLowerCase() === name.toLowerCase()
+    );
+    if (exists) return;
+
+    _currentProductTypes.push({ id: null, name: name });
+    _renderProductTypes();
+    _setDirty();
+    input.value = '';
+    input.focus();
+    _hideAutocomplete('productTypes');
+  }
+
+  // ─── Capabilities ─────────────────────────────────────────
+
+  function _renderCapabilities() {
+    const container = document.getElementById('supplierCapabilitiesContainer');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_currentCapabilities.length === 0) {
+      const empty = document.createElement('p');
+      empty.style.cssText = 'font-size:13px;color:#999';
+      empty.appendChild(renderTextSafe('No capabilities.'));
+      container.appendChild(empty);
+      return;
+    }
+
+    for (let i = 0; i < _currentCapabilities.length; i++) {
+      const cap = _currentCapabilities[i];
+      const row = document.createElement('div');
+      row.className = 'supplier-capability-row';
+
+      // Brand
+      const brandGroup = document.createElement('div');
+      brandGroup.style.flex = '2';
+      const brandLabel = document.createElement('label');
+      brandLabel.className = 'supplier-contact-label';
+      brandLabel.appendChild(renderTextSafe('Brand'));
+      brandGroup.appendChild(brandLabel);
+      const brandSelect = document.createElement('select');
+      brandSelect.className = 'supplier-text-input';
+      const brandOpt = document.createElement('option');
+      brandOpt.value = '';
+      brandOpt.appendChild(renderTextSafe('— Select —'));
+      brandSelect.appendChild(brandOpt);
+      for (const b of _currentBrands) {
+        const opt = document.createElement('option');
+        opt.value = b.name || b.brand_name || '';
+        opt.appendChild(renderTextSafe(b.name || b.brand_name || ''));
+        if (opt.value === (cap.brand || '')) opt.selected = true;
+        brandSelect.appendChild(opt);
+      }
+      brandSelect.addEventListener('change', () => {
+        _currentCapabilities[i].brand = brandSelect.value;
+        _setDirty();
+      });
+      brandGroup.appendChild(brandSelect);
+      row.appendChild(brandGroup);
+
+      // Product Type
+      const ptGroup = document.createElement('div');
+      ptGroup.style.flex = '2';
+      const ptLabel = document.createElement('label');
+      ptLabel.className = 'supplier-contact-label';
+      ptLabel.appendChild(renderTextSafe('Product Type'));
+      ptGroup.appendChild(ptLabel);
+      const ptSelect = document.createElement('select');
+      ptSelect.className = 'supplier-text-input';
+      const ptOpt = document.createElement('option');
+      ptOpt.value = '';
+      ptOpt.appendChild(renderTextSafe('— Select —'));
+      ptSelect.appendChild(ptOpt);
+      for (const pt of _currentProductTypes) {
+        const opt = document.createElement('option');
+        opt.value = pt.name || pt.product_type_name || '';
+        opt.appendChild(renderTextSafe(pt.name || pt.product_type_name || ''));
+        if (opt.value === (cap.product_type || '')) opt.selected = true;
+        ptSelect.appendChild(opt);
+      }
+      ptSelect.addEventListener('change', () => {
+        _currentCapabilities[i].product_type = ptSelect.value;
+        _setDirty();
+      });
+      ptGroup.appendChild(ptSelect);
+      row.appendChild(ptGroup);
+
+      // Verified toggle (Master only)
+      if (typeof isMaster === 'function' && isMaster()) {
+        const verGroup = document.createElement('div');
+        verGroup.style.flex = '0.8';
+        verGroup.style.display = 'flex';
+        verGroup.style.alignItems = 'center';
+        verGroup.style.gap = '4px';
+        const verCb = document.createElement('input');
+        verCb.type = 'checkbox';
+        verCb.id = `capVerified_${i}`;
+        verCb.checked = !!cap.verified;
+        verCb.addEventListener('change', () => {
+          _currentCapabilities[i].verified = verCb.checked;
+          _setDirty();
+        });
+        verGroup.appendChild(verCb);
+        const verLabel = document.createElement('label');
+        verLabel.htmlFor = verCb.id;
+        verLabel.className = 'supplier-contact-label';
+        verLabel.style.marginBottom = '0';
+        verLabel.appendChild(renderTextSafe('Verified'));
+        verGroup.appendChild(verLabel);
+        row.appendChild(verGroup);
+      }
+
+      // Remove button
+      if (canModify()) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-sm btn-danger';
+        removeBtn.appendChild(renderTextSafe('Remove'));
+        removeBtn.style.alignSelf = 'flex-end';
+        removeBtn.addEventListener('click', () => {
+          if (!confirm('Remove this capability?')) return;
+          _currentCapabilities.splice(i, 1);
+          _renderCapabilities();
+          _setDirty();
+        });
+        row.appendChild(removeBtn);
+      }
+
+      container.appendChild(row);
+    }
+  }
+
+  // ─── Autocomplete ─────────────────────────────────────────
+
+  function _debouncedAutocomplete(type) {
+    if (autocompleteControllers[type]) {
+      autocompleteControllers[type].abort();
+    }
+    let timerKey = type + 'Timer';
+    if (window.Suppliers[timerKey]) {
+      clearTimeout(window.Suppliers[timerKey]);
+    }
+    window.Suppliers[timerKey] = setTimeout(() => {
+      _fetchAutocomplete(type);
+    }, DEBOUNCE_MS);
+  }
+
+  async function _fetchAutocomplete(type) {
+    const inputId = type === 'brands' ? 'supplierBrandInput' : 'supplierProductTypeInput';
+    const dropdownId = type === 'brands' ? 'supplierBrandAutocomplete' : 'supplierProductTypeAutocomplete';
+    const endpoint = type === 'brands' ? '/brands' : '/product-types';
+
+    const input = document.getElementById(inputId);
+    const dropdown = document.getElementById(dropdownId);
+    if (!input || !dropdown) return;
+
+    const q = input.value.trim();
+    if (q.length < AUTOCOMPLETE_MIN_CHARS) {
+      _hideAutocomplete(type);
+      return;
+    }
+
+    const controller = new AbortController();
+    autocompleteControllers[type] = controller;
+
+    try {
+      const url = `${endpoint}?q=${encodeURIComponent(q)}&limit=${AUTOCOMPLETE_MAX_RESULTS}`;
+      const resp = await fetch(url, {
+        credentials: 'include',
+        signal: controller.signal,
+      });
+      if (resp.status === 401) {
+        if (typeof showLogin === 'function') showLogin();
+        return;
+      }
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const items = Array.isArray(data) ? data : (data.brands || data.product_types || []);
+      _renderAutocomplete(dropdownId, items, type);
+    } catch (e) {
+      // AbortError is expected, ignore
+      if (e.name !== 'AbortError') {
+        console.warn('Autocomplete error:', e.message);
+      }
+    }
+  }
+
+  function _renderAutocomplete(dropdownId, items, type) {
+    const dropdown = document.getElementById(dropdownId);
+    if (!dropdown) return;
+    dropdown.textContent = '';
+
+    if (!items || items.length === 0) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+
+    dropdown.classList.remove('hidden');
+
+    for (const item of items) {
+      const div = document.createElement('div');
+      div.className = 'autocomplete-item';
+      const name = item.name || item.brand_name || item.product_type_name || '';
+      div.appendChild(renderTextSafe(name));
+      div.addEventListener('click', () => {
+        if (type === 'brands') {
+          const exists = _currentBrands.some(b =>
+            (b.name || b.brand_name || '').toLowerCase() === name.toLowerCase()
+          );
+          if (!exists) {
+            _currentBrands.push({ id: null, name: name });
+            _renderBrands();
+            _setDirty();
+          }
+        } else {
+          const exists = _currentProductTypes.some(pt =>
+            (pt.name || pt.product_type_name || '').toLowerCase() === name.toLowerCase()
+          );
+          if (!exists) {
+            _currentProductTypes.push({ id: null, name: name });
+            _renderProductTypes();
+            _setDirty();
+          }
+        }
+        document.getElementById(type === 'brands' ? 'supplierBrandInput' : 'supplierProductTypeInput').value = '';
+        _hideAutocomplete(type);
+      });
+      dropdown.appendChild(div);
+    }
+  }
+
+  function _hideAutocomplete(type) {
+    const id = type === 'brands' ? 'supplierBrandAutocomplete' : 'supplierProductTypeAutocomplete';
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  }
+
+  // Hide dropdown on click outside
+  document.addEventListener('click', function (e) {
+    const brandDropdown = document.getElementById('supplierBrandAutocomplete');
+    const brandInput = document.getElementById('supplierBrandInput');
+    if (brandDropdown && !brandDropdown.classList.contains('hidden')) {
+      if (brandInput && !brandInput.contains(e.target) && !brandDropdown.contains(e.target)) {
+        brandDropdown.classList.add('hidden');
+      }
+    }
+    const ptDropdown = document.getElementById('supplierProductTypeAutocomplete');
+    const ptInput = document.getElementById('supplierProductTypeInput');
+    if (ptDropdown && !ptDropdown.classList.contains('hidden')) {
+      if (ptInput && !ptInput.contains(e.target) && !ptDropdown.contains(e.target)) {
+        ptDropdown.classList.add('hidden');
+      }
+    }
+  });
+
+  // ─── Save ─────────────────────────────────────────────────
+
+  async function _saveSupplier() {
+    const errorEl = document.getElementById('supplierDetailError');
+    if (errorEl) errorEl.classList.add('hidden');
+
+    const saveBtn = document.getElementById('supplierSaveBtn');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+    }
+
+    try {
+      // ── Validate ──
+      const displayName = document.getElementById('supplierDisplayName');
+      if (!displayName || !displayName.value.trim()) {
+        throw new Error('Display Name is required.');
+      }
+
+      // Basic email validation (UX only)
+      for (const contact of _currentContacts) {
+        if (contact.email) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(contact.email)) {
+            throw new Error(`Invalid email format for contact "${contact.name || '(unnamed)'}".`);
+          }
+        }
+      }
+
+      // ── 1. Save supplier main fields ──
+      const statusSelect = document.getElementById('supplierStatus');
+      const notesTextarea = document.getElementById('supplierNotes');
+
+      const supplierData = {
+        display_name: displayName.value.trim(),
+        status: statusSelect ? statusSelect.value : 'active',
+        notes: notesTextarea ? notesTextarea.value : '',
+      };
+
+      const updatedSupplier = await _apiPut(`/suppliers/${currentSupplierId}`, supplierData);
+
+      // ── 2. Sync contacts ──
+      // Diff: find removed, added, updated
+      const origContactIds = _originalContacts.map(c => c.id).filter(id => id != null);
+      const currentContactIds = _currentContacts.map(c => c.id).filter(id => id != null);
+
+      // Removed contacts (in original but not in current)
+      for (const origC of _originalContacts) {
+        if (origC.id && !_currentContacts.some(c => c.id === origC.id)) {
+          await _apiDelete(`/suppliers/${currentSupplierId}/contacts/${origC.id}`);
+        }
+      }
+
+      // Added or updated contacts
+      for (const contact of _currentContacts) {
+        const body = {
+          name: contact.name || '',
+          email: contact.email || '',
+          phone: contact.phone || '',
+          role: contact.role || '',
+          position: contact.position || 0,
+          is_default_rfq: !!contact.is_default_rfq,
+        };
+        if (contact.id) {
+          await _apiPut(`/suppliers/${currentSupplierId}/contacts/${contact.id}`, body);
+        } else {
+          await _apiPost(`/suppliers/${currentSupplierId}/contacts`, body);
+        }
+      }
+
+      // ── 3. Sync aliases ──
+      for (const origA of _originalAliases) {
+        if (origA.id && !_currentAliases.some(a => a.id === origA.id)) {
+          await _apiDelete(`/suppliers/${currentSupplierId}/aliases/${origA.id}`);
+        }
+      }
+      for (const alias of _currentAliases) {
+        if (!alias.id) {
+          await _apiPost(`/suppliers/${currentSupplierId}/aliases`, { alias_name: alias.alias_name || alias.name || '' });
+        }
+      }
+
+      // ── 4. Sync brands ──
+      // Brands are managed via the supplier's brand list
+      // We diff against the original brands
+      for (const origB of _originalBrands) {
+        if (origB.id && !_currentBrands.some(b => b.id === origB.id)) {
+          await _apiDelete(`/suppliers/${currentSupplierId}/brands/${origB.id}`);
+        }
+      }
+      for (const brand of _currentBrands) {
+        if (!brand.id) {
+          await _apiPost(`/suppliers/${currentSupplierId}/brands`, { name: brand.name || brand.brand_name || '' });
+        }
+      }
+
+      // ── 5. Sync product types ──
+      for (const origPt of _originalProductTypes) {
+        if (origPt.id && !_currentProductTypes.some(pt => pt.id === origPt.id)) {
+          await _apiDelete(`/suppliers/${currentSupplierId}/product-types/${origPt.id}`);
+        }
+      }
+      for (const pt of _currentProductTypes) {
+        if (!pt.id) {
+          await _apiPost(`/suppliers/${currentSupplierId}/product-types`, { name: pt.name || pt.product_type_name || '' });
+        }
+      }
+
+      // ── 6. Sync capabilities ──
+      for (const origCap of _originalCapabilities) {
+        if (origCap.id && !_currentCapabilities.some(c => c.id === origCap.id)) {
+          await _apiDelete(`/suppliers/${currentSupplierId}/capabilities/${origCap.id}`);
+        }
+      }
+      for (let i = 0; i < _currentCapabilities.length; i++) {
+        const cap = _currentCapabilities[i];
+        const body = {
+          brand: cap.brand || '',
+          product_type: cap.product_type || '',
+          verified: !!cap.verified,
+        };
+        if (cap.id) {
+          await _apiPut(`/suppliers/${currentSupplierId}/capabilities/${cap.id}`, body);
+        } else {
+          await _apiPost(`/suppliers/${currentSupplierId}/capabilities`, body);
+        }
+      }
+
+      // ── 7. Reload from server for authoritative state ──
+      await loadDetail(currentSupplierId);
+      _showSuccess('Supplier saved successfully.');
+    } catch (e) {
+      if (e.status === 401 && typeof showLogin === 'function') {
+        showLogin();
+        return;
+      }
+      let msg = e.message || 'Something went wrong. Please try again.';
+      if (e.status === 403) {
+        msg = 'You do not have permission for this action.';
+      } else if (e.status === 409) {
+        msg = 'Duplicate value (e.g. canonical name or alias already exists).';
+      } else if (e.status >= 500) {
+        msg = 'Something went wrong. Please try again.';
+      }
+      _showError('supplierDetailError', msg);
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      }
+    }
+  }
+
+  // ─── New Supplier ─────────────────────────────────────────
+
+  /**
+   * Create a new supplier and navigate to its detail.
+   */
+  async function newSupplier() {
+    if (dirty) {
+      if (!confirm('You have unsaved changes. Discard them?')) return;
+    }
+
+    // Prompt for canonical name
+    const name = prompt('Enter canonical name for the new supplier:');
+    if (!name || !name.trim()) return;
+
+    _clearError('supplierDetailError');
+
+    try {
+      const result = await _apiPost('/suppliers', { canonical_name: name.trim() });
+      if (result && result.id) {
+        await loadDetail(result.id);
+        _showSuccess('New supplier created.');
+      }
+    } catch (e) {
+      if (e.status === 401 && typeof showLogin === 'function') {
+        showLogin();
+        return;
+      }
+      let msg = e.message || 'Failed to create supplier.';
+      if (e.status === 409) {
+        msg = 'A supplier with this canonical name already exists.';
+      } else if (e.status >= 500) {
+        msg = 'Something went wrong. Please try again.';
+      }
+      _showError('supplierDetailError', msg);
+    }
+  }
+
+  // ─── Panel Navigation ─────────────────────────────────────
+
+  function _showListPanel() {
+    if (dirty) {
+      if (!confirm('You have unsaved changes. Discard them?')) return;
+    }
+    _clearDirty();
+    currentSupplierId = null;
+    const listPanel = document.getElementById('suppliersListPanel');
+    const detailPanel = document.getElementById('supplierDetailPanel');
+    if (listPanel) listPanel.classList.remove('hidden');
+    if (detailPanel) detailPanel.classList.add('hidden');
+    _currentPage = 1;
+    loadList();
+  }
+
+  // ─── Public API ───────────────────────────────────────────
+
+  return {
+    // State (read-only access for nav guard)
+    get dirty() { return dirty; },
+    get currentSupplierId() { return currentSupplierId; },
+
+    // Constants
+    DEBOUNCE_MS: DEBOUNCE_MS,
+    AUTOCOMPLETE_MIN_CHARS: AUTOCOMPLETE_MIN_CHARS,
+    AUTOCOMPLETE_MAX_RESULTS: AUTOCOMPLETE_MAX_RESULTS,
+
+    // Safe render helper (exported for testability)
+    renderTextSafe: renderTextSafe,
+
+    // Public methods
+    loadList: loadList,
+    loadDetail: loadDetail,
+    newSupplier: newSupplier,
+
+    // Internal (exposed for inline handlers + testability)
+    _onSearchInput: _onSearchInput,
+    _showListPanel: _showListPanel,
+    _setDirty: _setDirty,
+    _clearDirty: _clearDirty,
+  };
+
+})();
