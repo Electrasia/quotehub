@@ -630,6 +630,33 @@ def _v3_suppliers_backfill(db):
 MIGRATIONS[3] = _v3_suppliers_backfill
 
 
+# ─── Migration v4: supplier_brands junction table ───────────────────────
+
+def _v4_supplier_brands(db):
+    """Create ``supplier_brands`` junction table for per-supplier brand associations.
+
+    Added after v2 shipped — existing databases need this DDL applied.
+    Idempotent (IF NOT EXISTS).
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_brands (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            brand_id    INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(supplier_id, brand_id)
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_brands_supplier"
+        " ON supplier_brands(supplier_id)"
+    )
+    logger.info("Migration v4 complete: supplier_brands table created")
+
+
+MIGRATIONS[4] = _v4_supplier_brands
+
+
 def _init_schema_version(db):
     """Create the _schema_version table and seed with version 0 if empty.
 
