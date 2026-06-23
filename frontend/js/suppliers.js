@@ -591,7 +591,7 @@ window.Suppliers = (function () {
           phone: '',
           role: '',
           position: (_currentContacts.length + 1) * 10,
-          is_default_rfq: false,
+          is_default_rfq_contact: false,
         });
         _renderContacts();
         _setDirty();
@@ -962,9 +962,9 @@ window.Suppliers = (function () {
       const rfqCb = document.createElement('input');
       rfqCb.type = 'checkbox';
       rfqCb.id = `contactDefaultRfq_${origIndex}`;
-      rfqCb.checked = !!contact.is_default_rfq;
+      rfqCb.checked = !!(contact.is_default_rfq_contact || contact.is_default_rfq);
       rfqCb.addEventListener('change', () => {
-        _currentContacts[origIndex].is_default_rfq = rfqCb.checked;
+        _currentContacts[origIndex].is_default_rfq_contact = rfqCb.checked;
         _setDirty();
       });
       rfqGroup.appendChild(rfqCb);
@@ -1353,6 +1353,26 @@ window.Suppliers = (function () {
     }
   });
 
+  // ─── Sync step helper (isolated error handling) ──────────
+
+  /**
+   * Run a sync step with isolated error handling.
+   * Critical errors (401, 403) propagate. Non-critical errors (404, 409, 422, 500)
+   * are logged as warnings and the step is skipped — subsequent steps still run.
+   * Returns true if the step succeeded, false otherwise.
+   */
+  async function _syncStep(label, fn) {
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      if (e.status === 401) throw e;
+      if (e.status === 403) throw e;
+      console.warn(`[suppliers] Sync step "${label}" failed, skipping:`, e.message);
+      return false;
+    }
+  }
+
   // ─── Save ─────────────────────────────────────────────────
 
   async function _saveSupplier() {
@@ -1364,6 +1384,8 @@ window.Suppliers = (function () {
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving...';
     }
+
+    let failedSteps = [];
 
     try {
       // ── Validate ──
@@ -1395,83 +1417,90 @@ window.Suppliers = (function () {
       const updatedSupplier = await _apiPut(`/suppliers/${currentSupplierId}`, supplierData);
 
       // ── 2. Sync contacts ──
-      // Diff: find removed, added, updated
-      const origContactIds = _originalContacts.map(c => c.id).filter(id => id != null);
-      const currentContactIds = _currentContacts.map(c => c.id).filter(id => id != null);
-
-      // Removed contacts (in original but not in current)
-      for (const origC of _originalContacts) {
-        if (origC.id && !_currentContacts.some(c => c.id === origC.id)) {
-          await _apiDelete(`/suppliers/${currentSupplierId}/contacts/${origC.id}`);
+      if (!await _syncStep('contacts', async () => {
+        // Removed contacts (in original but not in current)
+        for (const origC of _originalContacts) {
+          if (origC.id && !_currentContacts.some(c => c.id === origC.id)) {
+            await _apiDelete(`/suppliers/${currentSupplierId}/contacts/${origC.id}`);
+          }
         }
-      }
 
-      // Added or updated contacts
-      for (const contact of _currentContacts) {
-        const body = {
-          name: contact.name || '',
-          email: contact.email || '',
-          phone: contact.phone || '',
-          role: contact.role || '',
-          position: contact.position || 0,
-          is_default_rfq: !!contact.is_default_rfq,
-        };
-        if (contact.id) {
-          await _apiPut(`/suppliers/${currentSupplierId}/contacts/${contact.id}`, body);
-        } else {
-          await _apiPost(`/suppliers/${currentSupplierId}/contacts`, body);
+        // Added or updated contacts
+        for (const contact of _currentContacts) {
+          const body = {
+            name: contact.name || '',
+            email: contact.email || '',
+            phone: contact.phone || '',
+            role: contact.role || '',
+            position: contact.position || 0,
+            is_default_rfq_contact: !!(contact.is_default_rfq_contact || contact.is_default_rfq),
+          };
+          if (contact.id) {
+            await _apiPut(`/suppliers/${currentSupplierId}/contacts/${contact.id}`, body);
+          } else {
+            await _apiPost(`/suppliers/${currentSupplierId}/contacts`, body);
+          }
         }
+      })) {
+        failedSteps.push('contacts');
       }
 
       // ── 3. Sync aliases ──
-      for (const origA of _originalAliases) {
-        if (origA.id && !_currentAliases.some(a => a.id === origA.id)) {
-          await _apiDelete(`/suppliers/${currentSupplierId}/aliases/${origA.id}`);
+      if (!await _syncStep('aliases', async () => {
+        for (const origA of _originalAliases) {
+          if (origA.id && !_currentAliases.some(a => a.id === origA.id)) {
+            await _apiDelete(`/suppliers/${currentSupplierId}/aliases/${origA.id}`);
+          }
         }
-      }
-      for (const alias of _currentAliases) {
-        if (!alias.id) {
-          await _apiPost(`/suppliers/${currentSupplierId}/aliases`, { alias: alias.alias_name || alias.name || '' });
+        for (const alias of _currentAliases) {
+          if (!alias.id) {
+            await _apiPost(`/suppliers/${currentSupplierId}/aliases`, { alias: alias.alias_name || alias.alias || '' });
+          }
         }
+      })) {
+        failedSteps.push('aliases');
       }
 
       // ── 4. Sync brands ──
       // Supplier-scoped brand sync is skipped because the backend does not expose
       // brand sub-resource endpoints under /suppliers/{id}/brands. Brands are
       // only managed globally via POST /brands and GET /brands, not per-supplier.
-      // Brands are still displayed and embedded in the supplier detail response.
 
       // ── 5. Sync product types ──
       // Same rationale as brands — no per-supplier product-type endpoints exist.
-      // Product types are managed globally via POST /product-types and GET /product-types.
 
       // ── 6. Sync capabilities ──
-      for (const origCap of _originalCapabilities) {
-        if (origCap.id && !_currentCapabilities.some(c => c.id === origCap.id)) {
-          await _apiDelete(`/suppliers/${currentSupplierId}/capabilities/${origCap.id}`);
+      if (!await _syncStep('capabilities', async () => {
+        for (const origCap of _originalCapabilities) {
+          if (origCap.id && !_currentCapabilities.some(c => c.id === origCap.id)) {
+            await _apiDelete(`/suppliers/${currentSupplierId}/capabilities/${origCap.id}`);
+          }
         }
-      }
-      for (let i = 0; i < _currentCapabilities.length; i++) {
-        const cap = _currentCapabilities[i];
-        const body = {
-          brand: cap.brand || '',
-          product_type: cap.product_type || '',
-          verified: !!cap.verified,
-        };
-        if (cap.id) {
-          await _apiPut(`/suppliers/${currentSupplierId}/capabilities/${cap.id}`, body);
-        } else {
-          await _apiPost(`/suppliers/${currentSupplierId}/capabilities`, body);
+        for (let i = 0; i < _currentCapabilities.length; i++) {
+          const cap = _currentCapabilities[i];
+          const body = {
+            brand: cap.brand || '',
+            product_type: cap.product_type || '',
+            verified: !!cap.verified,
+          };
+          if (cap.id) {
+            await _apiPut(`/suppliers/${currentSupplierId}/capabilities/${cap.id}`, body);
+          } else {
+            await _apiPost(`/suppliers/${currentSupplierId}/capabilities`, body);
+          }
         }
+      })) {
+        failedSteps.push('capabilities');
       }
 
       // ── 7. Clear dirty flag & reload from server ──
-      // Clear dirty BEFORE loadDetail so the confirm dialog at the top of
-      // loadDetail doesn't trigger (dirty was set by edit handlers that
-      // ran before the save button was clicked).
       _clearDirty();
       await loadDetail(currentSupplierId);
-      _showSuccess('Supplier saved successfully.');
+      let successMsg = 'Supplier saved successfully.';
+      if (failedSteps.length) {
+        successMsg += ' Some sub-resources could not be saved: ' + failedSteps.join(', ') + '. See console for details.';
+      }
+      _showSuccess(successMsg);
     } catch (e) {
       if (e.status === 401 && typeof showLogin === 'function') {
         showLogin();
