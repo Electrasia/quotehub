@@ -296,24 +296,25 @@ async def get_supplier(supplier_id: int):
         ]
 
         # Fetch capabilities (with brand and product_type names)
+        rows = db.execute(
+            """SELECT c.*, b.name AS brand_name, pt.name AS product_type_name
+               FROM supplier_capabilities c
+               JOIN brands b ON b.id = c.brand_id
+               JOIN product_types pt ON pt.id = c.product_type_id
+               WHERE c.supplier_id = ?
+               ORDER BY c.id""",
+            (supplier_id,),
+        ).fetchall()
         capabilities = [
             {
-                "id": r["id"],
-                "brand": bname,
-                "product_type": ptname,
-                "verified": r["verified"],
-                "created_at": r["created_at"],
-                "updated_at": r["updated_at"],
+                "id": row["id"],
+                "brand": row["brand_name"],
+                "product_type": row["product_type_name"],
+                "verified": row["verified"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
             }
-            for r, bname, ptname in db.execute(
-                """SELECT c.*, b.name AS brand_name, pt.name AS product_type_name
-                   FROM supplier_capabilities c
-                   JOIN brands b ON b.id = c.brand_id
-                   JOIN product_types pt ON pt.id = c.product_type_id
-                   WHERE c.supplier_id = ?
-                   ORDER BY c.id""",
-                (supplier_id,),
-            ).fetchall()
+            for row in rows
         ]
 
     supplier["aliases"] = aliases
