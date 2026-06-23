@@ -1864,3 +1864,145 @@ class TestPurgeSupplier:
         # And the purge entry exists too
         self._assert_audit_log_exists(sid, "purge_supplier")
 
+
+# =============================================================================
+# SUPPLIER BRANDS
+# =============================================================================
+
+
+class TestSupplierBrands:
+    """Tests for per-supplier brand CRUD endpoints."""
+
+    def _create_supplier(self, client, name="Brand Corp"):
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_list_brands_empty(self, admin_client):
+        """New supplier starts with no brands."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.get(f"/suppliers/{sid}/brands")
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+    def test_add_brand(self, admin_client):
+        """Admin can add a brand to a supplier."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "sony"
+        assert "id" in data
+        assert "brand_id" in data
+
+    def test_add_brand_normalizes(self, admin_client):
+        """Brand name is normalised on add."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/brands", json={"name": "  SAMSUNG  "})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "samsung"
+
+    def test_add_brand_creates_global(self, admin_client):
+        """Adding a brand creates it in the global brands table if needed."""
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/brands", json={"name": "NewGlobalBrand"})
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute("SELECT id FROM brands WHERE name = ?", ("newglobalbrand",)).fetchone()
+            assert row is not None
+
+    def test_add_brand_duplicate_409(self, admin_client):
+        """Adding the same brand twice returns 409."""
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        resp = admin_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        assert resp.status_code == 409
+
+    def test_add_brand_empty_422(self, admin_client):
+        """Empty brand name returns 422."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/brands", json={"name": "   "})
+        assert resp.status_code == 422
+
+    def test_list_brands_after_add(self, admin_client):
+        """List returns added brands."""
+        sid = self._create_supplier(admin_client)
+        admin_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        admin_client.post(f"/suppliers/{sid}/brands", json={"name": "Samsung"})
+        resp = admin_client.get(f"/suppliers/{sid}/brands")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 2
+        names = {b["name"] for b in items}
+        assert names == {"samsung", "sony"}
+
+    def test_remove_brand(self, admin_client):
+        """Admin can remove a brand from a supplier."""
+        sid = self._create_supplier(admin_client)
+        add_resp = admin_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        sb_id = add_resp.json()["id"]
+        resp = admin_client.delete(f"/suppliers/{sid}/brands/{sb_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        # Verify removed
+        list_resp = admin_client.get(f"/suppliers/{sid}/brands")
+        assert list_resp.json()["items"] == []
+
+    def test_remove_brand_404(self, admin_client):
+        """Removing non-existent brand returns 404."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.delete(f"/suppliers/{sid}/brands/99999")
+        assert resp.status_code == 404
+
+    def test_brand_audit_log(self, admin_client):
+        """Brand add/remove writes to audit log."""
+        sid = self._create_supplier(admin_client)
+        add_resp = admin_client.post(f"/suppliers/{sid}/brands", json={"name": "AuditedBrand"})
+        sb_id = add_resp.json()["id"]
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("add_supplier_brand", sid),
+            ).fetchone()
+            assert row is not None
+            assert row["actor"] == "admin"
+
+        admin_client.delete(f"/suppliers/{sid}/brands/{sb_id}")
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("remove_supplier_brand", sid),
+            ).fetchone()
+            assert row is not None
+
+    def test_user_read_only_403(self, user_client):
+        """User role cannot add brands (403)."""
+        from backend.db import get_db
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                ("brand-readonly", "Brand Readonly"),
+            )
+            sid = cur.lastrowid
+        resp = user_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        assert resp.status_code == 403
+
+    def test_brand_in_purge_snapshot(self, master_client):
+        """Brands appear in purge snapshot."""
+        sid = self._create_supplier(master_client, name="PurgeBrand")
+        master_client.post(f"/suppliers/{sid}/brands", json={"name": "Sony"})
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200
+        # Check audit log snapshot
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT details FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("purge_supplier", sid),
+            ).fetchone()
+            assert row is not None
+            details = json.loads(row["details"])
+            assert "brands" in details
+            assert len(details["brands"]) >= 1
+

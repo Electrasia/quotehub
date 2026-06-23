@@ -465,7 +465,12 @@ async def purge_supplier(
             (supplier_id,),
         ).fetchone()["n"]
 
-        has_any_ref = (quotation_count + contact_count + alias_count + capability_count) > 0
+        brand_count = db.execute(
+            "SELECT COUNT(*) AS n FROM supplier_brands WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        has_any_ref = (quotation_count + contact_count + alias_count + brand_count + capability_count) > 0
 
         # ── Block if not new AND has references ─────────────────────────
         if not is_new and has_any_ref:
@@ -481,6 +486,8 @@ async def purge_supplier(
                     parts.append(f"{contact_count} contact{'s' if contact_count > 1 else ''}")
                 if alias_count:
                     parts.append(f"{alias_count} aliase{'s' if alias_count > 1 else ''}")
+                if brand_count:
+                    parts.append(f"{brand_count} brand{'s' if brand_count > 1 else ''}")
                 if capability_count:
                     parts.append(f"{capability_count} capabilit{'ies' if capability_count > 1 else 'y'}")
                 detail = (
@@ -505,11 +512,21 @@ async def purge_supplier(
                 "SELECT * FROM supplier_capabilities WHERE supplier_id = ?", (supplier_id,),
             ).fetchall()
         ]
+        brands = [
+            dict(r) for r in db.execute(
+                """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+                   FROM supplier_brands sb
+                   JOIN brands b ON b.id = sb.brand_id
+                   WHERE sb.supplier_id = ?""",
+                (supplier_id,),
+            ).fetchall()
+        ]
 
         snapshot = {
             "supplier": dict(supplier),
             "contacts": contacts,
             "aliases": aliases,
+            "brands": brands,
             "capabilities": capabilities,
             "purged_at": _now_iso(),
             "reason": "master_purge",
@@ -524,6 +541,7 @@ async def purge_supplier(
         #    PRAGMA foreign_keys) ────────────────────────────────────────
         db.execute("DELETE FROM contacts WHERE supplier_id = ?", (supplier_id,))
         db.execute("DELETE FROM supplier_aliases WHERE supplier_id = ?", (supplier_id,))
+        db.execute("DELETE FROM supplier_brands WHERE supplier_id = ?", (supplier_id,))
         db.execute("DELETE FROM supplier_capabilities WHERE supplier_id = ?", (supplier_id,))
 
         # ── Delete the supplier itself ──────────────────────────────────
@@ -729,6 +747,111 @@ async def delete_alias(
         _write_audit_log(db, supplier_id, _make_audit_entry(
             "remove_alias", user,
             {"alias_id": alias_id, "alias": row["alias"]},
+        ))
+
+    return {"status": "deleted"}
+
+
+# =============================================================================
+# SUPPLIER BRANDS
+# =============================================================================
+
+class SupplierBrandCreate(BaseModel):
+    name: str
+
+
+@router.get("/{supplier_id}/brands", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_supplier_brands(supplier_id: int):
+    """List brands associated with a supplier."""
+    with get_db(readonly=True) as db:
+        _get_supplier_or_404(db, supplier_id)
+        brands = [
+            dict(r) for r in db.execute(
+                """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+                   FROM supplier_brands sb
+                   JOIN brands b ON b.id = sb.brand_id
+                   WHERE sb.supplier_id = ?
+                   ORDER BY b.name""",
+                (supplier_id,),
+            ).fetchall()
+        ]
+    return {"items": brands}
+
+
+@router.post("/{supplier_id}/brands", dependencies=[Depends(require_role("admin", "master"))])
+async def add_supplier_brand(
+    supplier_id: int,
+    body: SupplierBrandCreate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Add a brand to a supplier. Creates the brand in the global table if needed."""
+    norm = normalize_name(body.name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Brand name cannot be empty after normalisation")
+
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        # Ensure brand exists in global table
+        db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (norm,))
+        brand_row = db.execute("SELECT id FROM brands WHERE name = ?", (norm,)).fetchone()
+        brand_id = brand_row["id"]
+
+        # Check duplicate
+        existing = db.execute(
+            "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+            (supplier_id, brand_id),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Brand already associated with this supplier")
+
+        cur = db.execute(
+            "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+            (supplier_id, brand_id),
+        )
+        sb_id = cur.lastrowid
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "add_supplier_brand", user,
+            {"supplier_brand_id": sb_id, "brand_id": brand_id, "brand_name": norm},
+        ))
+
+        result = dict(db.execute(
+            """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+               FROM supplier_brands sb
+               JOIN brands b ON b.id = sb.brand_id
+               WHERE sb.id = ?""",
+            (sb_id,),
+        ).fetchone())
+
+    return result
+
+
+@router.delete("/{supplier_id}/brands/{sb_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def remove_supplier_brand(
+    supplier_id: int,
+    sb_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Remove a brand from a supplier."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            """SELECT sb.id, sb.brand_id, b.name
+               FROM supplier_brands sb
+               JOIN brands b ON b.id = sb.brand_id
+               WHERE sb.id = ? AND sb.supplier_id = ?""",
+            (sb_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Supplier brand not found")
+
+        db.execute("DELETE FROM supplier_brands WHERE id = ?", (sb_id,))
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "remove_supplier_brand", user,
+            {"supplier_brand_id": sb_id, "brand_id": row["brand_id"], "brand_name": row["name"]},
         ))
 
     return {"status": "deleted"}

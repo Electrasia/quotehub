@@ -408,6 +408,16 @@ def _v2_suppliers_ddl(db):
     """)
 
     db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_brands (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            brand_id    INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(supplier_id, brand_id)
+        )
+    """)
+
+    db.execute("""
         CREATE TABLE IF NOT EXISTS supplier_audit_log (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             supplier_id INTEGER,
@@ -461,6 +471,10 @@ def _v2_suppliers_ddl(db):
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_supplier_capabilities_supplier"
         " ON supplier_capabilities(supplier_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_brands_supplier"
+        " ON supplier_brands(supplier_id)"
     )
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_brands_name ON brands(name)"

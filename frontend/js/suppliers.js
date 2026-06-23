@@ -404,22 +404,21 @@ window.Suppliers = (function () {
     _currentBrands = [];
 
     try {
-      const [supplier, contacts, aliases] = await Promise.all([
+      const [supplier, contacts, aliases, brands] = await Promise.all([
         _apiGet(`/suppliers/${id}`),
         _apiGet(`/suppliers/${id}/contacts`),
         _apiGet(`/suppliers/${id}/aliases`),
+        _apiGet(`/suppliers/${id}/brands`),
       ]);
 
       _originalSupplier = supplier;
       _originalContacts = _unwrapItems(contacts);
       _originalAliases = _unwrapItems(aliases);
+      _originalBrands = _unwrapItems(brands);
 
       // Clone current state
       _currentContacts = _originalContacts.map(c => ({ ...c }));
       _currentAliases = _originalAliases.map(a => ({ ...a }));
-
-      // Load brands from the supplier (embedded)
-      _originalBrands = Array.isArray(supplier.brands) ? supplier.brands : [];
       _currentBrands = _originalBrands.map(b => ({ ...b }));
 
       _renderDetail(supplier);
@@ -1181,9 +1180,22 @@ window.Suppliers = (function () {
       }
 
       // ── 4. Sync brands ──
-      // Supplier-scoped brand sync is skipped because the backend does not expose
-      // brand sub-resource endpoints under /suppliers/{id}/brands. Brands are
-      // only managed globally via POST /brands and GET /brands, not per-supplier.
+      if (!await _syncStep('brands', async () => {
+        // Remove brands no longer in current list
+        for (const origB of _originalBrands) {
+          if (origB.id && !_currentBrands.some(b => b.id === origB.id)) {
+            await _apiDelete(`/suppliers/${currentSupplierId}/brands/${origB.id}`);
+          }
+        }
+        // Add new brands (no id yet)
+        for (const brand of _currentBrands) {
+          if (!brand.id) {
+            await _apiPost(`/suppliers/${currentSupplierId}/brands`, { name: brand.name || '' });
+          }
+        }
+      })) {
+        failedSteps.push('brands');
+      }
 
       // ── 5. Clear dirty flag & reload from server ──
       _clearDirty();
