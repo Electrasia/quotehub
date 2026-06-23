@@ -226,7 +226,10 @@ async def list_suppliers(
         # Items
         offset = (page - 1) * per_page
         rows = db.execute(
-            f"SELECT s.* FROM suppliers s {where} ORDER BY s.canonical_name LIMIT ? OFFSET ?",
+            f"""SELECT s.*,
+                (SELECT COUNT(*) FROM supplier_aliases a WHERE a.supplier_id = s.id) AS alias_count,
+                (SELECT COUNT(*) FROM contacts c WHERE c.supplier_id = s.id) AS contact_count
+                FROM suppliers s {where} ORDER BY s.canonical_name LIMIT ? OFFSET ?""",
             params + [per_page, offset],
         ).fetchall()
 
