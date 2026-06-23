@@ -1471,7 +1471,11 @@ window.Suppliers = (function () {
         }
       }
 
-      // ── 7. Reload from server for authoritative state ──
+      // ── 7. Clear dirty flag & reload from server ──
+      // Clear dirty BEFORE loadDetail so the confirm dialog at the top of
+      // loadDetail doesn't trigger (dirty was set by edit handlers that
+      // ran before the save button was clicked).
+      _clearDirty();
       await loadDetail(currentSupplierId);
       _showSuccess('Supplier saved successfully.');
     } catch (e) {
