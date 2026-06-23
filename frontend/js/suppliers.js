@@ -25,22 +25,18 @@ window.Suppliers = (function () {
   let currentSupplierId = null;
   let dirty = false;
   let listCache = null;            // { items: [], total: number, page: number }
-  let autocompleteControllers = {};  // { brands: AbortController, productTypes: AbortController }
+  let autocompleteControllers = {};  // { brands: AbortController }
 
   // Original data loaded from server (for save diffing)
   let _originalSupplier = null;
   let _originalContacts = [];
   let _originalAliases = [];
   let _originalBrands = [];
-  let _originalProductTypes = [];
-  let _originalCapabilities = [];
 
   // Current form data (kept in sync with DOM)
   let _currentContacts = [];
   let _currentAliases = [];
   let _currentBrands = [];
-  let _currentProductTypes = [];
-  let _currentCapabilities = [];
 
   // Pagination
   let _currentPage = 1;
@@ -403,37 +399,28 @@ window.Suppliers = (function () {
     _originalContacts = [];
     _originalAliases = [];
     _originalBrands = [];
-    _originalProductTypes = [];
-    _originalCapabilities = [];
     _currentContacts = [];
     _currentAliases = [];
     _currentBrands = [];
-    _currentProductTypes = [];
-    _currentCapabilities = [];
 
     try {
-      const [supplier, contacts, aliases, capabilities] = await Promise.all([
+      const [supplier, contacts, aliases] = await Promise.all([
         _apiGet(`/suppliers/${id}`),
         _apiGet(`/suppliers/${id}/contacts`),
         _apiGet(`/suppliers/${id}/aliases`),
-        _apiGet(`/suppliers/${id}/capabilities`),
       ]);
 
       _originalSupplier = supplier;
       _originalContacts = _unwrapItems(contacts);
       _originalAliases = _unwrapItems(aliases);
-      _originalCapabilities = _unwrapItems(capabilities);
 
       // Clone current state
       _currentContacts = _originalContacts.map(c => ({ ...c }));
       _currentAliases = _originalAliases.map(a => ({ ...a }));
-      _currentCapabilities = _originalCapabilities.map(c => ({ ...c }));
 
-      // Load brands and product types from the supplier (embedded)
+      // Load brands from the supplier (embedded)
       _originalBrands = Array.isArray(supplier.brands) ? supplier.brands : [];
-      _originalProductTypes = Array.isArray(supplier.product_types) ? supplier.product_types : [];
       _currentBrands = _originalBrands.map(b => ({ ...b }));
-      _currentProductTypes = _originalProductTypes.map(pt => ({ ...pt }));
 
       _renderDetail(supplier);
     } catch (e) {
@@ -645,82 +632,6 @@ window.Suppliers = (function () {
     brandsSection.appendChild(brandInputRow);
     content.appendChild(brandsSection);
 
-    // ── Product Types Section ──
-    const ptSection = document.createElement('div');
-    ptSection.className = 'supplier-detail-section';
-
-    const ptTitle = document.createElement('h4');
-    ptTitle.className = 'supplier-section-title';
-    ptTitle.appendChild(renderTextSafe('Product Types'));
-    ptSection.appendChild(ptTitle);
-
-    const ptContainer = document.createElement('div');
-    ptContainer.id = 'supplierProductTypesContainer';
-    ptContainer.className = 'tag-chip-container';
-    ptSection.appendChild(ptContainer);
-
-    const ptInputRow = document.createElement('div');
-    ptInputRow.style.display = 'flex';
-    ptInputRow.style.gap = '8px';
-    ptInputRow.style.marginTop = '8px';
-    ptInputRow.style.position = 'relative';
-
-    const ptInput = document.createElement('input');
-    ptInput.type = 'text';
-    ptInput.id = 'supplierProductTypeInput';
-    ptInput.className = 'supplier-text-input';
-    ptInput.style.flex = '1';
-    ptInput.placeholder = 'Type to search product types...';
-    ptInput.autocomplete = 'off';
-    ptInput.addEventListener('input', () => _debouncedAutocomplete('productTypes'));
-    ptInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        _addProductTypeFromInput();
-      }
-    });
-    ptInputRow.appendChild(ptInput);
-
-    const ptDropdown = document.createElement('div');
-    ptDropdown.id = 'supplierProductTypeAutocomplete';
-    ptDropdown.className = 'autocomplete-dropdown hidden';
-    ptInputRow.appendChild(ptDropdown);
-
-    ptSection.appendChild(ptInputRow);
-    content.appendChild(ptSection);
-
-    // ── Capabilities Section ──
-    const capSection = document.createElement('div');
-    capSection.className = 'supplier-detail-section';
-
-    const capTitle = document.createElement('h4');
-    capTitle.className = 'supplier-section-title';
-    capTitle.appendChild(renderTextSafe('Capabilities'));
-    capSection.appendChild(capTitle);
-
-    const capContainer = document.createElement('div');
-    capContainer.id = 'supplierCapabilitiesContainer';
-    capSection.appendChild(capContainer);
-
-    if (canModify()) {
-      const addCapBtn = document.createElement('button');
-      addCapBtn.className = 'btn btn-sm btn-secondary';
-      addCapBtn.appendChild(renderTextSafe('+ Add Capability'));
-      addCapBtn.addEventListener('click', () => {
-        _currentCapabilities.push({
-          id: null,
-          brand: '',
-          product_type: '',
-          verified: false,
-        });
-        _renderCapabilities();
-        _setDirty();
-      });
-      capSection.appendChild(addCapBtn);
-    }
-
-    content.appendChild(capSection);
-
     // ── Notes ──
     const notesSection = document.createElement('div');
     notesSection.className = 'supplier-detail-section';
@@ -774,8 +685,6 @@ window.Suppliers = (function () {
     _renderAliases();
     _renderContacts();
     _renderBrands();
-    _renderProductTypes();
-    _renderCapabilities();
   }
 
   // ─── Aliases ──────────────────────────────────────────────
@@ -1054,182 +963,6 @@ window.Suppliers = (function () {
     _hideAutocomplete('brands');
   }
 
-  // ─── Product Types ────────────────────────────────────────
-
-  function _renderProductTypes() {
-    const container = document.getElementById('supplierProductTypesContainer');
-    if (!container) return;
-    container.textContent = '';
-
-    if (_currentProductTypes.length === 0) {
-      const empty = document.createElement('span');
-      empty.style.cssText = 'font-size:13px;color:#999';
-      empty.appendChild(renderTextSafe('No product types.'));
-      container.appendChild(empty);
-      return;
-    }
-
-    for (let i = 0; i < _currentProductTypes.length; i++) {
-      const pt = _currentProductTypes[i];
-      const chip = document.createElement('span');
-      chip.className = 'tag-chip';
-      chip.appendChild(renderTextSafe(pt.name || pt.product_type_name || ''));
-
-      if (canModify()) {
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'tag-chip-remove';
-        removeBtn.appendChild(renderTextSafe('×'));
-        removeBtn.title = 'Remove product type';
-        removeBtn.addEventListener('click', () => {
-          if (!confirm('Remove this product type?')) return;
-          _currentProductTypes.splice(i, 1);
-          _renderProductTypes();
-          _setDirty();
-        });
-        chip.appendChild(removeBtn);
-      }
-
-      container.appendChild(chip);
-    }
-  }
-
-  function _addProductTypeFromInput() {
-    const input = document.getElementById('supplierProductTypeInput');
-    if (!input) return;
-    const name = input.value.trim();
-    if (!name) return;
-
-    const exists = _currentProductTypes.some(pt =>
-      (pt.name || pt.product_type_name || '').toLowerCase() === name.toLowerCase()
-    );
-    if (exists) return;
-
-    _currentProductTypes.push({ id: null, name: name });
-    _renderProductTypes();
-    _setDirty();
-    input.value = '';
-    input.focus();
-    _hideAutocomplete('productTypes');
-  }
-
-  // ─── Capabilities ─────────────────────────────────────────
-
-  function _renderCapabilities() {
-    const container = document.getElementById('supplierCapabilitiesContainer');
-    if (!container) return;
-    container.textContent = '';
-
-    if (_currentCapabilities.length === 0) {
-      const empty = document.createElement('p');
-      empty.style.cssText = 'font-size:13px;color:#999';
-      empty.appendChild(renderTextSafe('No capabilities.'));
-      container.appendChild(empty);
-      return;
-    }
-
-    for (let i = 0; i < _currentCapabilities.length; i++) {
-      const cap = _currentCapabilities[i];
-      const row = document.createElement('div');
-      row.className = 'supplier-capability-row';
-
-      // Brand
-      const brandGroup = document.createElement('div');
-      brandGroup.style.flex = '2';
-      const brandLabel = document.createElement('label');
-      brandLabel.className = 'supplier-contact-label';
-      brandLabel.appendChild(renderTextSafe('Brand'));
-      brandGroup.appendChild(brandLabel);
-      const brandSelect = document.createElement('select');
-      brandSelect.className = 'supplier-text-input';
-      const brandOpt = document.createElement('option');
-      brandOpt.value = '';
-      brandOpt.appendChild(renderTextSafe('— Select —'));
-      brandSelect.appendChild(brandOpt);
-      for (const b of _currentBrands) {
-        const opt = document.createElement('option');
-        opt.value = b.name || b.brand_name || '';
-        opt.appendChild(renderTextSafe(b.name || b.brand_name || ''));
-        if (opt.value === (cap.brand || '')) opt.selected = true;
-        brandSelect.appendChild(opt);
-      }
-      brandSelect.addEventListener('change', () => {
-        _currentCapabilities[i].brand = brandSelect.value;
-        _setDirty();
-      });
-      brandGroup.appendChild(brandSelect);
-      row.appendChild(brandGroup);
-
-      // Product Type
-      const ptGroup = document.createElement('div');
-      ptGroup.style.flex = '2';
-      const ptLabel = document.createElement('label');
-      ptLabel.className = 'supplier-contact-label';
-      ptLabel.appendChild(renderTextSafe('Product Type'));
-      ptGroup.appendChild(ptLabel);
-      const ptSelect = document.createElement('select');
-      ptSelect.className = 'supplier-text-input';
-      const ptOpt = document.createElement('option');
-      ptOpt.value = '';
-      ptOpt.appendChild(renderTextSafe('— Select —'));
-      ptSelect.appendChild(ptOpt);
-      for (const pt of _currentProductTypes) {
-        const opt = document.createElement('option');
-        opt.value = pt.name || pt.product_type_name || '';
-        opt.appendChild(renderTextSafe(pt.name || pt.product_type_name || ''));
-        if (opt.value === (cap.product_type || '')) opt.selected = true;
-        ptSelect.appendChild(opt);
-      }
-      ptSelect.addEventListener('change', () => {
-        _currentCapabilities[i].product_type = ptSelect.value;
-        _setDirty();
-      });
-      ptGroup.appendChild(ptSelect);
-      row.appendChild(ptGroup);
-
-      // Verified toggle (Master only)
-      if (typeof isMaster === 'function' && isMaster()) {
-        const verGroup = document.createElement('div');
-        verGroup.style.flex = '0.8';
-        verGroup.style.display = 'flex';
-        verGroup.style.alignItems = 'center';
-        verGroup.style.gap = '4px';
-        const verCb = document.createElement('input');
-        verCb.type = 'checkbox';
-        verCb.id = `capVerified_${i}`;
-        verCb.checked = !!cap.verified;
-        verCb.addEventListener('change', () => {
-          _currentCapabilities[i].verified = verCb.checked;
-          _setDirty();
-        });
-        verGroup.appendChild(verCb);
-        const verLabel = document.createElement('label');
-        verLabel.htmlFor = verCb.id;
-        verLabel.className = 'supplier-contact-label';
-        verLabel.style.marginBottom = '0';
-        verLabel.appendChild(renderTextSafe('Verified'));
-        verGroup.appendChild(verLabel);
-        row.appendChild(verGroup);
-      }
-
-      // Remove button
-      if (canModify()) {
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'btn btn-sm btn-danger';
-        removeBtn.appendChild(renderTextSafe('Remove'));
-        removeBtn.style.alignSelf = 'flex-end';
-        removeBtn.addEventListener('click', () => {
-          if (!confirm('Remove this capability?')) return;
-          _currentCapabilities.splice(i, 1);
-          _renderCapabilities();
-          _setDirty();
-        });
-        row.appendChild(removeBtn);
-      }
-
-      container.appendChild(row);
-    }
-  }
-
   // ─── Autocomplete ─────────────────────────────────────────
 
   function _debouncedAutocomplete(type) {
@@ -1246,9 +979,10 @@ window.Suppliers = (function () {
   }
 
   async function _fetchAutocomplete(type) {
-    const inputId = type === 'brands' ? 'supplierBrandInput' : 'supplierProductTypeInput';
-    const dropdownId = type === 'brands' ? 'supplierBrandAutocomplete' : 'supplierProductTypeAutocomplete';
-    const endpoint = type === 'brands' ? '/brands' : '/product-types';
+    if (type !== 'brands') return;
+    const inputId = 'supplierBrandInput';
+    const dropdownId = 'supplierBrandAutocomplete';
+    const endpoint = '/brands';
 
     const input = document.getElementById(inputId);
     const dropdown = document.getElementById(dropdownId);
@@ -1312,17 +1046,8 @@ window.Suppliers = (function () {
             _renderBrands();
             _setDirty();
           }
-        } else {
-          const exists = _currentProductTypes.some(pt =>
-            (pt.name || pt.product_type_name || '').toLowerCase() === name.toLowerCase()
-          );
-          if (!exists) {
-            _currentProductTypes.push({ id: null, name: name });
-            _renderProductTypes();
-            _setDirty();
-          }
         }
-        document.getElementById(type === 'brands' ? 'supplierBrandInput' : 'supplierProductTypeInput').value = '';
+        document.getElementById(type === 'brands' ? 'supplierBrandInput' : null).value = '';
         _hideAutocomplete(type);
       });
       dropdown.appendChild(div);
@@ -1330,7 +1055,8 @@ window.Suppliers = (function () {
   }
 
   function _hideAutocomplete(type) {
-    const id = type === 'brands' ? 'supplierBrandAutocomplete' : 'supplierProductTypeAutocomplete';
+    const id = type === 'brands' ? 'supplierBrandAutocomplete' : null;
+    if (!id) return;
     const el = document.getElementById(id);
     if (el) el.classList.add('hidden');
   }
@@ -1342,13 +1068,6 @@ window.Suppliers = (function () {
     if (brandDropdown && !brandDropdown.classList.contains('hidden')) {
       if (brandInput && !brandInput.contains(e.target) && !brandDropdown.contains(e.target)) {
         brandDropdown.classList.add('hidden');
-      }
-    }
-    const ptDropdown = document.getElementById('supplierProductTypeAutocomplete');
-    const ptInput = document.getElementById('supplierProductTypeInput');
-    if (ptDropdown && !ptDropdown.classList.contains('hidden')) {
-      if (ptInput && !ptInput.contains(e.target) && !ptDropdown.contains(e.target)) {
-        ptDropdown.classList.add('hidden');
       }
     }
   });
@@ -1466,34 +1185,7 @@ window.Suppliers = (function () {
       // brand sub-resource endpoints under /suppliers/{id}/brands. Brands are
       // only managed globally via POST /brands and GET /brands, not per-supplier.
 
-      // ── 5. Sync product types ──
-      // Same rationale as brands — no per-supplier product-type endpoints exist.
-
-      // ── 6. Sync capabilities ──
-      if (!await _syncStep('capabilities', async () => {
-        for (const origCap of _originalCapabilities) {
-          if (origCap.id && !_currentCapabilities.some(c => c.id === origCap.id)) {
-            await _apiDelete(`/suppliers/${currentSupplierId}/capabilities/${origCap.id}`);
-          }
-        }
-        for (let i = 0; i < _currentCapabilities.length; i++) {
-          const cap = _currentCapabilities[i];
-          const body = {
-            brand: cap.brand || '',
-            product_type: cap.product_type || '',
-            verified: !!cap.verified,
-          };
-          if (cap.id) {
-            await _apiPut(`/suppliers/${currentSupplierId}/capabilities/${cap.id}`, body);
-          } else {
-            await _apiPost(`/suppliers/${currentSupplierId}/capabilities`, body);
-          }
-        }
-      })) {
-        failedSteps.push('capabilities');
-      }
-
-      // ── 7. Clear dirty flag & reload from server ──
+      // ── 5. Clear dirty flag & reload from server ──
       _clearDirty();
       await loadDetail(currentSupplierId);
       let successMsg = 'Supplier saved successfully.';
