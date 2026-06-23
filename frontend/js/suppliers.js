@@ -46,6 +46,10 @@ window.Suppliers = (function () {
   let _currentPage = 1;
   let _totalPages = 1;
 
+  // Stale-flag: set when a new supplier is created so the list re-fetches
+  // on next Back-to-List navigation.
+  let _listStale = false;
+
   // ─── Shared Safe Render Helper ────────────────────────────
 
   /**
@@ -56,6 +60,19 @@ window.Suppliers = (function () {
    */
   function renderTextSafe(text) {
     return document.createTextNode(text == null ? '' : String(text));
+  }
+
+  /**
+   * Safely unwrap a sub-resource API response that may be either
+   * a bare array or an {"items": [...]} envelope.
+   * Returns a bare array (empty if neither shape matches).
+   * @param {*} resp - The API response value
+   * @returns {Array}
+   */
+  function _unwrapItems(resp) {
+    if (Array.isArray(resp)) return resp;
+    if (resp && Array.isArray(resp.items)) return resp.items;
+    return [];
   }
 
   // ─── Error Helpers ────────────────────────────────────────
@@ -187,7 +204,7 @@ window.Suppliers = (function () {
       const data = await _apiGet(url);
       listCache = data;
       _totalPages = Math.ceil(data.total / PER_PAGE) || 1;
-      _renderList(data.suppliers || []);
+      _renderList(data.items || []);
       _renderPagination(data.total);
     } catch (e) {
       listCache = null;
@@ -214,7 +231,7 @@ window.Suppliers = (function () {
       td.style.textAlign = 'center';
       td.style.padding = '24px';
       td.style.color = '#888';
-      td.appendChild(renderTextSafe('No suppliers found.'));
+      td.appendChild(renderTextSafe("No suppliers found. Click '+ New Supplier' to add one."));
       tr.appendChild(td);
       tbody.appendChild(tr);
       return;
@@ -403,9 +420,9 @@ window.Suppliers = (function () {
       ]);
 
       _originalSupplier = supplier;
-      _originalContacts = Array.isArray(contacts) ? contacts : [];
-      _originalAliases = Array.isArray(aliases) ? aliases : [];
-      _originalCapabilities = Array.isArray(capabilities) ? capabilities : [];
+      _originalContacts = _unwrapItems(contacts);
+      _originalAliases = _unwrapItems(aliases);
+      _originalCapabilities = _unwrapItems(capabilities);
 
       // Clone current state
       _currentContacts = _originalContacts.map(c => ({ ...c }));
@@ -1483,36 +1500,44 @@ window.Suppliers = (function () {
 
   /**
    * Create a new supplier and navigate to its detail.
+   * On 409 (duplicate), alerts the user and re-prompts so they can
+   * choose a different name or cancel.
    */
   async function newSupplier() {
     if (dirty) {
       if (!confirm('You have unsaved changes. Discard them?')) return;
     }
 
-    // Prompt for canonical name
-    const name = prompt('Enter canonical name for the new supplier:');
-    if (!name || !name.trim()) return;
+    _clearError('suppliersListError');
 
-    _clearError('supplierDetailError');
+    // Loop until the user cancels or creates successfully
+    while (true) {
+      const name = prompt('Enter canonical name for the new supplier:');
+      if (!name || !name.trim()) return; // user cancelled
 
-    try {
-      const result = await _apiPost('/suppliers', { canonical_name: name.trim() });
-      if (result && result.id) {
-        await loadDetail(result.id);
-        _showSuccess('New supplier created.');
-      }
-    } catch (e) {
-      if (e.status === 401 && typeof showLogin === 'function') {
-        showLogin();
+      try {
+        const result = await _apiPost('/suppliers', { canonical_name: name.trim() });
+        if (result && result.id) {
+          _listStale = true;
+          await loadDetail(result.id);
+          _showSuccess('New supplier created.');
+          return; // success, exit loop
+        }
+      } catch (e) {
+        if (e.status === 401 && typeof showLogin === 'function') {
+          showLogin();
+          return;
+        }
+        if (e.status === 409) {
+          // Duplicate — tell the user and re-prompt
+          alert('A supplier with this name already exists. Please choose a different name.');
+          continue; // back to prompt
+        }
+        // Other errors (network, 5xx, etc.)
+        let msg = e.message || 'Failed to create supplier.';
+        _showError('suppliersListError', msg);
         return;
       }
-      let msg = e.message || 'Failed to create supplier.';
-      if (e.status === 409) {
-        msg = 'A supplier with this canonical name already exists.';
-      } else if (e.status >= 500) {
-        msg = 'Something went wrong. Please try again.';
-      }
-      _showError('supplierDetailError', msg);
     }
   }
 
@@ -1528,7 +1553,14 @@ window.Suppliers = (function () {
     const detailPanel = document.getElementById('supplierDetailPanel');
     if (listPanel) listPanel.classList.remove('hidden');
     if (detailPanel) detailPanel.classList.add('hidden');
-    _currentPage = 1;
+    // If we just created a new supplier, reset to page 1; otherwise
+    // preserve current pagination so the user doesn't lose their place.
+    if (_listStale) {
+      _currentPage = 1;
+      _listStale = false;
+    }
+    // Always re-fetch from the backend to get fresh data.
+    _clearError('suppliersListError');
     loadList();
   }
 
@@ -1557,6 +1589,7 @@ window.Suppliers = (function () {
     _showListPanel: _showListPanel,
     _setDirty: _setDirty,
     _clearDirty: _clearDirty,
+    _listStale: _listStale,
   };
 
 })();
