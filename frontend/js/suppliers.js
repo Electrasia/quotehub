@@ -148,7 +148,7 @@ window.Suppliers = (function () {
       const data = await resp.json();
       if (!resp.ok) {
         const msg = data.detail || `HTTP ${resp.status}`;
-        const err = new Error(msg);
+        const err = new Error(`${method} ${url} → ${resp.status}: ${msg}`);
         err.status = resp.status;
         err.data = data;
         throw err;
@@ -160,7 +160,7 @@ window.Suppliers = (function () {
       if (e.message === 'Not authenticated') {
         if (typeof showLogin === 'function') showLogin();
       }
-      throw new Error('Something went wrong. Please try again.');
+      throw new Error(`Something went wrong. Please try again. (${method} ${url})`);
     }
   }
 
@@ -1442,40 +1442,14 @@ window.Suppliers = (function () {
       }
 
       // ── 4. Sync brands ──
-      // Note: supplier-scoped brand endpoints don't exist yet on the backend;
-      //       404s are silently skipped so a missing endpoint doesn't abort the save.
-      try {
-        for (const origB of _originalBrands) {
-          if (origB.id && !_currentBrands.some(b => b.id === origB.id)) {
-            await _apiDelete(`/suppliers/${currentSupplierId}/brands/${origB.id}`);
-          }
-        }
-        for (const brand of _currentBrands) {
-          if (!brand.id) {
-            await _apiPost(`/suppliers/${currentSupplierId}/brands`, { name: brand.name || brand.brand_name || '' });
-          }
-        }
-      } catch (e) {
-        if (e.status !== 404) throw e;
-        console.warn(`[suppliers] Brand sync skipped (endpoint not available):`, e.message);
-      }
+      // Supplier-scoped brand sync is skipped because the backend does not expose
+      // brand sub-resource endpoints under /suppliers/{id}/brands. Brands are
+      // only managed globally via POST /brands and GET /brands, not per-supplier.
+      // Brands are still displayed and embedded in the supplier detail response.
 
       // ── 5. Sync product types ──
-      try {
-        for (const origPt of _originalProductTypes) {
-          if (origPt.id && !_currentProductTypes.some(pt => pt.id === origPt.id)) {
-            await _apiDelete(`/suppliers/${currentSupplierId}/product-types/${origPt.id}`);
-          }
-        }
-        for (const pt of _currentProductTypes) {
-          if (!pt.id) {
-            await _apiPost(`/suppliers/${currentSupplierId}/product-types`, { name: pt.name || pt.product_type_name || '' });
-          }
-        }
-      } catch (e) {
-        if (e.status !== 404) throw e;
-        console.warn(`[suppliers] Product-type sync skipped (endpoint not available):`, e.message);
-      }
+      // Same rationale as brands — no per-supplier product-type endpoints exist.
+      // Product types are managed globally via POST /product-types and GET /product-types.
 
       // ── 6. Sync capabilities ──
       for (const origCap of _originalCapabilities) {
