@@ -816,7 +816,7 @@ window.Suppliers = (function () {
       const alias = _currentAliases[i];
       const chip = document.createElement('span');
       chip.className = 'tag-chip';
-      chip.appendChild(renderTextSafe(alias.alias_name || alias.name || ''));
+      chip.appendChild(renderTextSafe(alias.alias_name || alias.alias || alias.name || ''));
 
       if (canModify()) {
         const removeBtn = document.createElement('button');
