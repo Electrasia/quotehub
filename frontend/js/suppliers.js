@@ -741,12 +741,6 @@ window.Suppliers = (function () {
 
     content.appendChild(notesSection);
 
-    // ── Error container ──
-    const errContainer = document.createElement('div');
-    errContainer.id = 'supplierDetailError';
-    errContainer.className = 'supplier-error hidden';
-    content.appendChild(errContainer);
-
     // ── Save button ──
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'supplier-detail-actions';
