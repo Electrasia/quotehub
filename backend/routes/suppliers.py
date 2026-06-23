@@ -404,6 +404,133 @@ async def inactivate_supplier(
     return updated
 
 
+@router.delete("/{supplier_id}/purge", dependencies=[Depends(require_role("master"))])
+async def purge_supplier(
+    supplier_id: int,
+    user: dict = Depends(require_role("master")),
+):
+    """Permanently delete a supplier and all its data.
+
+    Master-only.  Stores a complete snapshot in the audit log **before**
+    deletion.  Preconditions:
+      - Supplier must exist.
+      - Status must be ``active`` or ``review`` (not ``inactive``).
+      - Supplier must be **≤ 24 hours old** OR have **zero** quotations,
+        contacts, aliases, and capabilities.
+
+    Returns 409 with a descriptive message when preconditions fail.
+    """
+    with get_db() as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        # ── Precondition 1: status ──────────────────────────────────────
+        status = supplier["status"]
+        if status == "inactive":
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot purge: supplier status is 'inactive'. Already removed from active use.",
+            )
+
+        # ── Precondition 2: age check ───────────────────────────────────
+        created = supplier.get("created_at", "")
+        is_new = False
+        if created:
+            try:
+                created_dt = datetime.strptime(created, "%Y-%m-%d %H:%M:%S")
+                now = datetime.now(timezone.utc)
+                age = now - created_dt.replace(tzinfo=timezone.utc)
+                is_new = age.total_seconds() <= 86400  # 24 hours
+            except ValueError:
+                is_new = False
+
+        # ── Precondition 3: reference counts ────────────────────────────
+        quotation_count = db.execute(
+            "SELECT COUNT(*) AS n FROM quotations WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        contact_count = db.execute(
+            "SELECT COUNT(*) AS n FROM contacts WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        alias_count = db.execute(
+            "SELECT COUNT(*) AS n FROM supplier_aliases WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        capability_count = db.execute(
+            "SELECT COUNT(*) AS n FROM supplier_capabilities WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        has_any_ref = (quotation_count + contact_count + alias_count + capability_count) > 0
+
+        # ── Block if not new AND has references ─────────────────────────
+        if not is_new and has_any_ref:
+            if quotation_count > 0:
+                plural = "s" if quotation_count > 1 else ""
+                detail = (
+                    f"Cannot purge: supplier has {quotation_count} linked "
+                    f"quotation{plural}. Inactivate instead."
+                )
+            else:
+                parts = []
+                if contact_count:
+                    parts.append(f"{contact_count} contact{'s' if contact_count > 1 else ''}")
+                if alias_count:
+                    parts.append(f"{alias_count} aliase{'s' if alias_count > 1 else ''}")
+                if capability_count:
+                    parts.append(f"{capability_count} capabilit{'ies' if capability_count > 1 else 'y'}")
+                detail = (
+                    "Cannot purge: supplier is older than 24 hours and has "
+                    f"{', '.join(parts)}. Inactivate instead."
+                )
+            raise HTTPException(status_code=409, detail=detail)
+
+        # ── Build snapshot BEFORE deletion ──────────────────────────────
+        contacts = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM contacts WHERE supplier_id = ?", (supplier_id,),
+            ).fetchall()
+        ]
+        aliases = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_aliases WHERE supplier_id = ?", (supplier_id,),
+            ).fetchall()
+        ]
+        capabilities = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_capabilities WHERE supplier_id = ?", (supplier_id,),
+            ).fetchall()
+        ]
+
+        snapshot = {
+            "supplier": dict(supplier),
+            "contacts": contacts,
+            "aliases": aliases,
+            "capabilities": capabilities,
+            "purged_at": _now_iso(),
+            "reason": "master_purge",
+        }
+
+        # ── Audit log entry BEFORE row deletion ─────────────────────────
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "purge_supplier", user, snapshot,
+        ))
+
+        # ── Delete children manually (CASCADE is inactive without
+        #    PRAGMA foreign_keys) ────────────────────────────────────────
+        db.execute("DELETE FROM contacts WHERE supplier_id = ?", (supplier_id,))
+        db.execute("DELETE FROM supplier_aliases WHERE supplier_id = ?", (supplier_id,))
+        db.execute("DELETE FROM supplier_capabilities WHERE supplier_id = ?", (supplier_id,))
+
+        # ── Delete the supplier itself ──────────────────────────────────
+        db.execute("DELETE FROM suppliers WHERE id = ?", (supplier_id,))
+
+    return {"detail": "Supplier purged. Snapshot retained in audit log."}
+
+
 # =============================================================================
 # CONTACTS
 # =============================================================================

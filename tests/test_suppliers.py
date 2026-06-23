@@ -1593,3 +1593,274 @@ class TestFrontendRenderingSafety:
             "renderTextSafe not found in window.Suppliers export (return object)"
         )
 
+    def test_purge_button_exists_in_source(self):
+        """Confirm the Purge Supplier button text exists in suppliers.js."""
+        source = self._read_suppliers_js()
+        assert "Purge Supplier" in source, (
+            "Purge Supplier button label not found in suppliers.js"
+        )
+
+    def test_purge_function_defined(self):
+        """Confirm _purgeSupplier function exists in suppliers.js."""
+        source = self._read_suppliers_js()
+        assert "async function _purgeSupplier" in source, (
+            "_purgeSupplier function definition not found in suppliers.js"
+        )
+
+
+# =============================================================================
+# TestPurgeSupplier — Master-only permanent supplier deletion
+# =============================================================================
+
+class TestPurgeSupplier:
+    """Tests for DELETE /suppliers/{id}/purge (Master-only)."""
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _create_supplier_via_db(self, canonical_name="Purge DB Supplier"):
+        """Create a supplier directly in the DB (avoids cookie-sharing issues)."""
+        from backend.db import get_db
+        from backend.suppliers import normalize_name
+        norm = normalize_name(canonical_name)
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name, status, notes) "
+                "VALUES (?, ?, 'active', '')",
+                (norm, canonical_name),
+            )
+            return cur.lastrowid
+
+    def _create_supplier(self, client, name="Purge Test Supplier"):
+        """Create a supplier via API using the given client."""
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200, f"Supplier create failed: {resp.json()}"
+        return resp.json()["id"]
+
+    def _assert_supplier_deleted(self, sid):
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT id FROM suppliers WHERE id = ?", (sid,)
+            ).fetchone()
+        assert row is None, f"Supplier {sid} was not deleted"
+
+    def _assert_audit_log_exists(self, sid, action, expect=True):
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                (action, sid),
+            ).fetchone()
+        if expect:
+            assert row is not None, f"No audit log entry found for action={action}, supplier={sid}"
+        return row
+
+    def _make_supplier_old(self, sid, hours_ago=48):
+        """Set supplier created_at to a past timestamp (bypass API)."""
+        from backend.db import get_db
+        from datetime import datetime, timezone, timedelta
+        past = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
+        with get_db() as db:
+            db.execute(
+                "UPDATE suppliers SET created_at = ? WHERE id = ?",
+                (past, sid),
+            )
+
+    def _add_contact(self, client, sid, name="Test Contact"):
+        resp = client.post(f"/suppliers/{sid}/contacts", json={"name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def _add_alias(self, client, sid, alias="test-alias"):
+        resp = client.post(f"/suppliers/{sid}/aliases", json={"alias": alias})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def _add_capability(self, client, sid, brand="Test Brand", product_type="Test PT"):
+        resp = client.post("/brands", json={"name": brand})
+        if resp.status_code == 409:
+            pass
+        resp = client.post("/product-types", json={"name": product_type})
+        if resp.status_code == 409:
+            pass
+        resp = client.post(f"/suppliers/{sid}/capabilities", json={
+            "brand": brand,
+            "product_type": product_type,
+        })
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def _add_quotation(self, sid):
+        """Insert a quotation linked to the supplier directly."""
+        from backend.db import get_db
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO quotations (filename, supplier, items, supplier_id) "
+                "VALUES (?, ?, ?, ?)",
+                ("test.pdf", "Purge Supplier", "[]", sid),
+            )
+            return cur.lastrowid
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+
+    def test_purge_unauthenticated_401(self, app_client, seeded_db):
+        """Unauthenticated request returns 401."""
+        sid = self._create_supplier_via_db()
+        resp = app_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
+
+    def test_purge_user_403(self, user_client):
+        """User role returns 403."""
+        sid = self._create_supplier_via_db()
+        resp = user_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.json()}"
+
+    def test_purge_admin_403(self, admin_client):
+        """Admin role returns 403."""
+        sid = self._create_supplier_via_db()
+        resp = admin_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.json()}"
+
+    def test_purge_master_succeeds(self, master_client):
+        """Master can successfully purge a supplier with no references."""
+        sid = self._create_supplier_via_db()
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.json()}"
+        self._assert_supplier_deleted(sid)
+
+    def test_purge_succeeds_when_no_references_and_empty(self, master_client):
+        """Supplier with no references of any kind can be purged."""
+        sid = self._create_supplier(master_client)
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200, f"Purge failed: {resp.json()}"
+        assert resp.json()["detail"] == "Supplier purged. Snapshot retained in audit log."
+
+        # Supplier deleted from DB
+        self._assert_supplier_deleted(sid)
+
+        # Audit log entry created
+        row = self._assert_audit_log_exists(sid, "purge_supplier")
+        details = _json.loads(row["details"])
+        assert "supplier" in details
+        assert details["reason"] == "master_purge"
+        assert "purged_at" in details
+
+    def test_purge_succeeds_within_24h_even_with_references(self, master_client):
+        """A supplier created within the last 24h can be purged even with refs."""
+        sid = self._create_supplier(master_client)
+        self._add_contact(master_client, sid)
+        self._add_alias(master_client, sid)
+        self._add_capability(master_client, sid)
+
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200, f"Purge within 24h with refs failed: {resp.json()}"
+        self._assert_supplier_deleted(sid)
+
+        # Snapshot must contain all child data
+        row = self._assert_audit_log_exists(sid, "purge_supplier")
+        details = _json.loads(row["details"])
+        assert len(details["contacts"]) >= 1
+        assert len(details["aliases"]) >= 1
+        assert len(details["capabilities"]) >= 1
+
+    def test_purge_blocked_by_quotation_references(self, master_client):
+        """Supplier older than 24h with quotation references → 409."""
+        sid = self._create_supplier(master_client)
+        self._make_supplier_old(sid, hours_ago=48)
+        self._add_quotation(sid)
+
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 409, f"Expected 409, got {resp.status_code}: {resp.json()}"
+        assert "quotation" in resp.json()["detail"].lower(), (
+            f"Error message should mention quotations: {resp.json()['detail']}"
+        )
+
+    def test_purge_blocked_when_inactive(self, master_client):
+        """Inactive supplier → 409."""
+        sid = self._create_supplier(master_client)
+        # Inactivate via API
+        resp = master_client.post(f"/suppliers/{sid}/inactivate")
+        assert resp.status_code == 200
+
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 409, f"Expected 409, got {resp.status_code}: {resp.json()}"
+        assert "inactive" in resp.json()["detail"].lower()
+
+        # Supplier still exists
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT status FROM suppliers WHERE id = ?", (sid,)
+            ).fetchone()
+        assert row is not None
+        assert row["status"] == "inactive"
+
+    def test_purge_audit_log_snapshot_completeness(self, master_client):
+        """Snapshot contains supplier, contacts, aliases, capabilities, purged_at, reason."""
+        sid = self._create_supplier(master_client)
+        # Set a display name for verification
+        master_client.put(f"/suppliers/{sid}", json={"display_name": "Snapshot Check Supplier"})
+        self._add_contact(master_client, sid, "Snapshot Contact")
+        self._add_alias(master_client, sid, "snapshot-alias")
+        self._add_capability(master_client, sid, "Snapshot Brand", "Snapshot PT")
+
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200
+
+        row = self._assert_audit_log_exists(sid, "purge_supplier")
+        details = _json.loads(row["details"])
+
+        # Supplier fields
+        assert details["supplier"]["id"] == sid
+        assert details["supplier"]["display_name"] == "Snapshot Check Supplier"
+        assert "canonical_name" in details["supplier"]
+
+        # Child arrays
+        assert isinstance(details["contacts"], list)
+        assert len(details["contacts"]) >= 1
+        assert details["contacts"][0]["name"] == "Snapshot Contact"
+
+        assert isinstance(details["aliases"], list)
+        assert len(details["aliases"]) >= 1
+
+        assert isinstance(details["capabilities"], list)
+        assert len(details["capabilities"]) >= 1
+
+        # Metadata
+        assert "purged_at" in details
+        assert details["reason"] == "master_purge"
+
+        # Details JSON is valid
+        assert isinstance(_json.loads(_json.dumps(details)), dict)
+
+    def test_purge_idempotency_not_required(self, master_client):
+        """Second purge of same id returns 404 (already deleted)."""
+        sid = self._create_supplier(master_client)
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200
+
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 404, f"Second purge expected 404, got {resp.status_code}: {resp.json()}"
+
+    def test_existing_audit_log_entries_preserved(self, master_client):
+        """Prior audit log entries for the supplier survive after purge."""
+        sid = self._create_supplier(master_client)
+        # Perform an update to create an audit log entry
+        master_client.put(f"/suppliers/{sid}", json={"notes": "Note before purge"})
+        # Verify the audit entry exists before purge
+        self._assert_audit_log_exists(sid, "create_supplier")
+        self._assert_audit_log_exists(sid, "update_supplier")
+
+        resp = master_client.delete(f"/suppliers/{sid}/purge")
+        assert resp.status_code == 200
+
+        # Prior entries still exist
+        self._assert_audit_log_exists(sid, "create_supplier")
+        self._assert_audit_log_exists(sid, "update_supplier")
+        # And the purge entry exists too
+        self._assert_audit_log_exists(sid, "purge_supplier")
+

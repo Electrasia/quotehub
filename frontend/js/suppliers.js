@@ -24,7 +24,7 @@ window.Suppliers = (function () {
   // ─── State ────────────────────────────────────────────────
   let currentSupplierId = null;
   let dirty = false;
-  let listCache = null;            // { suppliers: [], total: number, page: number }
+  let listCache = null;            // { items: [], total: number, page: number }
   let autocompleteControllers = {};  // { brands: AbortController, productTypes: AbortController }
 
   // Original data loaded from server (for save diffing)
@@ -759,6 +759,21 @@ window.Suppliers = (function () {
     saveBtn.addEventListener('click', _saveSupplier);
     actionsDiv.appendChild(saveBtn);
 
+    // ── Purge button (Master only, hidden for inactive) ──
+    const purgeBtn = document.createElement('button');
+    purgeBtn.id = 'supplierPurgeBtn';
+    purgeBtn.className = 'btn btn-danger';
+    purgeBtn.style.marginLeft = '8px';
+    purgeBtn.appendChild(renderTextSafe('Purge Supplier'));
+    const sStatus = (supplier.status || 'active');
+    if (typeof isMaster === 'function' && isMaster() && sStatus !== 'inactive') {
+      purgeBtn.classList.remove('hidden');
+    } else {
+      purgeBtn.classList.add('hidden');
+    }
+    purgeBtn.addEventListener('click', () => _purgeSupplier(supplier));
+    actionsDiv.appendChild(purgeBtn);
+
     content.appendChild(actionsDiv);
 
     // Render sub-components
@@ -1422,34 +1437,44 @@ window.Suppliers = (function () {
       }
       for (const alias of _currentAliases) {
         if (!alias.id) {
-          await _apiPost(`/suppliers/${currentSupplierId}/aliases`, { alias_name: alias.alias_name || alias.name || '' });
+          await _apiPost(`/suppliers/${currentSupplierId}/aliases`, { alias: alias.alias_name || alias.name || '' });
         }
       }
 
       // ── 4. Sync brands ──
-      // Brands are managed via the supplier's brand list
-      // We diff against the original brands
-      for (const origB of _originalBrands) {
-        if (origB.id && !_currentBrands.some(b => b.id === origB.id)) {
-          await _apiDelete(`/suppliers/${currentSupplierId}/brands/${origB.id}`);
+      // Note: supplier-scoped brand endpoints don't exist yet on the backend;
+      //       404s are silently skipped so a missing endpoint doesn't abort the save.
+      try {
+        for (const origB of _originalBrands) {
+          if (origB.id && !_currentBrands.some(b => b.id === origB.id)) {
+            await _apiDelete(`/suppliers/${currentSupplierId}/brands/${origB.id}`);
+          }
         }
-      }
-      for (const brand of _currentBrands) {
-        if (!brand.id) {
-          await _apiPost(`/suppliers/${currentSupplierId}/brands`, { name: brand.name || brand.brand_name || '' });
+        for (const brand of _currentBrands) {
+          if (!brand.id) {
+            await _apiPost(`/suppliers/${currentSupplierId}/brands`, { name: brand.name || brand.brand_name || '' });
+          }
         }
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        console.warn(`[suppliers] Brand sync skipped (endpoint not available):`, e.message);
       }
 
       // ── 5. Sync product types ──
-      for (const origPt of _originalProductTypes) {
-        if (origPt.id && !_currentProductTypes.some(pt => pt.id === origPt.id)) {
-          await _apiDelete(`/suppliers/${currentSupplierId}/product-types/${origPt.id}`);
+      try {
+        for (const origPt of _originalProductTypes) {
+          if (origPt.id && !_currentProductTypes.some(pt => pt.id === origPt.id)) {
+            await _apiDelete(`/suppliers/${currentSupplierId}/product-types/${origPt.id}`);
+          }
         }
-      }
-      for (const pt of _currentProductTypes) {
-        if (!pt.id) {
-          await _apiPost(`/suppliers/${currentSupplierId}/product-types`, { name: pt.name || pt.product_type_name || '' });
+        for (const pt of _currentProductTypes) {
+          if (!pt.id) {
+            await _apiPost(`/suppliers/${currentSupplierId}/product-types`, { name: pt.name || pt.product_type_name || '' });
+          }
         }
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        console.warn(`[suppliers] Product-type sync skipped (endpoint not available):`, e.message);
       }
 
       // ── 6. Sync capabilities ──
@@ -1493,6 +1518,55 @@ window.Suppliers = (function () {
         saveBtn.disabled = false;
         saveBtn.textContent = 'Save';
       }
+    }
+  }
+
+  // ─── Purge Supplier ──────────────────────────────────────
+
+  /**
+   * Permanently delete a supplier (Master only).
+   * Shows a confirm dialog, then calls DELETE /suppliers/{id}/purge.
+   * On success, navigates back to the list and marks it stale.
+   */
+  async function _purgeSupplier(supplier) {
+    const name = supplier.display_name || supplier.canonical_name || 'unnamed';
+    if (!confirm(
+      '⚠️ Permanently purge supplier \'' + name + '\'?\n\n' +
+      'This will permanently delete the supplier and all its contacts, aliases, and capabilities.\n' +
+      'A snapshot will be stored in the audit log.\n\n' +
+      'This action cannot be undone.'
+    )) {
+      return;
+    }
+
+    _clearError('supplierDetailError');
+
+    const purgeBtn = document.getElementById('supplierPurgeBtn');
+    if (purgeBtn) purgeBtn.disabled = true;
+
+    try {
+      const data = await _apiDelete('/suppliers/' + supplier.id + '/purge');
+      _showSuccess(data.detail || 'Supplier purged.');
+      _listStale = true;
+      _showListPanel();
+    } catch (e) {
+      if (e.status === 401 && typeof showLogin === 'function') {
+        showLogin();
+        return;
+      }
+      let msg = e.message || 'Failed to purge supplier.';
+      if (e.status === 403) {
+        msg = 'Permission denied. Only master can purge suppliers.';
+      } else if (e.status === 404) {
+        msg = 'Supplier not found.';
+      } else if (e.status === 409) {
+        // Backend sends an actionable message — surface it directly.
+        msg = e.message;
+      } else if (e.status >= 500) {
+        msg = 'Something went wrong. Please try again.';
+      }
+      _showError('supplierDetailError', msg);
+      if (purgeBtn) purgeBtn.disabled = false;
     }
   }
 
