@@ -591,6 +591,14 @@ db.execute("INSERT INTO suppliers (name) VALUES (?)", (name,))  ← duplicates o
 
 These rules are MANDATORY for every new migration. They prevent data corruption during startup failures or container restarts.
 
+### ⚠️ CRITICAL RULE: Foreign Key Enforcement
+
+`PRAGMA foreign_keys = ON` is set in `get_db()` (write connections only). This means:
+
+- Any future `sqlite3.connect()` call outside `get_db()` **must** include `PRAGMA foreign_keys = ON` explicitly. Otherwise, foreign key enforcement is silently bypassed for that connection.
+- The vacuum connection in `admin.py` and export/import connections in `export_import.py` are read-only or VACUUM-only — no FK risk.
+- If you add a new connection site, check whether it modifies data. If it does, enable FK enforcement or the database will allow orphaned rows.
+
 ---
 
 ## FTS Index Rebuild
