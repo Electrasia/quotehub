@@ -2488,22 +2488,24 @@ class TestAliasSuggestions:
         return resp.json()["id"]
 
     def test_suggestions_from_quotations(self, admin_client, seed_quotations):
-        """Returns supplier names from quotations that aren't canonical or aliases."""
-        sid = self._create_supplier(admin_client, name="Acme Corp")
+        """Returns supplier names from quotations that share tokens and aren't canonical or aliases."""
+        # "Beta Corp" shares token "beta" with seed quotation "Beta Inc"
+        sid = self._create_supplier(admin_client, name="Beta Corp")
         resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
         assert resp.status_code == 200
         items = resp.json()["items"]
-        # seed_quotations has "Acme Corp", "Beta Inc", "Gamma Ltd"
-        # Acme Corp is the canonical name, so should be excluded
-        assert "Acme Corp" not in items
-        # Beta Inc and Gamma Ltd should be suggestions
+        # "Beta Inc" shares token "beta" — should be suggested
         assert "Beta Inc" in items
-        assert "Gamma Ltd" in items
+        # "Acme Corp" shares token "corp" — should also be suggested
+        assert "Acme Corp" in items
+        # "Gamma Ltd" shares no token with "beta corp" — excluded by similarity
+        assert "Gamma Ltd" not in items
 
     def test_suggestions_excludes_aliases(self, admin_client, seed_quotations):
-        """Suggestions exclude existing aliases."""
+        """Suggestions exclude existing aliases even when tokens match."""
+        # "Beta Corp" shares token "beta" with seed quotation "Beta Inc"
         sid = self._create_supplier(admin_client, name="Beta Corp")
-        # Add "Beta Inc" as an alias
+        # Add "Beta Inc" as an alias — it should be excluded despite token match
         admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "Beta Inc"})
         resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
         assert resp.status_code == 200
@@ -2512,10 +2514,141 @@ class TestAliasSuggestions:
 
     def test_suggestions_limit(self, admin_client):
         """Suggestions are limited to 20."""
-        sid = self._create_supplier(admin_client, name="Limit Corp")
+        # Use a name that shares tokens with seed data so we get results
+        sid = self._create_supplier(admin_client, name="Gamma Corp")
         resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
         assert resp.status_code == 200
         assert len(resp.json()["items"]) <= 20
+
+    def test_suggestions_filters_by_similarity(self, admin_client):
+        """Only candidates sharing a token with the supplier are returned."""
+        from backend.db import get_db
+        sid = self._create_supplier(admin_client, name="Vega")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sug1.pdf", "Vega Global Ltd", "[]"),
+            )
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sug2.pdf", "Schneider Electric", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Vega Global Ltd" in items
+        assert "Schneider Electric" not in items
+
+    def test_suggestions_excludes_normalized_canonical(self, admin_client):
+        """Punctuation-variant of canonical is excluded via normalize_name."""
+        from backend.db import get_db
+        sid = self._create_supplier(admin_client, name="Honeywell")
+        with get_db() as db:
+            # "Honeywell, Inc." normalizes to "honeywell inc" — not the same as "honeywell"
+            # But it shares token "honeywell", so it would pass similarity.
+            # It should NOT be excluded because it's not claimed (canonical is "honeywell", not "honeywell inc").
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sug3.pdf", "Honeywell, Inc.", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Honeywell, Inc." in items
+
+    def test_suggestions_excludes_normalized_alias_from_other_supplier(self, admin_client):
+        """Alias of another supplier is excluded even when tokens match."""
+        from backend.db import get_db
+        # Supplier A has alias "Alpha XYZ"
+        sid_a = self._create_supplier(admin_client, name="Alpha")
+        admin_client.post(f"/suppliers/{sid_a}/aliases", json={"alias": "Alpha XYZ"})
+        # Supplier B shares token "alpha"
+        sid_b = self._create_supplier(admin_client, name="Alpha Beta")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sug4.pdf", "Alpha XYZ", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid_b}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Alpha XYZ" not in items
+
+    def test_suggestions_orders_by_frequency(self, admin_client):
+        """Results are ordered by frequency in quotations (most common first)."""
+        from backend.db import get_db
+        sid = self._create_supplier(admin_client, name="Vega")
+        with get_db() as db:
+            # Vega A: 1 occurrence
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("freq1.pdf", "Vega A", "[]"),
+            )
+            # Vega B: 5 occurrences
+            for i in range(5):
+                db.execute(
+                    "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                    (f"freq_b_{i}.pdf", "Vega B", "[]"),
+                )
+            # Vega C: 3 occurrences
+            for i in range(3):
+                db.execute(
+                    "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                    (f"freq_c_{i}.pdf", "Vega C", "[]"),
+                )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        # Vega B (5) should come before Vega C (3) before Vega A (1)
+        idx_b = items.index("Vega B")
+        idx_c = items.index("Vega C")
+        idx_a = items.index("Vega A")
+        assert idx_b < idx_c < idx_a
+
+    def test_suggestions_caps_at_20(self, admin_client):
+        """At most 20 suggestions are returned."""
+        from backend.db import get_db
+        sid = self._create_supplier(admin_client, name="Alpha")
+        with get_db() as db:
+            for i in range(25):
+                db.execute(
+                    "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                    (f"cap_{i}.pdf", f"Alpha X{i}", "[]"),
+                )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        assert len(resp.json()["items"]) == 20
+
+    def test_suggestions_empty_canonical_returns_empty(self, admin_client):
+        """Supplier with empty canonical returns empty list."""
+        from backend.db import get_db
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, raw_name, display_name, status) VALUES (?, ?, ?, ?)",
+                ("", "", "", "review"),
+            )
+            sid = cur.lastrowid
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+    def test_suggestions_skips_already_claimed_canonical(self, admin_client):
+        """Quotation matching an existing canonical is not suggested."""
+        from backend.db import get_db
+        # Create a supplier with canonical "honeywell"
+        self._create_supplier(admin_client, name="Honeywell")
+        # Create another supplier that shares token "honeywell"
+        sid = self._create_supplier(admin_client, name="Honeywell Security")
+        with get_db() as db:
+            # "Honeywell" normalizes to "honeywell" — already claimed
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("claim1.pdf", "Honeywell", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Honeywell" not in items
 
 
 # =============================================================================

@@ -889,29 +889,52 @@ async def delete_alias(
 
 @router.get("/{supplier_id}/alias-suggestions", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def alias_suggestions(supplier_id: int):
-    """Suggest alias names from quotations that aren't yet canonical names or aliases.
+    """Suggest alias names from quotations relevant to this supplier.
 
     Returns up to 20 distinct ``supplier`` values from ``quotations`` that:
-      - Are not the canonical name of any supplier.
-      - Are not an existing alias of any supplier.
+      - Share at least one token with the current supplier's canonical_name.
+      - Are not the canonical name of any supplier (punctuation-safe via normalize_name).
+      - Are not an existing alias of any supplier (punctuation-safe via normalize_name).
+    Results are ordered by frequency (most common first).
     """
     with get_db(readonly=True) as db:
-        _get_supplier_or_404(db, supplier_id)
+        supplier = _get_supplier_or_404(db, supplier_id)
+        canonical = supplier["canonical_name"] or ""
+        tokens = canonical.split()
+        if not tokens:
+            return {"items": []}
+
+        # Build claimed set: all canonical names and aliases, normalized
+        claimed = set()
+        for row in db.execute("SELECT canonical_name FROM suppliers").fetchall():
+            claimed.add(row["canonical_name"])
+        for row in db.execute("SELECT alias FROM supplier_aliases").fetchall():
+            claimed.add(row["alias"])
+
+        # Fetch candidates ordered by frequency
         rows = db.execute(
-            """SELECT DISTINCT q.supplier
-               FROM quotations q
-               WHERE q.supplier IS NOT NULL
-               AND TRIM(q.supplier) != ''
-               AND LOWER(TRIM(q.supplier)) NOT IN (
-                   SELECT LOWER(canonical_name) FROM suppliers
-               )
-               AND LOWER(TRIM(q.supplier)) NOT IN (
-                   SELECT LOWER(alias) FROM supplier_aliases
-               )
-               ORDER BY q.supplier
-               LIMIT 20""",
+            """SELECT supplier, COUNT(*) AS n
+               FROM quotations
+               WHERE supplier IS NOT NULL AND TRIM(supplier) != ''
+               GROUP BY supplier
+               ORDER BY n DESC, supplier""",
         ).fetchall()
-    return {"items": [r["supplier"] for r in rows]}
+
+        results = []
+        for row in rows:
+            candidate = row["supplier"]
+            norm = normalize_name(candidate)
+            if not norm:
+                continue
+            if norm in claimed:
+                continue
+            if not any(t in norm for t in tokens):
+                continue
+            results.append(candidate)
+            if len(results) >= 20:
+                break
+
+    return {"items": results}
 
 
 # =============================================================================
