@@ -2177,6 +2177,88 @@ class TestBrandScan:
         resp = user_client.post(f"/suppliers/{sid}/brands/scan")
         assert resp.status_code == 403
 
+    def test_scan_is_strictly_idempotent(self, admin_client):
+        """Strict idempotency: running scan twice produces identical state."""
+        from backend.db import get_db
+        sid = self._create_supplier(admin_client, name="StrictIdempotent")
+        with get_db() as db:
+            items = json.dumps([
+                {"brand": "Crestron", "model": "C2N-RTHS", "description": "Sensor"},
+                {"brand": "Crestron", "model": "CEN-SWPOE-10", "description": "Switch"},
+                {"brand": "Sony", "model": "SRP-X350P", "description": "Processor"},
+            ])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("strict_idempotent.pdf", "StrictIdempotent", sid, items),
+            )
+
+        # First scan
+        r1 = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert r1.status_code == 200, f"First scan failed: {r1.status_code}"
+
+        # Capture state after first scan
+        with get_db(readonly=True) as db:
+            brands_after_1 = db.execute(
+                "SELECT brand_id FROM supplier_brands WHERE supplier_id = ? ORDER BY brand_id",
+                (sid,)
+            ).fetchall()
+            brand_count_after_1 = len(brands_after_1)
+
+            audit_count_after_1 = db.execute(
+                "SELECT COUNT(*) FROM supplier_audit_log WHERE supplier_id = ?",
+                (sid,)
+            ).fetchone()[0]
+
+            global_brand_link_count_after_1 = db.execute(
+                "SELECT COUNT(*) FROM supplier_brands"
+            ).fetchone()[0]
+
+        # Second scan
+        r2 = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert r2.status_code == 200, f"Second scan failed: {r2.status_code}"
+
+        # Capture state after second scan
+        with get_db(readonly=True) as db:
+            brands_after_2 = db.execute(
+                "SELECT brand_id FROM supplier_brands WHERE supplier_id = ? ORDER BY brand_id",
+                (sid,)
+            ).fetchall()
+            brand_count_after_2 = len(brands_after_2)
+
+            audit_count_after_2 = db.execute(
+                "SELECT COUNT(*) FROM supplier_audit_log WHERE supplier_id = ?",
+                (sid,)
+            ).fetchone()[0]
+
+            global_brand_link_count_after_2 = db.execute(
+                "SELECT COUNT(*) FROM supplier_brands"
+            ).fetchone()[0]
+
+        # ASSERTION 1: brand IDs identical (no new links, no removed links)
+        assert brands_after_1 == brands_after_2, (
+            f"Brand links changed between scans. "
+            f"After 1st: {brands_after_1}. After 2nd: {brands_after_2}"
+        )
+
+        # ASSERTION 2: brand count for this supplier unchanged
+        assert brand_count_after_1 == brand_count_after_2, (
+            f"Supplier brand count changed. "
+            f"After 1st: {brand_count_after_1}. After 2nd: {brand_count_after_2}"
+        )
+
+        # ASSERTION 3: no new audit log entries from 2nd scan
+        assert audit_count_after_2 == audit_count_after_1, (
+            f"Audit log polluted by idempotent 2nd scan. "
+            f"After 1st: {audit_count_after_1}. After 2nd: {audit_count_after_2}"
+        )
+
+        # ASSERTION 4: global supplier_brands table count unchanged
+        assert global_brand_link_count_after_1 == global_brand_link_count_after_2, (
+            f"Global brand-link table grew on 2nd scan. "
+            f"After 1st: {global_brand_link_count_after_1}. "
+            f"After 2nd: {global_brand_link_count_after_2}"
+        )
+
 
 # =============================================================================
 # MERGE SUPPLIERS
