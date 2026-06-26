@@ -194,7 +194,8 @@ window.Suppliers = (function () {
 
     let url = `/suppliers?page=${_currentPage}&per_page=${PER_PAGE}`;
     if (q) url += `&q=${encodeURIComponent(q)}`;
-    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (status && status !== 'all') url += `&status=${encodeURIComponent(status)}`;
+    else if (status === 'all') url += `&status=all`;
 
     try {
       const data = await _apiGet(url);
@@ -227,7 +228,7 @@ window.Suppliers = (function () {
       td.style.textAlign = 'center';
       td.style.padding = '24px';
       td.style.color = '#888';
-      td.appendChild(renderTextSafe("No suppliers found. Click '+ New Supplier' to add one."));
+      td.appendChild(renderTextSafe("No suppliers yet. Click '+ New Supplier' to add one."));
       tr.appendChild(td);
       tbody.appendChild(tr);
       return;
@@ -452,10 +453,19 @@ window.Suppliers = (function () {
     content.appendChild(backLink);
 
     // ── Display Name ──
+    // ── Identity Section ──
+    const identitySection = document.createElement('div');
+    identitySection.className = 'supplier-detail-section';
+
+    const identityTitle = document.createElement('h4');
+    identityTitle.className = 'supplier-section-title';
+    identityTitle.appendChild(renderTextSafe('Identity'));
+    identitySection.appendChild(identityTitle);
+
     const dnLabel = document.createElement('label');
     dnLabel.className = 'supplier-field-label';
     dnLabel.appendChild(renderTextSafe('Display Name *'));
-    content.appendChild(dnLabel);
+    identitySection.appendChild(dnLabel);
 
     const dnInput = document.createElement('input');
     dnInput.type = 'text';
@@ -464,13 +474,13 @@ window.Suppliers = (function () {
     dnInput.value = supplier.display_name || '';
     dnInput.required = true;
     dnInput.addEventListener('input', () => _setDirty());
-    content.appendChild(dnInput);
+    identitySection.appendChild(dnInput);
 
     // ── Canonical Name (read-only) ──
     const cnLabel = document.createElement('label');
     cnLabel.className = 'supplier-field-label';
-    cnLabel.appendChild(renderTextSafe('Canonical Name'));
-    content.appendChild(cnLabel);
+    cnLabel.appendChild(renderTextSafe('Supplier Name (matching key)'));
+    identitySection.appendChild(cnLabel);
 
     const cnInput = document.createElement('input');
     cnInput.type = 'text';
@@ -479,13 +489,13 @@ window.Suppliers = (function () {
     cnInput.readOnly = true;
     cnInput.style.background = '#f5f5f5';
     cnInput.style.color = '#888';
-    content.appendChild(cnInput);
+    identitySection.appendChild(cnInput);
 
     // ── Status ──
     const stLabel = document.createElement('label');
     stLabel.className = 'supplier-field-label';
     stLabel.appendChild(renderTextSafe('Status'));
-    content.appendChild(stLabel);
+    identitySection.appendChild(stLabel);
 
     const stSelect = document.createElement('select');
     stSelect.id = 'supplierStatus';
@@ -505,7 +515,9 @@ window.Suppliers = (function () {
       stSelect.appendChild(opt);
     }
     stSelect.addEventListener('change', () => _setDirty());
-    content.appendChild(stSelect);
+    identitySection.appendChild(stSelect);
+
+    content.appendChild(identitySection);
 
     // ── Aliases Section ──
     const aliasesSection = document.createElement('div');
@@ -515,6 +527,11 @@ window.Suppliers = (function () {
     aliasesTitle.className = 'supplier-section-title';
     aliasesTitle.appendChild(renderTextSafe('Aliases'));
     aliasesSection.appendChild(aliasesTitle);
+
+    const aliasesDesc = document.createElement('p');
+    aliasesDesc.className = 'supplier-section-desc';
+    aliasesDesc.appendChild(renderTextSafe('Alternative spellings or company names used for this supplier.'));
+    aliasesSection.appendChild(aliasesDesc);
 
     const aliasesContainer = document.createElement('div');
     aliasesContainer.id = 'supplierAliasesContainer';
@@ -550,6 +567,15 @@ window.Suppliers = (function () {
     }
     aliasesSection.appendChild(aliasInputRow);
 
+    // Alias suggestions container
+    const suggestionsContainer = document.createElement('div');
+    suggestionsContainer.id = 'supplierAliasSuggestions';
+    suggestionsContainer.style.cssText = 'margin-top:6px;display:flex;flex-wrap:wrap;gap:4px';
+    aliasesSection.appendChild(suggestionsContainer);
+
+    // Load suggestions (non-blocking)
+    _loadAliasSuggestions(supplier.id, suggestionsContainer);
+
     content.appendChild(aliasesSection);
 
     // ── Contacts Section ──
@@ -560,6 +586,11 @@ window.Suppliers = (function () {
     contactsTitle.className = 'supplier-section-title';
     contactsTitle.appendChild(renderTextSafe('Contacts'));
     contactsSection.appendChild(contactsTitle);
+
+    const contactsDesc = document.createElement('p');
+    contactsDesc.className = 'supplier-section-desc';
+    contactsDesc.appendChild(renderTextSafe('People at this supplier you communicate with.'));
+    contactsSection.appendChild(contactsDesc);
 
     const contactsContainer = document.createElement('div');
     contactsContainer.id = 'supplierContactsContainer';
@@ -596,6 +627,11 @@ window.Suppliers = (function () {
     brandsTitle.appendChild(renderTextSafe('Brands'));
     brandsSection.appendChild(brandsTitle);
 
+    const brandsDesc = document.createElement('p');
+    brandsDesc.className = 'supplier-section-desc';
+    brandsDesc.appendChild(renderTextSafe('The brands this supplier represents.'));
+    brandsSection.appendChild(brandsDesc);
+
     const brandsContainer = document.createElement('div');
     brandsContainer.id = 'supplierBrandsContainer';
     brandsContainer.className = 'tag-chip-container';
@@ -612,7 +648,7 @@ window.Suppliers = (function () {
     brandInput.id = 'supplierBrandInput';
     brandInput.className = 'supplier-text-input';
     brandInput.style.flex = '1';
-    brandInput.placeholder = 'Type to search brands...';
+    brandInput.placeholder = 'Type brand name... (use ; to add multiple)';
     brandInput.autocomplete = 'off';
     brandInput.addEventListener('input', () => _debouncedAutocomplete('brands'));
     brandInput.addEventListener('keydown', (e) => {
@@ -628,6 +664,22 @@ window.Suppliers = (function () {
     brandDropdown.className = 'autocomplete-dropdown hidden';
     brandInputRow.appendChild(brandDropdown);
 
+    if (canModify()) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-sm btn-success';
+      addBtn.style.whiteSpace = 'nowrap';
+      addBtn.appendChild(renderTextSafe('Add'));
+      addBtn.addEventListener('click', () => _addBrandFromInput());
+      brandInputRow.appendChild(addBtn);
+
+      const scanBtn = document.createElement('button');
+      scanBtn.className = 'btn btn-sm';
+      scanBtn.style.whiteSpace = 'nowrap';
+      scanBtn.appendChild(renderTextSafe('Scan'));
+      scanBtn.addEventListener('click', () => _scanBrands());
+      brandInputRow.appendChild(scanBtn);
+    }
+
     brandsSection.appendChild(brandInputRow);
     content.appendChild(brandsSection);
 
@@ -639,6 +691,11 @@ window.Suppliers = (function () {
     notesTitle.className = 'supplier-section-title';
     notesTitle.appendChild(renderTextSafe('Notes'));
     notesSection.appendChild(notesTitle);
+
+    const notesDesc = document.createElement('p');
+    notesDesc.className = 'supplier-section-desc';
+    notesDesc.appendChild(renderTextSafe('Internal notes about this supplier.'));
+    notesSection.appendChild(notesDesc);
 
     const notesTextarea = document.createElement('textarea');
     notesTextarea.id = 'supplierNotes';
@@ -678,6 +735,16 @@ window.Suppliers = (function () {
     purgeBtn.addEventListener('click', () => _purgeSupplier(supplier));
     actionsDiv.appendChild(purgeBtn);
 
+    // ── Merge button (Admin/Master only) ──
+    if (canModify()) {
+      const mergeBtn = document.createElement('button');
+      mergeBtn.className = 'btn btn-sm';
+      mergeBtn.style.marginLeft = '8px';
+      mergeBtn.appendChild(renderTextSafe('Merge into...'));
+      mergeBtn.addEventListener('click', () => _mergeSupplier(supplier));
+      actionsDiv.appendChild(mergeBtn);
+    }
+
     content.appendChild(actionsDiv);
 
     // Render sub-components
@@ -687,6 +754,34 @@ window.Suppliers = (function () {
   }
 
   // ─── Aliases ──────────────────────────────────────────────
+
+  async function _loadAliasSuggestions(supplierId, container) {
+    try {
+      const resp = await _apiGet(`/suppliers/${supplierId}/alias-suggestions`);
+      const items = resp.items || [];
+      if (items.length === 0) return;
+      const label = document.createElement('span');
+      label.style.cssText = 'font-size:11px;color:#888;width:100%';
+      label.appendChild(renderTextSafe('Suggestions from quotations:'));
+      container.appendChild(label);
+      for (const name of items) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'btn btn-sm btn-secondary';
+        chip.style.cssText = 'font-size:11px;padding:2px 6px';
+        chip.appendChild(renderTextSafe(name));
+        chip.addEventListener('click', () => {
+          _currentAliases.push({ id: null, alias_name: name });
+          _renderAliases();
+          _setDirty();
+          chip.remove();
+        });
+        container.appendChild(chip);
+      }
+    } catch (e) {
+      // Silently ignore — suggestions are non-critical
+    }
+  }
 
   function _addAlias() {
     const input = document.getElementById('supplierAliasInput');
@@ -715,7 +810,7 @@ window.Suppliers = (function () {
     if (_currentAliases.length === 0) {
       const empty = document.createElement('span');
       empty.style.cssText = 'font-size:13px;color:#999';
-      empty.appendChild(renderTextSafe('No aliases.'));
+      empty.appendChild(renderTextSafe('No aliases. Add alternative spellings or company names.'));
       container.appendChild(empty);
       return;
     }
@@ -749,7 +844,7 @@ window.Suppliers = (function () {
     if (_currentContacts.length === 0) {
       const empty = document.createElement('p');
       empty.style.cssText = 'font-size:13px;color:#999';
-      empty.appendChild(renderTextSafe('No contacts.'));
+      empty.appendChild(renderTextSafe('No contacts yet. Add at least one contact for this supplier.'));
       container.appendChild(empty);
       return;
     }
@@ -799,7 +894,30 @@ window.Suppliers = (function () {
       emailInput.placeholder = 'Email';
       emailInput.addEventListener('input', () => {
         _currentContacts[origIndex].email = emailInput.value;
+        // Clear any previous warning on new input
+        const warnEl = emailGroup.querySelector('.email-dup-warning');
+        if (warnEl) warnEl.remove();
         _setDirty();
+      });
+      emailInput.addEventListener('blur', async () => {
+        const val = emailInput.value.trim();
+        if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) return;
+        try {
+          const resp = await _apiGet(`/suppliers/contacts/check-email?email=${encodeURIComponent(val)}&exclude_supplier_id=${currentSupplierId || ''}`);
+          const usedBy = resp.used_by || [];
+          if (usedBy.length > 0) {
+            // Remove any existing warning first
+            const existing = emailGroup.querySelector('.email-dup-warning');
+            if (existing) existing.remove();
+            const warnEl = document.createElement('div');
+            warnEl.className = 'email-dup-warning';
+            warnEl.style.cssText = 'font-size:11px;color:#c00;margin-top:2px';
+            warnEl.appendChild(renderTextSafe('Already used by: ' + usedBy.map(u => u.display_name).join(', ') + '. Continue anyway?'));
+            emailGroup.appendChild(warnEl);
+          }
+        } catch (e) {
+          // Silently ignore — non-blocking
+        }
       });
       emailGroup.appendChild(emailInput);
       row.appendChild(emailGroup);
@@ -842,24 +960,48 @@ window.Suppliers = (function () {
       roleGroup.appendChild(roleInput);
       row.appendChild(roleGroup);
 
-      // Position
-      const posGroup = document.createElement('div');
-      posGroup.style.flex = '0.8';
-      const posLabel = document.createElement('label');
-      posLabel.className = 'supplier-contact-label';
-      posLabel.appendChild(renderTextSafe('Position'));
-      posGroup.appendChild(posLabel);
-      const posInput = document.createElement('input');
-      posInput.type = 'number';
-      posInput.className = 'supplier-text-input';
-      posInput.value = contact.position || 0;
-      posInput.style.width = '60px';
-      posInput.addEventListener('input', () => {
-        _currentContacts[origIndex].position = parseInt(posInput.value) || 0;
+      // Reorder buttons (up/down)
+      const reorderGroup = document.createElement('div');
+      reorderGroup.style.flex = '0.6';
+      reorderGroup.style.display = 'flex';
+      reorderGroup.style.alignItems = 'center';
+      reorderGroup.style.gap = '2px';
+      reorderGroup.style.alignSelf = 'flex-end';
+
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.className = 'btn btn-sm btn-secondary';
+      upBtn.appendChild(renderTextSafe('↑'));
+      upBtn.title = 'Move up';
+      upBtn.disabled = (origIndex === 0);
+      upBtn.addEventListener('click', () => {
+        if (origIndex <= 0) return;
+        const temp = _currentContacts[origIndex];
+        _currentContacts[origIndex] = _currentContacts[origIndex - 1];
+        _currentContacts[origIndex - 1] = temp;
+        _reindexContacts();
+        _renderContacts();
         _setDirty();
       });
-      posGroup.appendChild(posInput);
-      row.appendChild(posGroup);
+      reorderGroup.appendChild(upBtn);
+
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.className = 'btn btn-sm btn-secondary';
+      downBtn.appendChild(renderTextSafe('↓'));
+      downBtn.title = 'Move down';
+      downBtn.disabled = (origIndex >= _currentContacts.length - 1);
+      downBtn.addEventListener('click', () => {
+        if (origIndex >= _currentContacts.length - 1) return;
+        const temp = _currentContacts[origIndex];
+        _currentContacts[origIndex] = _currentContacts[origIndex + 1];
+        _currentContacts[origIndex + 1] = temp;
+        _reindexContacts();
+        _renderContacts();
+        _setDirty();
+      });
+      reorderGroup.appendChild(downBtn);
+      row.appendChild(reorderGroup);
 
       // Default RFQ checkbox
       const rfqGroup = document.createElement('div');
@@ -903,6 +1045,12 @@ window.Suppliers = (function () {
     }
   }
 
+  function _reindexContacts() {
+    for (let i = 0; i < _currentContacts.length; i++) {
+      _currentContacts[i].position = i * 10;
+    }
+  }
+
   // ─── Brands ───────────────────────────────────────────────
 
   function _renderBrands() {
@@ -913,7 +1061,7 @@ window.Suppliers = (function () {
     if (_currentBrands.length === 0) {
       const empty = document.createElement('span');
       empty.style.cssText = 'font-size:13px;color:#999';
-      empty.appendChild(renderTextSafe('No brands.'));
+      empty.appendChild(renderTextSafe('No brands yet. Add the brands this supplier represents.'));
       container.appendChild(empty);
       return;
     }
@@ -945,21 +1093,60 @@ window.Suppliers = (function () {
   function _addBrandFromInput() {
     const input = document.getElementById('supplierBrandInput');
     if (!input) return;
-    const name = input.value.trim();
-    if (!name) return;
+    const raw = input.value.trim();
+    if (!raw) return;
 
-    // Check for duplicate
-    const exists = _currentBrands.some(b =>
-      (b.name || b.brand_name || '').toLowerCase() === name.toLowerCase()
-    );
-    if (exists) return;
-
-    _currentBrands.push({ id: null, name: name });
-    _renderBrands();
-    _setDirty();
+    // Split by ; and add each brand
+    const names = raw.split(';').map(s => s.trim()).filter(Boolean);
+    let added = 0;
+    for (const name of names) {
+      const exists = _currentBrands.some(b =>
+        (b.name || b.brand_name || '').toLowerCase() === name.toLowerCase()
+      );
+      if (!exists) {
+        _currentBrands.push({ id: null, name: name });
+        added++;
+      }
+    }
+    if (added > 0) {
+      _renderBrands();
+      _setDirty();
+    }
     input.value = '';
     input.focus();
     _hideAutocomplete('brands');
+  }
+
+  async function _scanBrands() {
+    if (!currentSupplierId) return;
+    const scanBtn = document.querySelector('.supplier-detail-section:last-of-type .btn-sm');
+    if (scanBtn) {
+      scanBtn.disabled = true;
+      scanBtn.textContent = 'Scanning...';
+    }
+    try {
+      const resp = await _apiPost(`/suppliers/${currentSupplierId}/brands/scan`);
+      if (resp.added > 0) {
+        // Reload brands from server
+        const brandsResp = await _apiGet(`/suppliers/${currentSupplierId}/brands`);
+        _currentBrands = _unwrapItems(brandsResp).map(b => ({ ...b }));
+        _renderBrands();
+        _setDirty();
+        const linkedMsg = resp.linked > 0 ? ` (${resp.linked} quotation(s) linked)` : '';
+        alert(`Scan complete: ${resp.added} new brand(s) added.${linkedMsg}`);
+      } else {
+        const linkedMsg = resp.linked > 0 ? ` (${resp.linked} quotation(s) linked)` : '';
+        alert(`Scan complete: no new brands found. (${resp.total_found} already linked)${linkedMsg}`);
+      }
+    } catch (e) {
+      console.error('Brand scan failed:', e);
+      alert('Scan failed: ' + (e.message || 'Unknown error'));
+    } finally {
+      if (scanBtn) {
+        scanBtn.disabled = false;
+        scanBtn.textContent = 'Scan';
+      }
+    }
   }
 
   // ─── Autocomplete ─────────────────────────────────────────
@@ -1205,6 +1392,8 @@ window.Suppliers = (function () {
         successMsg += ' Some sub-resources could not be saved: ' + failedSteps.join(', ') + '. See console for details.';
       }
       _showSuccess(successMsg);
+      // Refresh review badge in case status changed
+      updateReviewBadge();
     } catch (e) {
       if (e.status === 401 && typeof showLogin === 'function') {
         showLogin();
@@ -1214,7 +1403,7 @@ window.Suppliers = (function () {
       if (e.status === 403) {
         msg = 'You do not have permission for this action.';
       } else if (e.status === 409) {
-        msg = 'Duplicate value (e.g. canonical name or alias already exists).';
+        msg = 'Duplicate value (e.g. supplier name or alias already exists).';
       } else if (e.status >= 500) {
         msg = 'Something went wrong. Please try again.';
       }
@@ -1237,7 +1426,7 @@ window.Suppliers = (function () {
     const name = supplier.display_name || supplier.canonical_name || 'unnamed';
     if (!confirm(
       '⚠️ Permanently purge supplier \'' + name + '\'?\n\n' +
-      'This will permanently delete the supplier and all its contacts, aliases, and capabilities.\n' +
+      'This will permanently delete the supplier and all its contacts, aliases, and brands.\n' +
       'A snapshot will be stored in the audit log.\n\n' +
       'This action cannot be undone.'
     )) {
@@ -1275,6 +1464,70 @@ window.Suppliers = (function () {
     }
   }
 
+  async function _mergeSupplier(source) {
+    const sourceName = source.display_name || source.canonical_name || 'unnamed';
+    const targetName = prompt('Merge "' + sourceName + '" into which supplier?\n\nEnter the target supplier name:');
+    if (!targetName || !targetName.trim()) return;
+
+    _clearError('supplierDetailError');
+
+    try {
+      // Find target supplier by searching
+      const searchResp = await _apiGet(`/suppliers?q=${encodeURIComponent(targetName.trim())}&per_page=10`);
+      const items = searchResp.items || [];
+      if (items.length === 0) {
+        alert('No supplier found matching "' + targetName.trim() + '".');
+        return;
+      }
+
+      let target;
+      if (items.length === 1) {
+        target = items[0];
+      } else {
+        // Multiple matches — let user pick
+        const list = items.map((s, i) => `${i + 1}. ${s.display_name || s.canonical_name}`).join('\n');
+        const pick = prompt('Multiple suppliers found:\n\n' + list + '\n\nEnter the number of the target:');
+        if (!pick || isNaN(pick)) return;
+        target = items[parseInt(pick, 10) - 1];
+      }
+
+      if (!target) {
+        alert('Invalid selection.');
+        return;
+      }
+
+      if (target.id === source.id) {
+        alert('Cannot merge a supplier into itself.');
+        return;
+      }
+
+      const targetDispName = target.display_name || target.canonical_name;
+      if (!confirm('Merge "' + sourceName + '" into "' + targetDispName + '"?\n\nAll quotations, contacts, aliases, and brands will be transferred. The source supplier will be deleted.')) {
+        return;
+      }
+
+      const resp = await _apiPost(`/suppliers/${source.id}/merge/${target.id}`);
+      _showSuccess('Merged into "' + targetDispName + '" successfully.');
+      _listStale = true;
+      updateReviewBadge();
+      await loadDetail(target.id);
+    } catch (e) {
+      if (e.status === 401 && typeof showLogin === 'function') {
+        showLogin();
+        return;
+      }
+      let msg = e.message || 'Failed to merge suppliers.';
+      if (e.status === 403) {
+        msg = 'Permission denied.';
+      } else if (e.status === 404) {
+        msg = 'Supplier not found.';
+      } else if (e.status >= 500) {
+        msg = 'Something went wrong. Please try again.';
+      }
+      _showError('supplierDetailError', msg);
+    }
+  }
+
   // ─── New Supplier ─────────────────────────────────────────
 
   /**
@@ -1291,7 +1544,7 @@ window.Suppliers = (function () {
 
     // Loop until the user cancels or creates successfully
     while (true) {
-      const name = prompt('Enter canonical name for the new supplier:');
+        const name = prompt('Enter supplier name:');
       if (!name || !name.trim()) return; // user cancelled
 
       try {
@@ -1345,6 +1598,25 @@ window.Suppliers = (function () {
 
   // ─── Public API ───────────────────────────────────────────
 
+  // ─── Review Badge ────────────────────────────────────────
+
+  async function updateReviewBadge() {
+    try {
+      const data = await _apiGet('/suppliers?status=review&per_page=1');
+      const badge = document.getElementById('suppliersReviewBadge');
+      if (!badge) return;
+      const count = data.total || 0;
+      if (count > 0) {
+        badge.textContent = count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    } catch (e) {
+      // Silently ignore — badge is non-critical
+    }
+  }
+
   return {
     // State (read-only access for nav guard)
     get dirty() { return dirty; },
@@ -1362,6 +1634,7 @@ window.Suppliers = (function () {
     loadList: loadList,
     loadDetail: loadDetail,
     newSupplier: newSupplier,
+    updateReviewBadge: updateReviewBadge,
 
     // Internal (exposed for inline handlers + testability)
     _onSearchInput: _onSearchInput,

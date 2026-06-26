@@ -792,6 +792,35 @@ async def confirm(req: ConfirmRequest):
              currency, json.dumps(items), document_type, extraction_method)
         )
         last_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # Auto-associate brands with supplier
+        if supplier and items:
+            from ..suppliers import normalize_name, resolve_supplier
+            sid = resolve_supplier(db, supplier)
+            if sid:
+                # Collect unique brands from items
+                brands_found = set()
+                for item in items:
+                    brand = (item.get("brand") or "").strip()
+                    if brand:
+                        norm = normalize_name(brand)
+                        if norm:
+                            brands_found.add(norm)
+
+                # Link new brands to supplier
+                for brand_name in brands_found:
+                    db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (brand_name,))
+                    brand_row = db.execute("SELECT id FROM brands WHERE name = ?", (brand_name,)).fetchone()
+                    if brand_row:
+                        already = db.execute(
+                            "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+                            (sid, brand_row["id"]),
+                        ).fetchone()
+                        if not already:
+                            db.execute(
+                                "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+                                (sid, brand_row["id"]),
+                            )
     
     # Move PDF to archive
     src = Path(entry["filepath"])

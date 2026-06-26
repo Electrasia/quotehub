@@ -256,9 +256,9 @@ async def create_supplier(body: SupplierCreate, user: dict = Depends(require_rol
     with get_db() as db:
         try:
             cur = db.execute(
-                "INSERT INTO suppliers (canonical_name, display_name, status, notes) "
-                "VALUES (?, ?, 'active', ?)",
-                (norm, display, notes),
+                "INSERT INTO suppliers (canonical_name, raw_name, display_name, status, notes) "
+                "VALUES (?, ?, ?, 'active', ?)",
+                (norm, body.canonical_name.strip(), display, notes),
             )
             supplier_id = cur.lastrowid
         except Exception as exc:
@@ -268,12 +268,34 @@ async def create_supplier(body: SupplierCreate, user: dict = Depends(require_rol
 
         _write_audit_log(db, supplier_id, _make_audit_entry(
             "create_supplier", user,
-            {"canonical_name": norm, "display_name": display},
+            {"canonical_name": norm, "raw_name": body.canonical_name.strip(), "display_name": display},
         ))
 
         supplier = dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
 
     return supplier
+
+
+@router.get("/contacts/check-email", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def check_email(
+    email: str = Query(..., min_length=1),
+    exclude_supplier_id: int = Query(None),
+):
+    """Check if an email is already used by another supplier's contact.
+
+    Returns ``{ "used_by": [{ "supplier_id": int, "display_name": str }] }``.
+    """
+    with get_db(readonly=True) as db:
+        rows = db.execute(
+            """SELECT DISTINCT s.id AS supplier_id, s.display_name
+               FROM contacts c
+               JOIN suppliers s ON s.id = c.supplier_id
+               WHERE LOWER(c.email) = LOWER(?)
+               AND s.id != COALESCE(?, -1)
+               AND s.status != 'inactive'""",
+            (email.strip(), exclude_supplier_id),
+        ).fetchall()
+    return {"used_by": [dict(r) for r in rows]}
 
 
 @router.get("/{supplier_id}", dependencies=[Depends(require_role("user", "admin", "master"))])
@@ -553,6 +575,111 @@ async def purge_supplier(
     return {"detail": "Supplier purged. Snapshot retained in audit log."}
 
 
+@router.post("/{source_id}/merge/{target_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def merge_suppliers(
+    source_id: int,
+    target_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Merge source supplier into target. Moves all data, then deletes source.
+
+    Admin/Master only. Source and target must be different suppliers.
+    """
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a supplier into itself")
+
+    with get_db() as db:
+        source = _get_supplier_or_404(db, source_id)
+        target = _get_supplier_or_404(db, target_id)
+
+        # ── Build snapshot BEFORE any data moves ────────────────────────
+        source_contacts = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM contacts WHERE supplier_id = ?", (source_id,),
+            ).fetchall()
+        ]
+        source_aliases = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_aliases WHERE supplier_id = ?", (source_id,),
+            ).fetchall()
+        ]
+        source_capabilities = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_capabilities WHERE supplier_id = ?", (source_id,),
+            ).fetchall()
+        ]
+        source_brands = [
+            dict(r) for r in db.execute(
+                """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+                   FROM supplier_brands sb
+                   JOIN brands b ON b.id = sb.brand_id
+                   WHERE sb.supplier_id = ?""",
+                (source_id,),
+            ).fetchall()
+        ]
+
+        # ── Move quotations ────────────────────────────────────────────
+        db.execute(
+            "UPDATE quotations SET supplier_id = ? WHERE supplier_id = ?",
+            (target_id, source_id),
+        )
+
+        # ── Move contacts ──────────────────────────────────────────────
+        db.execute(
+            "UPDATE contacts SET supplier_id = ? WHERE supplier_id = ?",
+            (target_id, source_id),
+        )
+
+        # ── Move aliases: delete from source first (UNIQUE constraint), then insert for target
+        db.execute("DELETE FROM supplier_aliases WHERE supplier_id = ?", (source_id,))
+        for a in source_aliases:
+            exists = db.execute(
+                "SELECT id FROM supplier_aliases WHERE alias = ?",
+                (a["alias"],),
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO supplier_aliases (alias, raw_alias, supplier_id) VALUES (?, ?, ?)",
+                    (a["alias"], a["raw_alias"], target_id),
+                )
+
+        # ── Move brands (skip duplicates) ──────────────────────────────
+        for b in source_brands:
+            exists = db.execute(
+                "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+                (target_id, b["brand_id"]),
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+                    (target_id, b["brand_id"]),
+                )
+
+        # ── Delete source (now empty) ──────────────────────────────────
+        db.execute("DELETE FROM supplier_capabilities WHERE supplier_id = ?", (source_id,))
+        db.execute("DELETE FROM supplier_brands WHERE supplier_id = ?", (source_id,))
+        db.execute("DELETE FROM contacts WHERE supplier_id = ?", (source_id,))
+        db.execute("DELETE FROM suppliers WHERE id = ?", (source_id,))
+
+        # ── Audit log on target with complete snapshot ──────────────────
+        snapshot = {
+            "supplier": dict(source),
+            "contacts": source_contacts,
+            "aliases": source_aliases,
+            "brands": source_brands,
+            "capabilities": source_capabilities,
+            "merged_at": _now_iso(),
+            "reason": "admin_merge",
+        }
+        _write_audit_log(db, target_id, _make_audit_entry(
+            "merge_supplier", user,
+            {"merged_source_id": source_id, "source_name": source["canonical_name"],
+             "snapshot": snapshot},
+        ))
+
+    return {"status": "merged", "target_id": target_id}
+
+
 # =============================================================================
 # CONTACTS
 # =============================================================================
@@ -709,8 +836,8 @@ async def create_alias(
 
         try:
             cur = db.execute(
-                "INSERT INTO supplier_aliases (alias, supplier_id) VALUES (?, ?)",
-                (norm, supplier_id),
+                "INSERT INTO supplier_aliases (alias, raw_alias, supplier_id) VALUES (?, ?, ?)",
+                (norm, body.alias.strip(), supplier_id),
             )
             alias_id = cur.lastrowid
         except Exception as exc:
@@ -720,10 +847,10 @@ async def create_alias(
 
         _write_audit_log(db, supplier_id, _make_audit_entry(
             "add_alias", user,
-            {"alias_id": alias_id, "alias": norm},
+            {"alias_id": alias_id, "alias": norm, "raw_alias": body.alias.strip()},
         ))
 
-        row = dict(db.execute("SELECT id, alias, created_at FROM supplier_aliases WHERE id = ?", (alias_id,)).fetchone())
+        row = dict(db.execute("SELECT id, alias, raw_alias, created_at FROM supplier_aliases WHERE id = ?", (alias_id,)).fetchone())
 
     return row
 
@@ -753,6 +880,33 @@ async def delete_alias(
         ))
 
     return {"status": "deleted"}
+
+
+@router.get("/{supplier_id}/alias-suggestions", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def alias_suggestions(supplier_id: int):
+    """Suggest alias names from quotations that aren't yet canonical names or aliases.
+
+    Returns up to 20 distinct ``supplier`` values from ``quotations`` that:
+      - Are not the canonical name of any supplier.
+      - Are not an existing alias of any supplier.
+    """
+    with get_db(readonly=True) as db:
+        _get_supplier_or_404(db, supplier_id)
+        rows = db.execute(
+            """SELECT DISTINCT q.supplier
+               FROM quotations q
+               WHERE q.supplier IS NOT NULL
+               AND TRIM(q.supplier) != ''
+               AND LOWER(TRIM(q.supplier)) NOT IN (
+                   SELECT LOWER(canonical_name) FROM suppliers
+               )
+               AND LOWER(TRIM(q.supplier)) NOT IN (
+                   SELECT LOWER(alias) FROM supplier_aliases
+               )
+               ORDER BY q.supplier
+               LIMIT 20""",
+        ).fetchall()
+    return {"items": [r["supplier"] for r in rows]}
 
 
 # =============================================================================
@@ -858,6 +1012,107 @@ async def remove_supplier_brand(
         ))
 
     return {"status": "deleted"}
+
+
+@router.post("/{supplier_id}/brands/scan", dependencies=[Depends(require_role("admin", "master"))])
+async def scan_supplier_brands(
+    supplier_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Scan all quotations for this supplier and auto-link any brands found in items.
+
+    Returns the count of newly added brands.
+    """
+    with get_db() as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        # Step 1: Link unlinked quotations that match this supplier's raw name or aliases
+        raw_name = supplier.get("raw_name") or supplier["canonical_name"]
+        names_to_match = [raw_name]
+        alias_rows = db.execute(
+            "SELECT raw_alias FROM supplier_aliases WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchall()
+        for row in alias_rows:
+            if row["raw_alias"]:
+                names_to_match.append(row["raw_alias"])
+
+        # Case-insensitive matching: compare LOWER(supplier) against LOWER(known names)
+        lower_names = [n.lower() for n in names_to_match]
+        placeholders = ",".join("?" * len(lower_names))
+        link_result = db.execute(
+            f"""UPDATE quotations SET supplier_id = ?
+                WHERE supplier_id IS NULL
+                  AND LOWER(supplier) IN ({placeholders})""",
+            [supplier_id] + lower_names,
+        )
+        linked_count = link_result.rowcount
+
+        # Step 2: Fetch all quotations for this supplier (now includes newly linked)
+        quotations = db.execute(
+            "SELECT items FROM quotations WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchall()
+
+        if not quotations:
+            return {"added": 0, "total_found": 0, "linked": linked_count,
+                    "message": "No quotations found for this supplier"}
+
+        # Collect unique brand names from all quotation items
+        brands_found = set()
+        for q in quotations:
+            items = json.loads(q["items"]) if q["items"] else []
+            for item in items:
+                brand = (item.get("brand") or "").strip()
+                if brand:
+                    norm = normalize_name(brand)
+                    if norm:
+                        brands_found.add(norm)
+
+        if not brands_found:
+            return {"added": 0, "total_found": 0, "linked": linked_count,
+                    "message": "No brands found in quotation items"}
+
+        # Get existing brands for this supplier
+        existing = db.execute(
+            """SELECT b.name FROM supplier_brands sb
+               JOIN brands b ON b.id = sb.brand_id
+               WHERE sb.supplier_id = ?""",
+            (supplier_id,),
+        ).fetchall()
+        existing_names = {row["name"] for row in existing}
+
+        # Add new brands
+        added = 0
+        for brand_name in brands_found:
+            if brand_name in existing_names:
+                continue
+
+            # Ensure brand exists in global table
+            db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (brand_name,))
+            brand_row = db.execute("SELECT id FROM brands WHERE name = ?", (brand_name,)).fetchone()
+            brand_id = brand_row["id"]
+
+            # Link to supplier (skip if already linked)
+            already_linked = db.execute(
+                "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+                (supplier_id, brand_id),
+            ).fetchone()
+            if not already_linked:
+                db.execute(
+                    "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+                    (supplier_id, brand_id),
+                )
+                added += 1
+
+        if added > 0 or linked_count > 0:
+            _write_audit_log(db, supplier_id, _make_audit_entry(
+                "scan_supplier_brands", user,
+                {"brands_added": added, "total_found": len(brands_found),
+                 "quotations_linked": linked_count},
+            ))
+
+    return {"added": added, "total_found": len(brands_found), "linked": linked_count}
 
 
 # =============================================================================

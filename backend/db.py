@@ -104,6 +104,8 @@ def get_db(readonly=False):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA wal_autocheckpoint=500")
+    if not readonly:
+        conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         # Auto-commit on successful exit (for write operations)
@@ -347,6 +349,7 @@ def _v2_suppliers_ddl(db):
         CREATE TABLE IF NOT EXISTS suppliers (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             canonical_name  TEXT NOT NULL UNIQUE,
+            raw_name        TEXT NOT NULL DEFAULT '',
             display_name    TEXT NOT NULL DEFAULT '',
             status          TEXT NOT NULL DEFAULT 'active'
                             CHECK(status IN ('active','inactive','review')),
@@ -360,6 +363,7 @@ def _v2_suppliers_ddl(db):
         CREATE TABLE IF NOT EXISTS supplier_aliases (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             alias         TEXT NOT NULL UNIQUE,
+            raw_alias     TEXT NOT NULL DEFAULT '',
             supplier_id   INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
             created_at    TEXT NOT NULL DEFAULT (datetime('now'))
         )
@@ -655,6 +659,42 @@ def _v4_supplier_brands(db):
 
 
 MIGRATIONS[4] = _v4_supplier_brands
+
+
+def _v5_supplier_raw_name(db):
+    """Add ``raw_name`` column to ``suppliers`` to store the original user input.
+
+    DDL only — idempotent (IF NOT EXISTS via PRAGMA check).
+    Existing rows get ``raw_name = canonical_name`` as fallback.
+    """
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(suppliers)").fetchall()}
+    if "raw_name" not in cols:
+        db.execute("ALTER TABLE suppliers ADD COLUMN raw_name TEXT")
+        logger.info("  -> Added raw_name to suppliers")
+        # Backfill existing rows: set raw_name = canonical_name
+        db.execute("UPDATE suppliers SET raw_name = canonical_name WHERE raw_name IS NULL")
+        logger.info("  -> Backfilled raw_name for existing suppliers")
+    logger.info("Migration v5 complete: raw_name column added")
+
+
+MIGRATIONS[5] = _v5_supplier_raw_name
+
+
+def _v6_alias_raw_name(db):
+    """Add ``raw_alias`` column to ``supplier_aliases`` to store the original user input.
+
+    DDL only — idempotent. Existing rows get ``raw_alias = alias`` as fallback.
+    """
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(supplier_aliases)").fetchall()}
+    if "raw_alias" not in cols:
+        db.execute("ALTER TABLE supplier_aliases ADD COLUMN raw_alias TEXT")
+        logger.info("  -> Added raw_alias to supplier_aliases")
+        db.execute("UPDATE supplier_aliases SET raw_alias = alias WHERE raw_alias IS NULL")
+        logger.info("  -> Backfilled raw_alias for existing aliases")
+    logger.info("Migration v6 complete: raw_alias column added")
+
+
+MIGRATIONS[6] = _v6_alias_raw_name
 
 
 def _init_schema_version(db):

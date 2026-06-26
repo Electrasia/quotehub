@@ -2006,3 +2006,436 @@ class TestSupplierBrands:
             assert "brands" in details
             assert len(details["brands"]) >= 1
 
+
+# =============================================================================
+# BRAND SCAN ENDPOINT
+# =============================================================================
+
+
+class TestBrandScan:
+    """Tests for POST /suppliers/{id}/brands/scan."""
+
+    def _create_supplier(self, client, name="Scan Corp"):
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_scan_no_quotations(self, admin_client):
+        """Scan with no quotations returns added=0."""
+        sid = self._create_supplier(admin_client)
+        resp = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["added"] == 0
+
+    def test_scan_finds_brands(self, admin_client):
+        """Scan finds brands in quotation items and links them."""
+        sid = self._create_supplier(admin_client, name="ScanBrandCorp")
+        # Insert a quotation with brand items
+        from backend.db import get_db
+        with get_db() as db:
+            items = json.dumps([
+                {"brand": "Crestron", "model": "C2N-RTHS", "description": "Sensor"},
+                {"brand": "Crestron", "model": "CEN-SWPOE-10", "description": "Switch"},
+                {"brand": "Sony", "model": "SRP-X350P", "description": "Processor"},
+            ])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("scan_test_1.pdf", "ScanBrandCorp", sid, items),
+            )
+        resp = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["added"] == 2  # crestron, sony
+        assert data["total_found"] == 2
+        # Verify brands linked
+        list_resp = admin_client.get(f"/suppliers/{sid}/brands")
+        names = {b["name"] for b in list_resp.json()["items"]}
+        assert "crestron" in names
+        assert "sony" in names
+
+    def test_scan_idempotent(self, admin_client):
+        """Scanning twice doesn't duplicate brands."""
+        sid = self._create_supplier(admin_client, name="ScanIdempotent")
+        from backend.db import get_db
+        with get_db() as db:
+            items = json.dumps([{"brand": "Bose", "model": "XYZ", "description": "Speaker"}])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("scan_test_2.pdf", "ScanIdempotent", sid, items),
+            )
+        resp1 = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp1.json()["added"] == 1
+        resp2 = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp2.json()["added"] == 0  # already linked
+
+    def test_scan_creates_global_brand(self, admin_client):
+        """Scan creates brand in global brands table if needed."""
+        sid = self._create_supplier(admin_client, name="ScanGlobalBrand")
+        from backend.db import get_db
+        with get_db() as db:
+            items = json.dumps([{"brand": "NewGlobalScan", "model": "M1", "description": "Test"}])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("scan_test_3.pdf", "ScanGlobalBrand", sid, items),
+            )
+        admin_client.post(f"/suppliers/{sid}/brands/scan")
+        with get_db(readonly=True) as db:
+            row = db.execute("SELECT id FROM brands WHERE name = ?", ("newglobalscan",)).fetchone()
+            assert row is not None
+
+    def test_scan_audit_log(self, admin_client):
+        """Scan writes audit log when brands are added."""
+        sid = self._create_supplier(admin_client, name="ScanAudit")
+        from backend.db import get_db
+        with get_db() as db:
+            items = json.dumps([{"brand": "AuditBrand", "model": "A1", "description": "Test"}])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("scan_test_4.pdf", "ScanAudit", sid, items),
+            )
+        admin_client.post(f"/suppliers/{sid}/brands/scan")
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("scan_supplier_brands", sid),
+            ).fetchone()
+            assert row is not None
+
+    def test_scan_links_unlinked_quotations(self, admin_client):
+        """Scan links quotations with supplier_id=NULL that match supplier name."""
+        sid = self._create_supplier(admin_client, name="LinkTest")
+        from backend.db import get_db
+        # Insert quotation with matching supplier name but supplier_id=NULL
+        with get_db() as db:
+            items = json.dumps([{"brand": "LinkBrand", "model": "L1", "description": "Test"}])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("link_test.pdf", "LinkTest", None, items),
+            )
+            # Verify it's unlinked
+            row = db.execute("SELECT supplier_id FROM quotations WHERE filename = ?", ("link_test.pdf",)).fetchone()
+            assert row["supplier_id"] is None
+        # Scan should link it
+        resp = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["linked"] == 1
+        assert data["added"] == 1
+        # Verify now linked
+        with get_db(readonly=True) as db:
+            row = db.execute("SELECT supplier_id FROM quotations WHERE filename = ?", ("link_test.pdf",)).fetchone()
+            assert row["supplier_id"] == sid
+
+    def test_scan_links_by_alias(self, admin_client):
+        """Scan links quotations matching a supplier's alias."""
+        sid = self._create_supplier(admin_client, name="AliasLink")
+        # Add an alias
+        admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "AL-Link"})
+        from backend.db import get_db
+        # Insert quotation matching the alias
+        with get_db() as db:
+            items = json.dumps([{"brand": "AliasBrand", "model": "A1", "description": "Test"}])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("alias_link.pdf", "AL-Link", None, items),
+            )
+        resp = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["linked"] == 1
+        assert data["added"] == 1
+
+    def test_scan_links_by_alias_with_special_chars(self, admin_client):
+        """Scan links quotations matching a supplier's alias that has parentheses."""
+        sid = self._create_supplier(admin_client, name="ParensAlias")
+        # Add alias with parentheses
+        admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "Parens (Test)"})
+        from backend.db import get_db
+        # Insert quotation matching the raw alias exactly (with parentheses)
+        with get_db() as db:
+            items = json.dumps([{"brand": "ParensBrand", "model": "P1", "description": "Test"}])
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("parens_alias.pdf", "Parens (Test)", None, items),
+            )
+        resp = admin_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["linked"] == 1
+        assert data["added"] == 1
+
+    def test_scan_user_403(self, user_client):
+        """User role cannot scan brands (403)."""
+        from backend.db import get_db
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)",
+                ("scan-readonly", "Scan Readonly"),
+            )
+            sid = cur.lastrowid
+        resp = user_client.post(f"/suppliers/{sid}/brands/scan")
+        assert resp.status_code == 403
+
+
+# =============================================================================
+# MERGE SUPPLIERS
+# =============================================================================
+
+
+class TestMergeSuppliers:
+    """Tests for POST /suppliers/{source_id}/merge/{target_id}."""
+
+    def _create_supplier(self, client, name="Merge Corp"):
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_merge_moves_quotations(self, admin_client):
+        """Merge moves quotations from source to target."""
+        target_id = self._create_supplier(admin_client, name="MergeTarget")
+        source_id = self._create_supplier(admin_client, name="MergeSource")
+        from backend.db import get_db
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, supplier_id, items) VALUES (?, ?, ?, ?)",
+                ("merge_q.pdf", "MergeSource", source_id, "[]"),
+            )
+        resp = admin_client.post(f"/suppliers/{source_id}/merge/{target_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "merged"
+        with get_db(readonly=True) as db:
+            q = db.execute("SELECT supplier_id FROM quotations WHERE filename = ?", ("merge_q.pdf",)).fetchone()
+            assert q["supplier_id"] == target_id
+            src = db.execute("SELECT id FROM suppliers WHERE id = ?", (source_id,)).fetchone()
+            assert src is None
+
+    def test_merge_skips_duplicate_aliases(self, admin_client):
+        """Merge skips aliases that already exist globally (UNIQUE constraint)."""
+        target_id = self._create_supplier(admin_client, name="AliasTarget")
+        source_id = self._create_supplier(admin_client, name="AliasSource")
+        admin_client.post(f"/suppliers/{target_id}/aliases", json={"alias": "TargetAlias"})
+        admin_client.post(f"/suppliers/{source_id}/aliases", json={"alias": "SourceAlias"})
+        resp = admin_client.post(f"/suppliers/{source_id}/merge/{target_id}")
+        assert resp.status_code == 200
+        list_resp = admin_client.get(f"/suppliers/{target_id}/aliases")
+        names = {a["alias"] for a in list_resp.json()["items"]}
+        assert "targetalias" in names
+        assert "sourcealias" in names
+
+    def test_merge_self_returns_400(self, admin_client):
+        """Merging into itself returns 400."""
+        sid = self._create_supplier(admin_client, name="SelfMerge")
+        resp = admin_client.post(f"/suppliers/{sid}/merge/{sid}")
+        assert resp.status_code == 400
+
+    def test_merge_nonexistent_returns_404(self, admin_client):
+        """Merging non-existent supplier returns 404."""
+        sid = self._create_supplier(admin_client, name="Merge404")
+        resp = admin_client.post(f"/suppliers/{sid}/merge/99999")
+        assert resp.status_code == 404
+
+    def test_merge_user_403(self, user_client):
+        """User role cannot merge (403)."""
+        from backend.db import get_db
+        with get_db() as db:
+            t = db.execute("INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)", ("mt", "MT")).lastrowid
+            s = db.execute("INSERT INTO suppliers (canonical_name, display_name) VALUES (?, ?)", ("ms", "MS")).lastrowid
+        resp = user_client.post(f"/suppliers/{s}/merge/{t}")
+        assert resp.status_code == 403
+
+    def test_merge_audit_log(self, admin_client):
+        """Merge writes audit log on target."""
+        target_id = self._create_supplier(admin_client, name="AuditTarget")
+        source_id = self._create_supplier(admin_client, name="AuditSource")
+        admin_client.post(f"/suppliers/{source_id}/merge/{target_id}")
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("merge_supplier", target_id),
+            ).fetchone()
+            assert row is not None
+
+    def test_merge_snapshot_in_audit_log(self, admin_client):
+        """Merge stores complete snapshot in audit log (symmetric with purge)."""
+        import json
+        target_id = self._create_supplier(admin_client, name="SnapTarget")
+        source_id = self._create_supplier(admin_client, name="SnapSource")
+        # Add contacts and aliases to source
+        admin_client.post(f"/suppliers/{source_id}/contacts", json={
+            "name": "M Contact", "email": "m@example.com",
+        })
+        admin_client.post(f"/suppliers/{source_id}/aliases", json={"alias": "SnapAlias"})
+        resp = admin_client.post(f"/suppliers/{source_id}/merge/{target_id}")
+        assert resp.status_code == 200
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT details FROM supplier_audit_log WHERE action = ? AND supplier_id = ?",
+                ("merge_supplier", target_id),
+            ).fetchone()
+            assert row is not None
+            details = json.loads(row["details"])
+            assert "snapshot" in details, "Audit log missing snapshot"
+            snap = details["snapshot"]
+            assert snap["supplier"]["canonical_name"] == "snapsource"
+            assert len(snap["contacts"]) == 1
+            assert len(snap["aliases"]) == 1
+
+
+# =============================================================================
+# CHECK EMAIL ENDPOINT
+# =============================================================================
+
+
+class TestCheckEmail:
+    """Tests for GET /contacts/check-email."""
+
+    def _create_supplier(self, client, name="Email Corp"):
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_email_not_used(self, admin_client):
+        """Returns empty used_by when email is not in any contact."""
+        resp = admin_client.get("/suppliers/contacts/check-email?email=unique@example.com")
+        assert resp.status_code == 200
+        assert resp.json()["used_by"] == []
+
+    def test_email_used_by_supplier(self, admin_client):
+        """Returns supplier info when email is used."""
+        sid = self._create_supplier(admin_client, name="EmailTest1")
+        admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Contact", "email": "taken@example.com",
+        })
+        resp = admin_client.get("/suppliers/contacts/check-email?email=taken@example.com")
+        assert resp.status_code == 200
+        used_by = resp.json()["used_by"]
+        assert len(used_by) == 1
+        assert used_by[0]["supplier_id"] == sid
+
+    def test_email_excludes_own_supplier(self, admin_client):
+        """Excludes the specified supplier from results."""
+        sid = self._create_supplier(admin_client, name="EmailTest2")
+        admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Contact", "email": "own@example.com",
+        })
+        resp = admin_client.get(
+            f"/suppliers/contacts/check-email?email=own@example.com&exclude_supplier_id={sid}"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["used_by"] == []
+
+    def test_email_case_insensitive(self, admin_client):
+        """Email match is case-insensitive."""
+        sid = self._create_supplier(admin_client, name="EmailTest3")
+        admin_client.post(f"/suppliers/{sid}/contacts", json={
+            "name": "Contact", "email": "Case@Example.com",
+        })
+        resp = admin_client.get("/suppliers/contacts/check-email?email=case@example.com")
+        assert resp.status_code == 200
+        assert len(resp.json()["used_by"]) == 1
+
+
+# =============================================================================
+# ALIAS SUGGESTIONS
+# =============================================================================
+
+
+class TestAliasSuggestions:
+    """Tests for GET /suppliers/{id}/alias-suggestions."""
+
+    def _create_supplier(self, client, name="Suggest Corp"):
+        resp = client.post("/suppliers", json={"canonical_name": name})
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_suggestions_from_quotations(self, admin_client, seed_quotations):
+        """Returns supplier names from quotations that aren't canonical or aliases."""
+        sid = self._create_supplier(admin_client, name="Acme Corp")
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        # seed_quotations has "Acme Corp", "Beta Inc", "Gamma Ltd"
+        # Acme Corp is the canonical name, so should be excluded
+        assert "Acme Corp" not in items
+        # Beta Inc and Gamma Ltd should be suggestions
+        assert "Beta Inc" in items
+        assert "Gamma Ltd" in items
+
+    def test_suggestions_excludes_aliases(self, admin_client, seed_quotations):
+        """Suggestions exclude existing aliases."""
+        sid = self._create_supplier(admin_client, name="Beta Corp")
+        # Add "Beta Inc" as an alias
+        admin_client.post(f"/suppliers/{sid}/aliases", json={"alias": "Beta Inc"})
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Beta Inc" not in items
+
+    def test_suggestions_limit(self, admin_client):
+        """Suggestions are limited to 20."""
+        sid = self._create_supplier(admin_client, name="Limit Corp")
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        assert len(resp.json()["items"]) <= 20
+
+
+# =============================================================================
+# FK ENFORCEMENT VERIFICATION
+# =============================================================================
+
+
+class TestFKEnforcement:
+    """Verify PRAGMA foreign_keys=ON is active and working."""
+
+    def test_fk_blocks_orphan_contacts(self):
+        """FK enforcement blocks inserting contact with non-existent supplier_id."""
+        import sqlite3
+        from backend.db import get_db
+        with get_db() as db:
+            try:
+                db.execute(
+                    "INSERT INTO contacts (supplier_id, name, email, phone, role) VALUES (?, ?, ?, ?, ?)",
+                    (999999, "Orphan", "", "", ""),
+                )
+                raise AssertionError("FK enforcement is NOT active — orphan insert succeeded")
+            except sqlite3.IntegrityError:
+                pass
+
+    def test_fk_blocks_orphan_aliases(self):
+        """FK enforcement blocks inserting alias with non-existent supplier_id."""
+        import sqlite3
+        from backend.db import get_db
+        with get_db() as db:
+            try:
+                db.execute(
+                    "INSERT INTO supplier_aliases (alias, raw_alias, supplier_id) VALUES (?, ?, ?)",
+                    ("orphan_alias_xyz", "Orphan", 999999),
+                )
+                raise AssertionError("FK enforcement is NOT active for aliases")
+            except sqlite3.IntegrityError:
+                pass
+
+    def test_audit_log_survives_supplier_deletion(self):
+        """Deleting a supplier does NOT erase its audit log entries."""
+        from backend.db import get_db
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, raw_name, display_name) VALUES (?, ?, ?)",
+                ("fktest_audit", "FK Test Audit", "FK Test Audit"),
+            )
+            sid = cur.lastrowid
+            db.execute(
+                "INSERT INTO supplier_audit_log (supplier_id, action, actor, details) VALUES (?, ?, ?, ?)",
+                (sid, "test_action", "test", "{}"),
+            )
+            # Delete the supplier directly
+            db.execute("DELETE FROM suppliers WHERE id = ?", (sid,))
+            # Audit log should still exist
+            row = db.execute(
+                "SELECT id FROM supplier_audit_log WHERE supplier_id = ?", (sid,)
+            ).fetchone()
+            assert row is not None, "Audit log entry was erased when supplier was deleted"
+
