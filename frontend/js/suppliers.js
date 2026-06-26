@@ -20,6 +20,8 @@ window.Suppliers = (function () {
   const AUTOCOMPLETE_MIN_CHARS = 2;
   const AUTOCOMPLETE_MAX_RESULTS = 20;
   const PER_PAGE = 25;
+  const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const PHONE_PATTERN = /^[\d\s+\-().]*$/;
 
   // ─── State ────────────────────────────────────────────────
   let currentSupplierId = null;
@@ -119,8 +121,28 @@ window.Suppliers = (function () {
   function _updateSaveButton() {
     const btn = document.getElementById('supplierSaveBtn');
     if (btn) {
-      btn.disabled = !dirty;
+      btn.disabled = !dirty || _hasInvalidContactFields();
     }
+  }
+
+  function _setFieldError(parentGroup, message) {
+    const existing = parentGroup.querySelector('.field-error');
+    if (existing) existing.remove();
+    if (!message) return;
+    const errEl = document.createElement('div');
+    errEl.className = 'field-error';
+    errEl.appendChild(renderTextSafe(message));
+    parentGroup.appendChild(errEl);
+  }
+
+  function _hasInvalidContactFields() {
+    for (const c of _currentContacts) {
+      const email = (c.email || '').trim();
+      if (email && !EMAIL_PATTERN.test(email)) return true;
+      const phone = (c.phone || '').trim();
+      if (phone && !PHONE_PATTERN.test(phone)) return true;
+    }
+    return false;
   }
 
   // ─── API Client Wrappers ──────────────────────────────────
@@ -907,11 +929,21 @@ window.Suppliers = (function () {
         // Clear any previous warning on new input
         const warnEl = emailGroup.querySelector('.email-dup-warning');
         if (warnEl) warnEl.remove();
+        _setFieldError(emailGroup, null);
         _setDirty();
+        _updateSaveButton();
       });
       emailInput.addEventListener('blur', async () => {
         const val = emailInput.value.trim();
-        if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) return;
+        if (!val) {
+          _setFieldError(emailGroup, null);
+          return;
+        }
+        if (!EMAIL_PATTERN.test(val)) {
+          _setFieldError(emailGroup, 'Invalid email format');
+          return;
+        }
+        _setFieldError(emailGroup, null);
         try {
           const resp = await _apiGet(`/suppliers/contacts/check-email?email=${encodeURIComponent(val)}&exclude_supplier_id=${currentSupplierId || ''}`);
           const usedBy = resp.used_by || [];
@@ -929,6 +961,10 @@ window.Suppliers = (function () {
         }
       });
       emailGroup.appendChild(emailInput);
+      const emailVal = (contact.email || '').trim();
+      if (emailVal && !EMAIL_PATTERN.test(emailVal)) {
+        _setFieldError(emailGroup, 'Invalid email format');
+      }
       row.appendChild(emailGroup);
 
       // Phone
@@ -945,9 +981,27 @@ window.Suppliers = (function () {
       phoneInput.placeholder = 'Phone';
       phoneInput.addEventListener('input', () => {
         _currentContacts[origIndex].phone = phoneInput.value;
+        _setFieldError(phoneGroup, null);
         _setDirty();
+        _updateSaveButton();
+      });
+      phoneInput.addEventListener('blur', () => {
+        const val = phoneInput.value.trim();
+        if (!val) {
+          _setFieldError(phoneGroup, null);
+          return;
+        }
+        if (!PHONE_PATTERN.test(val)) {
+          _setFieldError(phoneGroup, 'Invalid phone format');
+        } else {
+          _setFieldError(phoneGroup, null);
+        }
       });
       phoneGroup.appendChild(phoneInput);
+      const phoneVal = (contact.phone || '').trim();
+      if (phoneVal && !PHONE_PATTERN.test(phoneVal)) {
+        _setFieldError(phoneGroup, 'Invalid phone format');
+      }
       row.appendChild(phoneGroup);
 
       // Role

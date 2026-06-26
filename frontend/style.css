@@ -453,10 +453,10 @@ body.role-master #suppliersNewBtn { display: inline-block !important; }
     margin-bottom: 2px;
     font-weight: 500;
 }
-.supplier-contact-name { flex: 2; }
-.supplier-contact-email { flex: 2; }
-.supplier-contact-phone { flex: 1.5; }
-.supplier-contact-role { flex: 1.5; }
+.supplier-contact-name { flex: 2; position: relative; }
+.supplier-contact-email { flex: 2; position: relative; }
+.supplier-contact-phone { flex: 1.5; position: relative; }
+.supplier-contact-role { flex: 1.5; position: relative; }
 .supplier-contact-reorder {
     flex: 0.6;
     display: flex;
@@ -476,6 +476,15 @@ body.role-master #suppliersNewBtn { display: inline-block !important; }
     font-size: 11px;
     color: #c00;
     margin-top: 2px;
+}
+.field-error {
+    font-size: 11px;
+    color: #c00;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    line-height: 1.2;
 }
 
 /* ===========================================================================
