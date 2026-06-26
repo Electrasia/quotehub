@@ -369,9 +369,13 @@ window.Suppliers = (function () {
   async function loadDetail(id) {
     // Check dirty before navigating away from current detail
     if (currentSupplierId !== null && dirty) {
-      if (!confirm('You have unsaved changes. Discard them and view another supplier?')) {
-        return;
-      }
+      const discard = await showConfirmPopup({
+        message: 'You have unsaved changes. Discard them and view another supplier?',
+        confirmText: 'Discard',
+        cancelText: 'Keep editing',
+        danger: true,
+      });
+      if (!discard) return;
     }
 
     _clearError('supplierDetailError');
@@ -795,8 +799,14 @@ window.Suppliers = (function () {
     input.focus();
   }
 
-  function _removeAlias(index) {
-    if (!confirm('Remove this alias?')) return;
+  async function _removeAlias(index) {
+    const ok = await showConfirmPopup({
+      message: 'Remove this alias?',
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
     _currentAliases.splice(index, 1);
     _renderAliases();
     _setDirty();
@@ -1032,8 +1042,14 @@ window.Suppliers = (function () {
         removeBtn.className = 'btn btn-sm btn-danger';
         removeBtn.appendChild(renderTextSafe('Remove'));
         removeBtn.style.alignSelf = 'flex-end';
-        removeBtn.addEventListener('click', () => {
-          if (!confirm('Remove this contact?')) return;
+        removeBtn.addEventListener('click', async () => {
+          const ok = await showConfirmPopup({
+            message: 'Remove this contact?',
+            confirmText: 'Remove',
+            cancelText: 'Cancel',
+            danger: true,
+          });
+          if (!ok) return;
           _currentContacts.splice(origIndex, 1);
           _renderContacts();
           _setDirty();
@@ -1077,8 +1093,14 @@ window.Suppliers = (function () {
         removeBtn.className = 'tag-chip-remove';
         removeBtn.appendChild(renderTextSafe('×'));
         removeBtn.title = 'Remove brand';
-        removeBtn.addEventListener('click', () => {
-          if (!confirm('Remove this brand?')) return;
+        removeBtn.addEventListener('click', async () => {
+          const ok = await showConfirmPopup({
+            message: 'Remove this brand?',
+            confirmText: 'Remove',
+            cancelText: 'Cancel',
+            danger: true,
+          });
+          if (!ok) return;
           _currentBrands.splice(i, 1);
           _renderBrands();
           _setDirty();
@@ -1133,14 +1155,14 @@ window.Suppliers = (function () {
         _renderBrands();
         _setDirty();
         const linkedMsg = resp.linked > 0 ? ` (${resp.linked} quotation(s) linked)` : '';
-        alert(`Scan complete: ${resp.added} new brand(s) added.${linkedMsg}`);
+        showBriefPopup(`Scan complete: ${resp.added} new brand(s) added.${linkedMsg}`);
       } else {
         const linkedMsg = resp.linked > 0 ? ` (${resp.linked} quotation(s) linked)` : '';
-        alert(`Scan complete: no new brands found. (${resp.total_found} already linked)${linkedMsg}`);
+        showBriefPopup(`Scan complete: no new brands found. (${resp.total_found} already linked)${linkedMsg}`);
       }
     } catch (e) {
       console.error('Brand scan failed:', e);
-      alert('Scan failed: ' + (e.message || 'Unknown error'));
+      await showAlertPopup({ message: e.message || 'Unknown error', title: 'Scan failed' });
     } finally {
       if (scanBtn) {
         scanBtn.disabled = false;
@@ -1424,14 +1446,16 @@ window.Suppliers = (function () {
    */
   async function _purgeSupplier(supplier) {
     const name = supplier.display_name || supplier.canonical_name || 'unnamed';
-    if (!confirm(
-      '⚠️ Permanently purge supplier \'' + name + '\'?\n\n' +
-      'This will permanently delete the supplier and all its contacts, aliases, and brands.\n' +
-      'A snapshot will be stored in the audit log.\n\n' +
-      'This action cannot be undone.'
-    )) {
-      return;
-    }
+    const ok = await showConfirmPopup({
+      message: 'Permanently purge supplier \'' + name + '\'?\n\n' +
+        'This will permanently delete the supplier and all its contacts, aliases, and brands.\n' +
+        'A snapshot will be stored in the audit log.\n\n' +
+        'This action cannot be undone.',
+      confirmText: 'Purge',
+      cancelText: 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
 
     _clearError('supplierDetailError');
 
@@ -1466,7 +1490,10 @@ window.Suppliers = (function () {
 
   async function _mergeSupplier(source) {
     const sourceName = source.display_name || source.canonical_name || 'unnamed';
-    const targetName = prompt('Merge "' + sourceName + '" into which supplier?\n\nEnter the target supplier name:');
+    const targetName = await showPromptPopup({
+      message: 'Merge "' + sourceName + '" into which supplier?\nEnter the target supplier name:',
+      confirmText: 'Search',
+    });
     if (!targetName || !targetName.trim()) return;
 
     _clearError('supplierDetailError');
@@ -1476,7 +1503,7 @@ window.Suppliers = (function () {
       const searchResp = await _apiGet(`/suppliers?q=${encodeURIComponent(targetName.trim())}&per_page=10`);
       const items = searchResp.items || [];
       if (items.length === 0) {
-        alert('No supplier found matching "' + targetName.trim() + '".');
+        await showAlertPopup({ message: 'No supplier found matching "' + targetName.trim() + '".' });
         return;
       }
 
@@ -1486,25 +1513,31 @@ window.Suppliers = (function () {
       } else {
         // Multiple matches — let user pick
         const list = items.map((s, i) => `${i + 1}. ${s.display_name || s.canonical_name}`).join('\n');
-        const pick = prompt('Multiple suppliers found:\n\n' + list + '\n\nEnter the number of the target:');
+        const pick = await showPromptPopup({
+          message: 'Multiple suppliers found:\n\n' + list + '\n\nEnter the number of the target:',
+          confirmText: 'Select',
+        });
         if (!pick || isNaN(pick)) return;
         target = items[parseInt(pick, 10) - 1];
       }
 
       if (!target) {
-        alert('Invalid selection.');
+        await showAlertPopup({ message: 'Invalid selection.' });
         return;
       }
 
       if (target.id === source.id) {
-        alert('Cannot merge a supplier into itself.');
+        await showAlertPopup({ message: 'Cannot merge a supplier into itself.' });
         return;
       }
 
       const targetDispName = target.display_name || target.canonical_name;
-      if (!confirm('Merge "' + sourceName + '" into "' + targetDispName + '"?\n\nAll quotations, contacts, aliases, and brands will be transferred. The source supplier will be deleted.')) {
-        return;
-      }
+      const ok = await showConfirmPopup({
+        message: 'Merge "' + sourceName + '" into "' + targetDispName + '"?\n\nAll quotations, contacts, aliases, and brands will be transferred. The source supplier will be deleted.',
+        confirmText: 'Merge',
+        cancelText: 'Cancel',
+      });
+      if (!ok) return;
 
       const resp = await _apiPost(`/suppliers/${source.id}/merge/${target.id}`);
       _showSuccess('Merged into "' + targetDispName + '" successfully.');
@@ -1537,15 +1570,24 @@ window.Suppliers = (function () {
    */
   async function newSupplier() {
     if (dirty) {
-      if (!confirm('You have unsaved changes. Discard them?')) return;
+      const ok = await showConfirmPopup({
+        message: 'You have unsaved changes. Discard them?',
+        confirmText: 'Discard',
+        cancelText: 'Keep editing',
+        danger: true,
+      });
+      if (!ok) return;
     }
 
     _clearError('suppliersListError');
 
     // Loop until the user cancels or creates successfully
     while (true) {
-        const name = prompt('Enter supplier name:');
-      if (!name || !name.trim()) return; // user cancelled
+      const name = await showPromptPopup({
+        message: 'Enter supplier name:',
+        confirmText: 'Create',
+      });
+      if (name === null || !name.trim()) return; // user cancelled
 
       try {
         const result = await _apiPost('/suppliers', { canonical_name: name.trim() });
@@ -1562,7 +1604,7 @@ window.Suppliers = (function () {
         }
         if (e.status === 409) {
           // Duplicate — tell the user and re-prompt
-          alert('A supplier with this name already exists. Please choose a different name.');
+          await showAlertPopup({ message: 'A supplier with this name already exists. Please choose a different name.' });
           continue; // back to prompt
         }
         // Other errors (network, 5xx, etc.)
@@ -1575,9 +1617,15 @@ window.Suppliers = (function () {
 
   // ─── Panel Navigation ─────────────────────────────────────
 
-  function _showListPanel() {
+  async function _showListPanel() {
     if (dirty) {
-      if (!confirm('You have unsaved changes. Discard them?')) return;
+      const ok = await showConfirmPopup({
+        message: 'You have unsaved changes. Discard them?',
+        confirmText: 'Discard',
+        cancelText: 'Keep editing',
+        danger: true,
+      });
+      if (!ok) return;
     }
     _clearDirty();
     currentSupplierId = null;

@@ -521,3 +521,19 @@ body.role-master #suppliersNewBtn { display: inline-block !important; }
 
 /* Hidden */
 .hidden { display: none !important; }
+
+/* Modal danger variant for destructive confirmations */
+.modal-content--danger {
+    border: 2px solid #e74c3c;
+}
+
+/* Modal prompt input */
+.modal-prompt-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    box-sizing: border-box;
+}
