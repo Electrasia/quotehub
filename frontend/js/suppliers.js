@@ -564,7 +564,7 @@ window.Suppliers = (function () {
 
     if (canModify()) {
       const addAliasBtn = document.createElement('button');
-      addAliasBtn.className = 'btn btn-sm btn-primary';
+      addAliasBtn.className = 'btn btn-sm btn-secondary';
       addAliasBtn.appendChild(renderTextSafe('Add'));
       addAliasBtn.addEventListener('click', _addAlias);
       aliasInputRow.appendChild(addAliasBtn);
@@ -670,14 +670,14 @@ window.Suppliers = (function () {
 
     if (canModify()) {
       const addBtn = document.createElement('button');
-      addBtn.className = 'btn btn-sm btn-success';
+      addBtn.className = 'btn btn-sm btn-secondary';
       addBtn.style.whiteSpace = 'nowrap';
       addBtn.appendChild(renderTextSafe('Add'));
       addBtn.addEventListener('click', () => _addBrandFromInput());
       brandInputRow.appendChild(addBtn);
 
       const scanBtn = document.createElement('button');
-      scanBtn.className = 'btn btn-sm';
+      scanBtn.className = 'btn btn-sm btn-secondary';
       scanBtn.style.whiteSpace = 'nowrap';
       scanBtn.appendChild(renderTextSafe('Scan'));
       scanBtn.addEventListener('click', () => _scanBrands());
@@ -718,7 +718,7 @@ window.Suppliers = (function () {
 
     const saveBtn = document.createElement('button');
     saveBtn.id = 'supplierSaveBtn';
-    saveBtn.className = 'btn btn-success';
+    saveBtn.className = 'btn btn-primary';
     saveBtn.disabled = true;
     saveBtn.appendChild(renderTextSafe('Save'));
     saveBtn.addEventListener('click', _saveSupplier);
@@ -742,7 +742,7 @@ window.Suppliers = (function () {
     // ── Merge button (Admin/Master only) ──
     if (canModify()) {
       const mergeBtn = document.createElement('button');
-      mergeBtn.className = 'btn btn-sm';
+      mergeBtn.className = 'btn btn-sm btn-secondary';
       mergeBtn.style.marginLeft = '8px';
       mergeBtn.appendChild(renderTextSafe('Merge into...'));
       mergeBtn.addEventListener('click', () => _mergeSupplier(supplier));
@@ -873,7 +873,7 @@ window.Suppliers = (function () {
 
       // Name
       const nameGroup = document.createElement('div');
-      nameGroup.style.flex = '2';
+      nameGroup.className = 'supplier-contact-name';
       const nameLabel = document.createElement('label');
       nameLabel.className = 'supplier-contact-label';
       nameLabel.appendChild(renderTextSafe('Name'));
@@ -892,7 +892,7 @@ window.Suppliers = (function () {
 
       // Email
       const emailGroup = document.createElement('div');
-      emailGroup.style.flex = '2';
+      emailGroup.className = 'supplier-contact-email';
       const emailLabel = document.createElement('label');
       emailLabel.className = 'supplier-contact-label';
       emailLabel.appendChild(renderTextSafe('Email'));
@@ -921,7 +921,6 @@ window.Suppliers = (function () {
             if (existing) existing.remove();
             const warnEl = document.createElement('div');
             warnEl.className = 'email-dup-warning';
-            warnEl.style.cssText = 'font-size:11px;color:#c00;margin-top:2px';
             warnEl.appendChild(renderTextSafe('Already used by: ' + usedBy.map(u => u.display_name).join(', ') + '. Continue anyway?'));
             emailGroup.appendChild(warnEl);
           }
@@ -934,7 +933,7 @@ window.Suppliers = (function () {
 
       // Phone
       const phoneGroup = document.createElement('div');
-      phoneGroup.style.flex = '1.5';
+      phoneGroup.className = 'supplier-contact-phone';
       const phoneLabel = document.createElement('label');
       phoneLabel.className = 'supplier-contact-label';
       phoneLabel.appendChild(renderTextSafe('Phone'));
@@ -953,7 +952,7 @@ window.Suppliers = (function () {
 
       // Role
       const roleGroup = document.createElement('div');
-      roleGroup.style.flex = '1.5';
+      roleGroup.className = 'supplier-contact-role';
       const roleLabel = document.createElement('label');
       roleLabel.className = 'supplier-contact-label';
       roleLabel.appendChild(renderTextSafe('Role'));
@@ -972,11 +971,7 @@ window.Suppliers = (function () {
 
       // Reorder buttons (up/down)
       const reorderGroup = document.createElement('div');
-      reorderGroup.style.flex = '0.6';
-      reorderGroup.style.display = 'flex';
-      reorderGroup.style.alignItems = 'center';
-      reorderGroup.style.gap = '2px';
-      reorderGroup.style.alignSelf = 'flex-end';
+      reorderGroup.className = 'supplier-contact-reorder';
 
       const upBtn = document.createElement('button');
       upBtn.type = 'button';
@@ -1015,14 +1010,11 @@ window.Suppliers = (function () {
 
       // Default RFQ checkbox
       const rfqGroup = document.createElement('div');
-      rfqGroup.style.flex = '0.8';
-      rfqGroup.style.display = 'flex';
-      rfqGroup.style.alignItems = 'center';
-      rfqGroup.style.gap = '4px';
+      rfqGroup.className = 'supplier-contact-rfq';
       const rfqCb = document.createElement('input');
       rfqCb.type = 'checkbox';
       rfqCb.id = `contactDefaultRfq_${origIndex}`;
-      rfqCb.checked = !!(contact.is_default_rfq_contact || contact.is_default_rfq);
+      rfqCb.checked = !!contact.is_default_rfq_contact;
       rfqCb.addEventListener('change', () => {
         _currentContacts[origIndex].is_default_rfq_contact = rfqCb.checked;
         _setDirty();
@@ -1031,7 +1023,6 @@ window.Suppliers = (function () {
       const rfqLabel = document.createElement('label');
       rfqLabel.htmlFor = rfqCb.id;
       rfqLabel.className = 'supplier-contact-label';
-      rfqLabel.style.marginBottom = '0';
       rfqLabel.appendChild(renderTextSafe('RFQ'));
       rfqGroup.appendChild(rfqLabel);
       row.appendChild(rfqGroup);
@@ -1041,7 +1032,6 @@ window.Suppliers = (function () {
         const removeBtn = document.createElement('button');
         removeBtn.className = 'btn btn-sm btn-danger';
         removeBtn.appendChild(renderTextSafe('Remove'));
-        removeBtn.style.alignSelf = 'flex-end';
         removeBtn.addEventListener('click', async () => {
           const ok = await showConfirmPopup({
             message: 'Remove this contact?',
@@ -1360,7 +1350,7 @@ window.Suppliers = (function () {
             phone: contact.phone || '',
             role: contact.role || '',
             position: contact.position || 0,
-            is_default_rfq_contact: !!(contact.is_default_rfq_contact || contact.is_default_rfq),
+            is_default_rfq_contact: !!contact.is_default_rfq_contact,
           };
           if (contact.id) {
             await _apiPut(`/suppliers/${currentSupplierId}/contacts/${contact.id}`, body);
@@ -1409,7 +1399,7 @@ window.Suppliers = (function () {
       // ── 5. Clear dirty flag & reload from server ──
       _clearDirty();
       await loadDetail(currentSupplierId);
-      let successMsg = 'Supplier saved successfully.';
+      let successMsg = 'Supplier saved';
       if (failedSteps.length) {
         successMsg += ' Some sub-resources could not be saved: ' + failedSteps.join(', ') + '. See console for details.';
       }
@@ -1540,7 +1530,7 @@ window.Suppliers = (function () {
       if (!ok) return;
 
       const resp = await _apiPost(`/suppliers/${source.id}/merge/${target.id}`);
-      _showSuccess('Merged into "' + targetDispName + '" successfully.');
+      _showSuccess('Suppliers merged');
       _listStale = true;
       updateReviewBadge();
       await loadDetail(target.id);

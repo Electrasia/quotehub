@@ -102,7 +102,7 @@ async function saveSettings() {
         }
         if (result.status === 'saved') {
             popupDurationSec = popupDuration;
-            showBriefPopup('Settings saved!');
+            showBriefPopup('Settings saved');
         }
     } catch (e) {
         showBriefPopup('Failed to save settings: ' + e.message);

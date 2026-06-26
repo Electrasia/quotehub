@@ -111,8 +111,6 @@ body.role-user .ai-admin-master { display: none !important; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: #3498db; color: #fff; }
 .btn-primary:hover:not(:disabled) { background: #2980b9; }
-.btn-success { background: #27ae60; color: #fff; }
-.btn-success:hover:not(:disabled) { background: #219a52; }
 .btn-danger { background: #e74c3c; color: #fff; }
 .btn-danger:hover:not(:disabled) { background: #c0392b; }
 .btn-secondary { background: #95a5a6; color: #fff; }
@@ -441,7 +439,7 @@ body.role-master #suppliersNewBtn { display: inline-block !important; }
 .supplier-contact-row {
     display: flex;
     gap: 8px;
-    align-items: flex-start;
+    align-items: flex-end;
     padding: 8px 0;
     border-bottom: 1px solid #f0f0f0;
 }
@@ -454,6 +452,30 @@ body.role-master #suppliersNewBtn { display: inline-block !important; }
     color: #888;
     margin-bottom: 2px;
     font-weight: 500;
+}
+.supplier-contact-name { flex: 2; }
+.supplier-contact-email { flex: 2; }
+.supplier-contact-phone { flex: 1.5; }
+.supplier-contact-role { flex: 1.5; }
+.supplier-contact-reorder {
+    flex: 0.6;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.supplier-contact-rfq {
+    flex: 0.8;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.supplier-contact-rfq label.supplier-contact-label {
+    margin-bottom: 0;
+}
+.email-dup-warning {
+    font-size: 11px;
+    color: #c00;
+    margin-top: 2px;
 }
 
 /* Capability rows */

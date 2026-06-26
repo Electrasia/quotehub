@@ -808,3 +808,44 @@ Frontend currently handles each shape correctly.
    - **XLSX column resizing**: Pre-existing known issue
    - **Vision.py output validation**: Vision LLM (vision.py) still lacks Pydantic validation that text LLM (llm.py) already has — same treatment recommended
 5. **config.json tracking**: Already removed from git tracking (`.gitignore` + `config.example.json` template + `deploy.sh` auto-copy). Do NOT re-flag as outstanding — the file on disk is a local dev artifact, the repo copy is a placeholder with `config.example.json` as the deployment source of truth. See v0.063.1 work log.
+
+---
+
+## Button Color Standard
+
+The app uses a 4-color intent system. Buttons must signal their intent through color, not their feature affiliation.
+
+| Class | Color | When to use |
+|-------|-------|-------------|
+| `.btn-primary` | Blue | The single primary commit action on the screen: Save, Submit, Confirm, New |
+| `.btn-secondary` | Gray | Everything else: Add (inline), Cancel, Back, Reorder, Scan, Merge, suggestion chips |
+| `.btn-warning` | Amber | Cautionary but recoverable: Inactivate, Override (reserved for future use) |
+| `.btn-danger` | Red | Destructive actions: Purge, Delete, Remove |
+
+Rules:
+- Only one `.btn-primary` visible on a screen at a time.
+- `.btn-success` (green) was retired. Use `.btn-primary` for Save and `.btn-secondary` for inline Add actions.
+- Tiny "✕" remove buttons in rows use `.btn-sm.btn-danger`.
+
+---
+
+## Success Feedback Standard
+
+Use `showBriefPopup(message)` to confirm real persistence events that change server-side state.
+
+When to toast:
+- After successful Save (single aggregated toast when all sync steps complete cleanly)
+- After successful Inactivate, Merge, Delete, Upload completion
+- After successful create (new supplier, new user, etc.)
+
+When NOT to toast:
+- Inline form additions that haven't been persisted (e.g., Add Contact row appears locally)
+- Visual state changes (reorder, expand/collapse, modal open)
+- Read-only operations (list refresh, search load)
+- Operations that already produce explicit modal confirmation (Scan result count, Purge confirm)
+- Error paths (use _showError or showAlertPopup instead)
+
+Message style:
+- Short (1-4 words ideal, max 6 words)
+- Past tense ("Supplier saved", "User created")
+- No punctuation at end

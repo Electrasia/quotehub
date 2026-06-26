@@ -611,7 +611,7 @@ async function confirmSave() {
                 uploadedFiles[fileIdx].status = 'saved';
                 renderFileList();
             }
-            showBriefPopup('Saved successfully!');
+            showBriefPopup('Extraction saved');
             setTimeout(async () => {
                 await backToUpload();
                 autoProcessNext();

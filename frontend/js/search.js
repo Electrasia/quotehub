@@ -294,6 +294,7 @@ async function saveEdit() {
         const result = await resp.json();
         if (result.status === 'updated') {
             closeModal('editModal');
+            showBriefPopup('Quotation updated');
             searchQuotations();
         }
     } catch (e) {
@@ -314,6 +315,7 @@ async function deleteSelected() {
             });
             const result = await resp.json();
             if (result.status === 'deleted') {
+                showBriefPopup('Quotation deleted');
                 searchQuotations();
             }
         } catch (e) {

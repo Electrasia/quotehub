@@ -157,7 +157,7 @@
                     <div id="fileList"></div>
                     <p id="queueSummary" class="hidden" style="font-size:13px;color:#666;margin-top:10px"></p>
                     <div class="actions" style="margin-top:16px">
-                        <button class="btn btn-success" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
+                        <button class="btn btn-primary" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
                         <button class="btn btn-secondary" onclick="clearFiles()">Clear All</button>
                     </div>
                 </div>
@@ -278,7 +278,7 @@
                             <button class="btn btn-sm btn-secondary" onclick="addRow()" style="margin-bottom:16px">+ Add Row</button>
 
                             <div class="actions">
-                                <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
+                                <button class="btn btn-primary" onclick="confirmSave()">Confirm & Save</button>
                                 <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
                     </div>
                 </div>
@@ -789,7 +789,7 @@
                         <option value="admin" selected>admin</option>
                         <option value="master">master</option>
                     </select>
-                    <button class="btn btn-success btn-sm" onclick="submitAddUser()">Create</button>
+                    <button class="btn btn-primary btn-sm" onclick="submitAddUser()">Create</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideAddUserForm()">Cancel</button>
                 </div>
                 <div id="newPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
@@ -822,7 +822,7 @@
                         <input type="password" id="editPassword" placeholder="leave blank to keep" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateEditUserPassword()">
                         <span class="password-toggle" onclick="togglePassword('editPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                     </div>
-                    <button class="btn btn-success btn-sm" onclick="submitEditUser()">Save</button>
+                    <button class="btn btn-primary btn-sm" onclick="submitEditUser()">Save</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideEditUserForm()">Cancel</button>
                 </div>
                 <div id="editPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
@@ -926,7 +926,7 @@
 
             <button class="btn btn-sm btn-secondary" onclick="editAddRow()" style="margin-bottom:12px">+ Add Row</button>
             <div class="actions">
-                <button class="btn btn-success" onclick="saveEdit()">Save Changes</button>
+                <button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>
                 <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancel</button>
             </div>
         </div>
