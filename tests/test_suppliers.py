@@ -718,37 +718,37 @@ class TestCreateSupplier:
     def test_create_supplier_as_admin(self, admin_client):
         """Admin can create a new supplier."""
         resp = admin_client.post("/suppliers", json={
-            "canonical_name": "  New Supplier Corp  ",
-            "display_name": "New Supplier",
+            "name": "  New Supplier Corp  ",
             "notes": "Test supplier",
         })
         assert resp.status_code == 200, resp.json()
         data = resp.json()
         assert data["canonical_name"] == "new supplier corp"
-        assert data["display_name"] == "New Supplier"
+        assert data["display_name"] == "New Supplier Corp"
+        assert data["raw_name"] == "New Supplier Corp"
         assert data["status"] == "active"
         assert data["notes"] == "Test supplier"
         assert "id" in data
 
     def test_create_supplier_duplicate_409(self, admin_client):
         """Creating a supplier with a duplicate canonical_name returns 409."""
-        admin_client.post("/suppliers", json={"canonical_name": "Test Co"})
-        resp = admin_client.post("/suppliers", json={"canonical_name": "  Test Co  "})
+        admin_client.post("/suppliers", json={"name": "Test Co"})
+        resp = admin_client.post("/suppliers", json={"name": "  Test Co  "})
         assert resp.status_code == 409
 
     def test_create_supplier_as_user_403(self, user_client):
         """User role cannot create suppliers."""
-        resp = user_client.post("/suppliers", json={"canonical_name": "User Supplier"})
+        resp = user_client.post("/suppliers", json={"name": "User Supplier"})
         assert resp.status_code == 403
 
     def test_create_supplier_unauthenticated_401(self, app_client):
         """Unauthenticated request returns 401."""
-        resp = app_client.post("/suppliers", json={"canonical_name": "Anon Supplier"})
+        resp = app_client.post("/suppliers", json={"name": "Anon Supplier"})
         assert resp.status_code == 401
 
     def test_create_supplier_audit_log(self, admin_client):
         """Creating a supplier generates an audit log entry."""
-        admin_client.post("/suppliers", json={"canonical_name": "Audit Corp"})
+        admin_client.post("/suppliers", json={"name": "Audit Corp"})
         from backend.db import get_db
         with get_db(readonly=True) as db:
             row = db.execute(
@@ -759,9 +759,65 @@ class TestCreateSupplier:
             assert row["actor"] == "admin"
 
     def test_create_supplier_empty_name_422(self, admin_client):
-        """Empty canonical_name after normalisation returns 422."""
-        resp = admin_client.post("/suppliers", json={"canonical_name": "   "})
+        """Empty name after normalisation returns 422."""
+        resp = admin_client.post("/suppliers", json={"name": "   "})
         assert resp.status_code == 422
+
+    def test_create_preserves_display_name_case(self, admin_client):
+        """display_name preserves original case from user input."""
+        resp = admin_client.post("/suppliers", json={"name": "Vega Global Ltd"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["display_name"] == "Vega Global Ltd"
+        assert data["canonical_name"] == "vega global ltd"
+        assert data["raw_name"] == "Vega Global Ltd"
+
+    def test_create_preserves_symbols_in_display_and_raw(self, admin_client):
+        """display_name and raw_name preserve symbols like apostrophes."""
+        resp = admin_client.post("/suppliers", json={"name": "PCI Prime Connections Int'l"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["display_name"] == "PCI Prime Connections Int'l"
+        assert data["raw_name"] == "PCI Prime Connections Int'l"
+
+    def test_create_collapses_internal_whitespace_in_display_name(self, admin_client):
+        """display_name collapses internal whitespace; raw_name preserves it."""
+        resp = admin_client.post("/suppliers", json={"name": "  Vega   Global   Ltd  "})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["display_name"] == "Vega Global Ltd"
+        assert data["raw_name"] == "Vega   Global   Ltd"
+        assert data["canonical_name"] == "vega global ltd"
+
+    def test_create_rejects_name_normalizing_to_empty(self, admin_client):
+        """Name that normalizes to empty returns 422."""
+        resp = admin_client.post("/suppliers", json={"name": "..."})
+        assert resp.status_code == 422
+
+    def test_create_duplicate_returns_409_with_name_message(self, admin_client):
+        """Duplicate name returns 409 mentioning 'name'."""
+        admin_client.post("/suppliers", json={"name": "Vega"})
+        resp = admin_client.post("/suppliers", json={"name": "Vega"})
+        assert resp.status_code == 409
+        assert "name" in resp.json()["detail"].lower()
+
+    def test_create_audit_log_contains_name_field(self, admin_client):
+        """Audit log entry includes the user's original name field."""
+        admin_client.post("/suppliers", json={"name": "AuditName Corp"})
+        from backend.db import get_db
+        with get_db(readonly=True) as db:
+            row = db.execute(
+                "SELECT details FROM supplier_audit_log WHERE action = ?",
+                ("create_supplier",),
+            ).fetchone()
+            assert row is not None
+            import json
+            details = json.loads(row["details"])
+            assert "name" in details
+            assert details["name"] == "AuditName Corp"
+            assert "canonical_name" in details
+            assert "raw_name" in details
+            assert "display_name" in details
 
 
 class TestGetSupplier:
@@ -802,7 +858,7 @@ class TestUpdateSupplier:
     """Tests for PUT /suppliers/{id}."""
 
     def test_update_display_name(self, admin_client):
-        resp = admin_client.post("/suppliers", json={"canonical_name": "Update Corp"})
+        resp = admin_client.post("/suppliers", json={"name": "Update Corp"})
         sid = resp.json()["id"]
         resp = admin_client.put(f"/suppliers/{sid}", json={
             "display_name": "Updated Display",
@@ -812,7 +868,7 @@ class TestUpdateSupplier:
 
     def test_update_status_admin_cannot_review(self, admin_client):
         """Admin attempting to set status='review' returns 403."""
-        resp = admin_client.post("/suppliers", json={"canonical_name": "Status Corp"})
+        resp = admin_client.post("/suppliers", json={"name": "Status Corp"})
         sid = resp.json()["id"]
         resp = admin_client.put(f"/suppliers/{sid}", json={
             "status": "review",
@@ -820,7 +876,7 @@ class TestUpdateSupplier:
         assert resp.status_code == 403
 
     def test_update_status_master_can_review(self, master_client):
-        resp = master_client.post("/suppliers", json={"canonical_name": "Master Corp"})
+        resp = master_client.post("/suppliers", json={"name": "Master Corp"})
         sid = resp.json()["id"]
         resp = master_client.put(f"/suppliers/{sid}", json={
             "status": "review",
@@ -831,8 +887,7 @@ class TestUpdateSupplier:
     def test_update_audit_log_diff(self, admin_client):
         """Update produces audit log with before/after diff."""
         resp = admin_client.post("/suppliers", json={
-            "canonical_name": "Diff Corp",
-            "display_name": "Old Name",
+            "name": "Diff Corp",
         })
         sid = resp.json()["id"]
         admin_client.put(f"/suppliers/{sid}", json={
@@ -875,7 +930,7 @@ class TestInactivateSupplier:
     """Tests for POST /suppliers/{id}/inactivate (master-only)."""
 
     def test_inactivate_as_master(self, master_client):
-        resp = master_client.post("/suppliers", json={"canonical_name": "Inactivate Corp"})
+        resp = master_client.post("/suppliers", json={"name": "Inactivate Corp"})
         sid = resp.json()["id"]
         resp = master_client.post(f"/suppliers/{sid}/inactivate")
         assert resp.status_code == 200
@@ -906,7 +961,7 @@ class TestInactivateSupplier:
         assert resp.status_code == 403
 
     def test_inactivate_already_inactive(self, master_client):
-        resp = master_client.post("/suppliers", json={"canonical_name": "Already Inact Corp"})
+        resp = master_client.post("/suppliers", json={"name": "Already Inact Corp"})
         sid = resp.json()["id"]
         master_client.post(f"/suppliers/{sid}/inactivate")
         resp = master_client.post(f"/suppliers/{sid}/inactivate")
@@ -922,7 +977,7 @@ class TestListSuppliers:
 
     def test_list_all(self, master_client):
         for name in ["Alpha Corp", "Beta Inc", "Gamma Ltd"]:
-            master_client.post("/suppliers", json={"canonical_name": name})
+            master_client.post("/suppliers", json={"name": name})
         resp = master_client.get("/suppliers?status=all")
         assert resp.status_code == 200
         data = resp.json()
@@ -930,15 +985,15 @@ class TestListSuppliers:
         assert len(data["items"]) >= 3
 
     def test_list_active_only(self, master_client):
-        master_client.post("/suppliers", json={"canonical_name": "Active Corp"})
-        master_client.post("/suppliers", json={"canonical_name": "Active Too"})
+        master_client.post("/suppliers", json={"name": "Active Corp"})
+        master_client.post("/suppliers", json={"name": "Active Too"})
         resp = master_client.get("/suppliers?status=active")
         assert resp.status_code == 200
         for s in resp.json()["items"]:
             assert s["status"] == "active"
 
     def test_list_search(self, master_client):
-        master_client.post("/suppliers", json={"canonical_name": "Beta Inc"})
+        master_client.post("/suppliers", json={"name": "Beta Inc"})
         resp = master_client.get("/suppliers?q=beta")
         assert resp.status_code == 200
         data = resp.json()
@@ -948,7 +1003,7 @@ class TestListSuppliers:
 
     def test_list_pagination(self, master_client):
         for i in range(5):
-            master_client.post("/suppliers", json={"canonical_name": f"Page Corp {i}"})
+            master_client.post("/suppliers", json={"name": f"Page Corp {i}"})
         resp = master_client.get("/suppliers?per_page=2&page=1&status=all")
         assert resp.status_code == 200
         data = resp.json()
@@ -964,7 +1019,7 @@ class TestContactsCRUD:
     """Tests for contacts CRUD endpoints."""
 
     def _create_supplier(self, admin_client, name="Contact Corp"):
-        resp = admin_client.post("/suppliers", json={"canonical_name": name})
+        resp = admin_client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -1077,7 +1132,7 @@ class TestAliasesCRUD:
     """Tests for aliases CRUD endpoints."""
 
     def _create_supplier(self, admin_client, name="Alias Corp"):
-        resp = admin_client.post("/suppliers", json={"canonical_name": name})
+        resp = admin_client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -1139,7 +1194,7 @@ class TestCapabilitiesCRUD:
     """Tests for capabilities CRUD with role enforcement on verified flag."""
 
     def _create_supplier(self, client, name="Cap Corp"):
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -1307,7 +1362,7 @@ class TestResolveEndpoint:
     """Tests for POST /suppliers/resolve (strictly read-only)."""
 
     def test_resolve_canonical_name(self, master_client):
-        resp = master_client.post("/suppliers", json={"canonical_name": "Resolve Corp"})
+        resp = master_client.post("/suppliers", json={"name": "Resolve Corp"})
         sid = resp.json()["id"]
         # Also add an alias
         master_client.post(f"/suppliers/{sid}/aliases", json={"alias": "ResolveAlias"})
@@ -1319,7 +1374,7 @@ class TestResolveEndpoint:
         assert data["canonical_name"] == "resolve corp"
 
     def test_resolve_alias(self, master_client):
-        resp = master_client.post("/suppliers", json={"canonical_name": "Alias Resolve"})
+        resp = master_client.post("/suppliers", json={"name": "Alias Resolve"})
         sid = resp.json()["id"]
         master_client.post(f"/suppliers/{sid}/aliases", json={"alias": "ResolveAlias"})
         resp = master_client.post("/suppliers/resolve", json={"name": "ResolveAlias"})
@@ -1390,7 +1445,7 @@ class TestRoleEnforcement:
         """User can GET but not POST/PUT/DELETE on write endpoints."""
         sid = self._create_supplier_via_db()
         write_endpoints = [
-            ("POST", "/suppliers", {"canonical_name": "X"}),
+            ("POST", "/suppliers", {"name": "X"}),
             ("POST", f"/suppliers/{sid}/contacts", {"name": "X"}),
             ("POST", f"/suppliers/{sid}/aliases", {"alias": "X"}),
             ("POST", f"/suppliers/{sid}/capabilities", {"brand": "X", "product_type": "Y"}),
@@ -1403,7 +1458,7 @@ class TestRoleEnforcement:
 
     def test_admin_can_write(self, admin_client):
         """Admin can write to non-restricted endpoints."""
-        resp = admin_client.post("/suppliers", json={"canonical_name": "Admin Supplier"})
+        resp = admin_client.post("/suppliers", json={"name": "Admin Supplier"})
         assert resp.status_code == 200
         resp = admin_client.post(f"/suppliers/{resp.json()['id']}/contacts", json={"name": "Admin Contact"})
         assert resp.status_code == 200
@@ -1415,8 +1470,7 @@ class TestAuditLogDiffs:
     def test_update_supplier_diff_fields_only(self, admin_client):
         """Only changed fields appear in diff."""
         resp = admin_client.post("/suppliers", json={
-            "canonical_name": "Diff Corp",
-            "display_name": "Original Display",
+            "name": "Diff Corp",
             "notes": "Original notes",
         })
         sid = resp.json()["id"]
@@ -1436,7 +1490,7 @@ class TestAuditLogDiffs:
 
     def test_update_contact_diff(self, admin_client):
         """Contact update diff contains only changed fields."""
-        resp = admin_client.post("/suppliers", json={"canonical_name": "Contact Diff Corp"})
+        resp = admin_client.post("/suppliers", json={"name": "Contact Diff Corp"})
         sid = resp.json()["id"]
         resp = admin_client.post(f"/suppliers/{sid}/contacts", json={
             "name": "Diff Contact", "email": "old@example.com", "role": "Old Role",
@@ -1474,7 +1528,7 @@ class TestApiValidation:
         assert resp.status_code in (200, 422)
 
     def test_invalid_status_value(self, admin_client):
-        resp = admin_client.post("/suppliers", json={"canonical_name": "Valid"})
+        resp = admin_client.post("/suppliers", json={"name": "Valid"})
         sid = resp.json()["id"]
         resp = admin_client.put(f"/suppliers/{sid}", json={"status": "invalid"})
         # The status field has pattern="^(active|inactive|review)$" — FastAPI returns 422
@@ -1514,7 +1568,7 @@ class TestConcurrencyStress:
 
         def create_supplier(name):
             try:
-                resp = master_client.post("/suppliers", json={"canonical_name": name})
+                resp = master_client.post("/suppliers", json={"name": name})
                 with lock:
                     results.append((name, resp.status_code))
             except Exception as e:
@@ -1634,7 +1688,7 @@ class TestPurgeSupplier:
 
     def _create_supplier(self, client, name="Purge Test Supplier"):
         """Create a supplier via API using the given client."""
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200, f"Supplier create failed: {resp.json()}"
         return resp.json()["id"]
 
@@ -1874,7 +1928,7 @@ class TestSupplierBrands:
     """Tests for per-supplier brand CRUD endpoints."""
 
     def _create_supplier(self, client, name="Brand Corp"):
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -2016,7 +2070,7 @@ class TestBrandScan:
     """Tests for POST /suppliers/{id}/brands/scan."""
 
     def _create_supplier(self, client, name="Scan Corp"):
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -2269,7 +2323,7 @@ class TestMergeSuppliers:
     """Tests for POST /suppliers/{source_id}/merge/{target_id}."""
 
     def _create_supplier(self, client, name="Merge Corp"):
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -2375,7 +2429,7 @@ class TestCheckEmail:
     """Tests for GET /contacts/check-email."""
 
     def _create_supplier(self, client, name="Email Corp"):
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 
@@ -2429,7 +2483,7 @@ class TestAliasSuggestions:
     """Tests for GET /suppliers/{id}/alias-suggestions."""
 
     def _create_supplier(self, client, name="Suggest Corp"):
-        resp = client.post("/suppliers", json={"canonical_name": name})
+        resp = client.post("/suppliers", json={"name": name})
         assert resp.status_code == 200
         return resp.json()["id"]
 

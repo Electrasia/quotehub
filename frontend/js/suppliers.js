@@ -1590,7 +1590,7 @@ window.Suppliers = (function () {
       if (name === null || !name.trim()) return; // user cancelled
 
       try {
-        const result = await _apiPost('/suppliers', { canonical_name: name.trim() });
+        const result = await _apiPost('/suppliers', { name: name });
         if (result && result.id) {
           _listStale = true;
           await loadDetail(result.id);

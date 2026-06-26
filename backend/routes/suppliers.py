@@ -13,6 +13,7 @@ Roles:
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -132,8 +133,7 @@ def _get_product_type_or_create(db, name: str) -> int:
 # ─── Pydantic models ─────────────────────────────────────────────────────────
 
 class SupplierCreate(BaseModel):
-    canonical_name: str
-    display_name: str = ""
+    name: str = Field(..., min_length=1, max_length=255)
     notes: str = ""
 
 
@@ -242,15 +242,20 @@ async def list_suppliers(
 async def create_supplier(body: SupplierCreate, user: dict = Depends(require_role("admin", "master"))):
     """Create a new supplier.
 
-    ``canonical_name`` is normalised via :func:`~backend.suppliers.normalize_name`.
-    Duplicates return 409.
-    New suppliers always get ``status='active'``.
-    """
-    norm = normalize_name(body.canonical_name)
-    if not norm:
-        raise HTTPException(status_code=422, detail="canonical_name must not be empty after normalisation")
+    ``name`` is the user's raw input.  Three derived fields are computed:
 
-    display = body.display_name.strip() if body.display_name else norm
+    - ``raw_name``: trimmed only (preserve case/symbols/internal whitespace)
+    - ``display_name``: trimmed + internal whitespace collapsed to single space
+    - ``canonical_name``: ``normalize_name(name)`` for deterministic matching
+
+    Duplicates return 409.  New suppliers always get ``status='active'``.
+    """
+    raw_name = body.name.strip()
+    display_name = re.sub(r'\s+', ' ', raw_name)
+    norm = normalize_name(body.name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="name must not be empty after normalisation")
+
     notes = body.notes.strip() if body.notes else ""
 
     with get_db() as db:
@@ -258,17 +263,17 @@ async def create_supplier(body: SupplierCreate, user: dict = Depends(require_rol
             cur = db.execute(
                 "INSERT INTO suppliers (canonical_name, raw_name, display_name, status, notes) "
                 "VALUES (?, ?, ?, 'active', ?)",
-                (norm, body.canonical_name.strip(), display, notes),
+                (norm, raw_name, display_name, notes),
             )
             supplier_id = cur.lastrowid
         except Exception as exc:
             if "UNIQUE" in str(exc):
-                raise HTTPException(status_code=409, detail="Supplier with this canonical_name already exists")
+                raise HTTPException(status_code=409, detail="Supplier with this name already exists")
             raise
 
         _write_audit_log(db, supplier_id, _make_audit_entry(
             "create_supplier", user,
-            {"canonical_name": norm, "raw_name": body.canonical_name.strip(), "display_name": display},
+            {"name": body.name, "canonical_name": norm, "raw_name": raw_name, "display_name": display_name},
         ))
 
         supplier = dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
