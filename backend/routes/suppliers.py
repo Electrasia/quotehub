@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import require_role
 from ..db import get_db
-from ..suppliers import normalize_name, resolve_supplier
+from ..suppliers import normalize_name, resolve_supplier, get_meaningful_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -900,7 +900,7 @@ async def alias_suggestions(supplier_id: int):
     with get_db(readonly=True) as db:
         supplier = _get_supplier_or_404(db, supplier_id)
         canonical = supplier["canonical_name"] or ""
-        tokens = canonical.split()
+        tokens = get_meaningful_tokens(canonical)
         if not tokens:
             return {"items": []}
 

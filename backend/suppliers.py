@@ -14,6 +14,24 @@ import re
 
 # ─── Normalization ───────────────────────────────────────────────────────────
 
+COMMON_STOPWORDS = frozenset({
+    "ltd", "limited",
+    "inc", "incorporated",
+    "co", "company",
+    "corp", "corporation",
+})
+
+
+def get_meaningful_tokens(canonical_name: str) -> list[str]:
+    """Return canonical_name tokens with common business suffixes removed.
+
+    If all tokens are stopwords, returns the original tokens to avoid
+    pathological empty-match cases.
+    """
+    tokens = canonical_name.split()
+    meaningful = [t for t in tokens if t not in COMMON_STOPWORDS]
+    return meaningful if meaningful else tokens
+
 def normalize_name(raw: str | None) -> str:
     """Normalize a supplier name for matching.
 

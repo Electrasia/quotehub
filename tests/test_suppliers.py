@@ -2488,17 +2488,17 @@ class TestAliasSuggestions:
         return resp.json()["id"]
 
     def test_suggestions_from_quotations(self, admin_client, seed_quotations):
-        """Returns supplier names from quotations that share tokens and aren't canonical or aliases."""
-        # "Beta Corp" shares token "beta" with seed quotation "Beta Inc"
+        """Returns supplier names from quotations that share meaningful tokens and aren't canonical or aliases."""
+        # "Beta Corp" → meaningful tokens: ["beta"] ("corp" filtered as stopword)
         sid = self._create_supplier(admin_client, name="Beta Corp")
         resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
         assert resp.status_code == 200
         items = resp.json()["items"]
-        # "Beta Inc" shares token "beta" — should be suggested
+        # "Beta Inc" shares meaningful token "beta" — should be suggested
         assert "Beta Inc" in items
-        # "Acme Corp" shares token "corp" — should also be suggested
-        assert "Acme Corp" in items
-        # "Gamma Ltd" shares no token with "beta corp" — excluded by similarity
+        # "Acme Corp" only shares "corp" (stopword) — excluded by similarity
+        assert "Acme Corp" not in items
+        # "Gamma Ltd" only shares no meaningful token — excluded by similarity
         assert "Gamma Ltd" not in items
 
     def test_suggestions_excludes_aliases(self, admin_client, seed_quotations):
@@ -2649,6 +2649,76 @@ class TestAliasSuggestions:
         assert resp.status_code == 200
         items = resp.json()["items"]
         assert "Honeywell" not in items
+
+    def test_alias_suggestions_filters_ltd_stopword(self, admin_client):
+        """Stopword 'ltd' is excluded from similarity tokens."""
+        from backend.db import get_db
+        # "vega ltd" → meaningful tokens: ["vega"] ("ltd" filtered out)
+        sid = self._create_supplier(admin_client, name="Vega Ltd")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sw1.pdf", "Vega Hong Kong", "[]"),
+            )
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sw2.pdf", "Beta Ltd", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Vega Hong Kong" in items
+        assert "Beta Ltd" not in items
+
+    def test_alias_suggestions_filters_multiple_stopwords(self, admin_client):
+        """Multiple stopwords are all filtered from tokens."""
+        from backend.db import get_db
+        # "acme inc corp" → meaningful tokens: ["acme"]
+        sid = self._create_supplier(admin_client, name="Acme Inc Corp")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sw3.pdf", "Acme Global", "[]"),
+            )
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sw4.pdf", "Random Inc Corp", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "Acme Global" in items
+        assert "Random Inc Corp" not in items
+
+    def test_alias_suggestions_all_stopwords_fallback(self, admin_client):
+        """When all canonical tokens are stopwords, fallback uses original tokens."""
+        from backend.db import get_db
+        # "ltd company" → all tokens are stopwords → fallback to ["ltd", "company"]
+        sid = self._create_supplier(admin_client, name="Ltd Company")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("sw5.pdf", "Some Ltd Company Name", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        # Should match because fallback uses "ltd" and "company" as tokens
+        assert "Some Ltd Company Name" in items
+
+    def test_alias_suggestions_preserves_existing_behavior(self, admin_client):
+        """Non-stopword tokens still work correctly (regression check)."""
+        from backend.db import get_db
+        sid = self._create_supplier(admin_client, name="Avit")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO quotations (filename, supplier, items) VALUES (?, ?, ?)",
+                ("reg1.pdf", "AVIT (MACAU) COMPANY LIMITED", "[]"),
+            )
+        resp = admin_client.get(f"/suppliers/{sid}/alias-suggestions")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert "AVIT (MACAU) COMPANY LIMITED" in items
 
 
 # =============================================================================
