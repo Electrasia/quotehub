@@ -762,6 +762,41 @@ Items still needed before the app can be considered production-ready:
 
 ---
 
+## Priority 1 Review Items
+
+### Global vocabulary writes are not audit-logged
+
+`POST /brands` and `POST /product-types` create entries in shared vocabulary tables without writing to `supplier_audit_log`.
+
+**Reason:** `supplier_audit_log.supplier_id` is NOT NULL by design. Global vocabulary creation falls outside the supplier-scoped audit boundary. Vocabulary pollution is mitigated by `normalize_name()` applied on insert and during scan.
+
+**Risk:** Low. Trusted Master/Admin users only. No PII. No modify or delete paths exist for these endpoints.
+
+**Reconsider if:**
+- Vocabulary pollution becomes operational
+- Modify/delete endpoints are added
+- Multi-tenant scoping is introduced
+- External compliance demands universal write logging
+
+### Delete endpoint response shape is inconsistent
+
+Various delete endpoints return different shapes:
+- `{"status": "deleted"}`
+- `{"detail": "..."}`
+- 204 No Content
+
+Frontend currently handles each shape correctly.
+
+**Reason:** No user-facing bug exists. Standardization would require touching multiple endpoints and corresponding frontend handlers. Deferred to a future API consistency pass.
+
+**Risk:** Low. Working as-is. Future devs may add inconsistent new endpoints if no standard exists.
+
+**Reconsider when:**
+- Adding new delete endpoints (define the standard then)
+- During a future API hygiene milestone
+
+---
+
 ## Next Session Start Here
 
 1. Review this HANDOFF.md for context
