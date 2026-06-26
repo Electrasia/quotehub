@@ -107,7 +107,17 @@ function confirmNavStop() {
 
 function showUpload() {
     if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
-        if (!confirm('You have unsaved changes. Discard them?')) return;
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                showProcessView();
+                goToStep(uploadedFiles.length > 0 ? 2 : 1);
+            },
+        });
+        return;
     }
     showProcessView();
     goToStep(uploadedFiles.length > 0 ? 2 : 1);
@@ -117,7 +127,21 @@ function showUpload() {
 // callable from inline onclick handlers in index.html.
 function showSearch() {
     if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
-        if (!confirm('You have unsaved changes. Discard them?')) return;
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                if (isOnProcessView() && hasProcessWorkInProgress()) {
+                    pendingNavAction = _doShowSearch;
+                    showConfirmNavDialog();
+                    return;
+                }
+                _doShowSearch();
+            },
+        });
+        return;
     }
     if (isOnProcessView() && hasProcessWorkInProgress()) {
         pendingNavAction = _doShowSearch;
@@ -144,7 +168,21 @@ function _doShowSearch() {
 
 function showSettings() {
     if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
-        if (!confirm('You have unsaved changes. Discard them?')) return;
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                if (isOnProcessView() && hasProcessWorkInProgress()) {
+                    pendingNavAction = _doShowSettings;
+                    showConfirmNavDialog();
+                    return;
+                }
+                _doShowSettings();
+            },
+        });
+        return;
     }
     if (isOnProcessView() && hasProcessWorkInProgress()) {
         pendingNavAction = _doShowSettings;
@@ -194,7 +232,21 @@ async function _doShowSettings() {
 
 function showHelp() {
     if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
-        if (!confirm('You have unsaved changes. Discard them?')) return;
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                if (isOnProcessView() && hasProcessWorkInProgress()) {
+                    pendingNavAction = _doShowHelp;
+                    showConfirmNavDialog();
+                    return;
+                }
+                _doShowHelp();
+            },
+        });
+        return;
     }
     if (isOnProcessView() && hasProcessWorkInProgress()) {
         pendingNavAction = _doShowHelp;
