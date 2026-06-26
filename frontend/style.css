@@ -478,6 +478,13 @@ body.role-master #suppliersNewBtn { display: inline-block !important; }
     margin-top: 2px;
 }
 
+/* ===========================================================================
+   DORMANT — Capabilities feature (UI removed 2026-06)
+   CSS preserved for future RFQ milestone reactivation.
+   No DOM elements currently use this class.
+   See HANDOFF.md "Dormant Features" section.
+   =========================================================================== */
+
 /* Capability rows */
 .supplier-capability-row {
     display: flex;

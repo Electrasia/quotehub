@@ -1207,7 +1207,7 @@ window.Suppliers = (function () {
       }
       if (!resp.ok) return;
       const data = await resp.json();
-      const items = Array.isArray(data) ? data : (data.brands || data.product_types || []);
+      const items = Array.isArray(data) ? data : (data.brands || []);
       _renderAutocomplete(dropdownId, items, type);
     } catch (e) {
       // AbortError is expected, ignore

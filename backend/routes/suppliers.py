@@ -90,6 +90,15 @@ def _diff_dicts(before: dict, after: dict, *keys: str) -> dict:
     return diff
 
 
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
 def _get_brand_or_create(db, name: str) -> int:
     """Resolve a brand name to its ID, creating it if necessary.
 
@@ -110,6 +119,15 @@ def _get_brand_or_create(db, name: str) -> int:
             raise HTTPException(status_code=500, detail="Failed to create brand")
     return row["id"]
 
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
 
 def _get_product_type_or_create(db, name: str) -> int:
     """Resolve a product type name to its ID, creating it if necessary.
@@ -165,11 +183,29 @@ class AliasCreate(BaseModel):
     alias: str
 
 
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
 class CapabilityCreate(BaseModel):
     brand: str
     product_type: str
     verified: bool = False
 
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
 
 class CapabilityUpdate(BaseModel):
     brand: Optional[str] = None
@@ -184,6 +220,15 @@ class ResolveRequest(BaseModel):
 class BrandCreate(BaseModel):
     name: str
 
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
 
 class ProductTypeCreate(BaseModel):
     name: str
@@ -1147,6 +1192,15 @@ async def scan_supplier_brands(
 # CAPABILITIES
 # =============================================================================
 
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
 @router.get("/{supplier_id}/capabilities", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def list_capabilities(supplier_id: int):
     """List capabilities for a supplier, including brand and product_type names."""
@@ -1174,6 +1228,15 @@ async def list_capabilities(supplier_id: int):
         ]
     return {"items": capabilities}
 
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
 
 @router.post("/{supplier_id}/capabilities", dependencies=[Depends(require_role("admin", "master"))])
 async def create_capability(
@@ -1239,6 +1302,15 @@ async def create_capability(
         "updated_at": row["updated_at"],
     }
 
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
 
 @router.put("/{supplier_id}/capabilities/{capability_id}", dependencies=[Depends(require_role("admin", "master"))])
 async def update_capability(
@@ -1358,6 +1430,15 @@ async def update_capability(
     }
 
 
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
 @router.delete("/{supplier_id}/capabilities/{capability_id}", dependencies=[Depends(require_role("admin", "master"))])
 async def delete_capability(
     supplier_id: int,
@@ -1469,6 +1550,15 @@ async def create_brand(body: BrandCreate):
 product_types_router = APIRouter(prefix="/product-types", tags=["product-types"])
 
 
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
 @product_types_router.get("", dependencies=[Depends(require_role("user", "admin", "master"))])
 async def list_product_types(q: str = Query("", min_length=0)):
     """Autocomplete product types.
@@ -1488,6 +1578,15 @@ async def list_product_types(q: str = Query("", min_length=0)):
         ).fetchall()
     return {"items": [dict(r) for r in rows]}
 
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
 
 @product_types_router.post("", dependencies=[Depends(require_role("admin", "master"))])
 async def create_product_type(body: ProductTypeCreate):

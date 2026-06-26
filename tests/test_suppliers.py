@@ -1191,7 +1191,13 @@ class TestAliasesCRUD:
 
 
 class TestCapabilitiesCRUD:
-    """Tests for capabilities CRUD with role enforcement on verified flag."""
+    """
+    DORMANT — Capabilities feature (UI removed 2026-06).
+    
+    Tests preserved as regression guards. Routes remain registered.
+    Tests verify the backend contract is intact for future UI revival.
+    See HANDOFF.md "Dormant Features" section.
+    """
 
     def _create_supplier(self, client, name="Cap Corp"):
         resp = client.post("/suppliers", json={"name": name})
@@ -1298,7 +1304,13 @@ class TestCapabilitiesCRUD:
 
 
 class TestBrandsProductTypes:
-    """Tests for /brands and /product-types endpoints."""
+    """Tests for /brands and /product-types endpoints.
+    
+    Mixed status: /brands is live (used by suppliers UI autocomplete).
+    /product-types is DORMANT (UI removed 2026-06) — preserved as
+    regression guards for future RFQ milestone reactivation.
+    See HANDOFF.md "Dormant Features" section.
+    """
 
     def test_brands_min_2_chars(self, master_client):
         """Returns empty when query < 2 chars."""
@@ -1321,6 +1333,7 @@ class TestBrandsProductTypes:
         assert len(resp.json()["items"]) <= 20
 
     def test_product_types_min_2_chars(self, master_client):
+        # DORMANT — Product Types feature (UI removed 2026-06)
         resp = master_client.get("/product-types?q=b")
         assert resp.json()["items"] == []
 
@@ -1339,17 +1352,20 @@ class TestBrandsProductTypes:
         assert resp.status_code == 401
 
     def test_product_types_prefix_match(self, master_client):
+        # DORMANT — Product Types feature (UI removed 2026-06)
         master_client.post("/product-types", json={"name": "BetaType"})
         resp = master_client.get("/product-types?q=beta")
         names = [pt["name"] for pt in resp.json()["items"]]
         assert "betatype" in names
 
     def test_product_types_duplicate_409(self, master_client):
+        # DORMANT — Product Types feature (UI removed 2026-06)
         master_client.post("/product-types", json={"name": "AlphaType"})
         resp = master_client.post("/product-types", json={"name": "AlphaType"})
         assert resp.status_code == 409
 
     def test_product_types_empty_name_422(self, master_client):
+        # DORMANT — Product Types feature (UI removed 2026-06)
         resp = master_client.post("/product-types", json={"name": "   "})
         assert resp.status_code == 422
 

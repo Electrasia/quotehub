@@ -849,3 +849,33 @@ Message style:
 - Short (1-4 words ideal, max 6 words)
 - Past tense ("Supplier saved", "User created")
 - No punctuation at end
+
+---
+
+## Dormant Features
+
+Some backend code in the suppliers module is preserved but not currently exposed to the UI. These features were dropped from the UI scope during the suppliers milestone but the backend, tests, and CSS scaffolding remain as foundations for future work.
+
+### Capabilities
+- Backend endpoints: GET/POST/PUT/DELETE /{supplier_id}/capabilities
+- Pydantic models: CapabilityCreate, CapabilityUpdate
+- Helper functions: `_get_brand_or_create`, `_get_product_type_or_create`
+- Tests: TestCapabilitiesCRUD class
+- CSS: `.supplier-capability-row` rules
+- Status: Routes registered and reachable; no UI caller. Tests verify the backend contract.
+- Reactivate when: RFQ milestone introduces "supplier covers brand X type Y" matching. Backend is ready; only UI work needed.
+
+### Product Types
+- Backend endpoints: GET/POST /product-types
+- Pydantic models: ProductTypeCreate
+- Helper functions: see capabilities section (shared)
+- Tests: TestBrandsProductTypes (product_type test methods annotated individually)
+- Status: Routes registered and reachable; no UI caller.
+- Reactivate when: Capabilities feature is reactivated.
+
+### Why preserved instead of deleted
+- Local-network-only app with trusted users — no urgent attack surface concern.
+- Schema (tables, migrations) stays regardless.
+- Tests provide regression guards that the dormant backend remains correct.
+- Code annotations make the intent visually obvious to future contributors.
+- Reactivation is purely frontend work; backend is already wired.
