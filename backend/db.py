@@ -22,6 +22,7 @@ import logging
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,8 @@ def get_db(readonly=False):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA wal_autocheckpoint=500")
+    if not readonly:
+        conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         # Auto-commit on successful exit (for write operations)
@@ -307,6 +310,398 @@ def _v1_export_registry(db):
 
 
 MIGRATIONS[1] = _v1_export_registry
+
+
+# ─── Migration v2: suppliers DDL (additive only) ────────────────────────────
+
+def _v2_suppliers_ddl(db):
+    """Create all supplier-related tables + ALTER quotations.
+
+    **DDL ONLY** — safe to run multiple times (``CREATE TABLE IF NOT EXISTS``
+    and ``ALTER TABLE`` guarded by ``PRAGMA table_info``).
+
+    Tables created:
+        - ``suppliers`` — core supplier record.  ``status`` is one of
+          ``'active'`` (normal operational), ``'inactive'`` (soft-deleted),
+          or ``'review'`` (auto-created during backfill, needs human review).
+        - ``supplier_aliases`` — alternative names for a supplier.
+        - ``contacts`` — people at a supplier.  ``position`` is an INTEGER
+          representing display sort order (not job title — that is ``role``).
+        - ``brands`` — shared reference table (name UNIQUE).
+        - ``product_types`` — shared reference table (name UNIQUE).
+        - ``supplier_capabilities`` — brand → product-type junction per supplier.
+          ``verified`` flag is **Master-only** to set (Admin receives 403).
+        - ``supplier_audit_log`` — every sensitive operation logged with
+          before/after JSON diff on updates.
+
+    Quotations altered (additive, never destructive):
+        - ``normalized_supplier_name TEXT`` — computed by backfill.
+        - ``supplier_id INTEGER REFERENCES suppliers(id)`` — FK to supplier.
+
+    Indexes created for all lookup paths.
+
+    **Additive-only guarantee:**
+    - No existing columns are modified or dropped.
+    - ``quotations.supplier`` is never touched.
+    """
+    # ── New tables ──────────────────────────────────────────────────────
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_name  TEXT NOT NULL UNIQUE,
+            raw_name        TEXT NOT NULL DEFAULT '',
+            display_name    TEXT NOT NULL DEFAULT '',
+            status          TEXT NOT NULL DEFAULT 'active'
+                            CHECK(status IN ('active','inactive','review')),
+            notes           TEXT NOT NULL DEFAULT '',
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_aliases (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            -- Global UNIQUE on alias (not per-supplier):
+            --   1) Scan matches ONE supplier per alias — ambiguity would silently
+            --      pick the wrong supplier during auto-resolution.
+            --   2) Merge skips duplicate aliases instead of failing — the UNIQUE
+            --      constraint lets INSERT OR IGNORE handle collisions safely.
+            --   3) Same alias for two suppliers means they ARE the same supplier.
+            -- Revisit if: multi-tenant scoping or alias reassignment is needed.
+            alias         TEXT NOT NULL UNIQUE,
+            raw_alias     TEXT NOT NULL DEFAULT '',
+            supplier_id   INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS contacts (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id            INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            name                   TEXT NOT NULL DEFAULT '',
+            email                  TEXT NOT NULL DEFAULT '',
+            phone                  TEXT NOT NULL DEFAULT '',
+            role                   TEXT NOT NULL DEFAULT '',
+            position               INTEGER NOT NULL DEFAULT 0,
+            is_default_rfq_contact INTEGER NOT NULL DEFAULT 0,
+            created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS brands (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS product_types (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_capabilities (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            brand_id        INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+            product_type_id INTEGER NOT NULL REFERENCES product_types(id) ON DELETE CASCADE,
+            verified        INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(supplier_id, brand_id, product_type_id)
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_brands (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            brand_id    INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(supplier_id, brand_id)
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_audit_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER,
+            action      TEXT NOT NULL,
+            actor       TEXT NOT NULL,
+            details     TEXT NOT NULL DEFAULT '{}',
+            timestamp   TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
+    # ── ALTER quotations (additive, guarded) ────────────────────────────
+    # Use PRAGMA table_info to check before adding — safe even if the
+    # migration is somehow re-run (the version tracker normally prevents this).
+    cols = {row[1] for row in db.execute("PRAGMA table_info(quotations)")}
+
+    if "normalized_supplier_name" not in cols:
+        db.execute(
+            "ALTER TABLE quotations ADD COLUMN normalized_supplier_name TEXT"
+        )
+        logger.info("  -> Added normalized_supplier_name to quotations")
+
+    if "supplier_id" not in cols:
+        db.execute(
+            "ALTER TABLE quotations ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"
+        )
+        logger.info("  -> Added supplier_id to quotations")
+
+    # ── Indexes ─────────────────────────────────────────────────────────
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_suppliers_canonical_name"
+        " ON suppliers(canonical_name)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_suppliers_status ON suppliers(status)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_aliases_alias"
+        " ON supplier_aliases(alias)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_aliases_supplier"
+        " ON supplier_aliases(supplier_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contacts_supplier ON contacts(supplier_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_capabilities_triplet"
+        " ON supplier_capabilities(supplier_id, brand_id, product_type_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_capabilities_supplier"
+        " ON supplier_capabilities(supplier_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_brands_supplier"
+        " ON supplier_brands(supplier_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_brands_name ON brands(name)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_product_types_name ON product_types(name)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quotations_supplier_id"
+        " ON quotations(supplier_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quotations_normalized_name"
+        " ON quotations(normalized_supplier_name)"
+    )
+
+    logger.info("Migration v2 complete: suppliers DDL applied")
+
+
+MIGRATIONS[2] = _v2_suppliers_ddl
+
+
+# ─── Migration v3: supplier backfill (DML only, batched, idempotent) ────────
+
+def _v3_suppliers_backfill(db):
+    """Backfill ``normalized_supplier_name`` and ``supplier_id`` on quotations.
+
+    **DML ONLY** — no schema changes.  Idempotent.  Reversible.
+
+    Process:
+        1. Read quotations where ``normalized_supplier_name IS NULL``.
+        2. Process in **batches of 200 rows**, each committed independently
+           (prevents long-held write locks).
+        3. For each distinct ``supplier`` value:
+           a. Normalise via :func:`~backend.suppliers.normalize_name`.
+           b. Resolve via :func:`~backend.suppliers.resolve_supplier`.
+           c. If resolved → set ``supplier_id``.
+           d. If unresolved → ``INSERT OR IGNORE INTO suppliers`` with
+              ``status='review'`` and ``notes='Auto-created during backfill'``;
+              write a ``supplier_audit_log`` entry with
+              ``action='auto_created_backfill'``.
+        4. ``UPDATE quotations SET normalized_supplier_name = ?, supplier_id = ?``
+           for each quotation.
+
+    **Guarantees:**
+    - ``quotations.supplier`` is **never read for writing** and never modified.
+    - Rows where ``supplier`` is ``NULL`` or empty are skipped.
+    - Rows already processed (``normalized_supplier_name IS NOT NULL``) are
+      skipped — makes the migration safe to run multiple times.
+
+    **Reversibility:**
+    .. code-block:: sql
+        UPDATE quotations SET normalized_supplier_name = NULL, supplier_id = NULL
+        WHERE normalized_supplier_name IS NOT NULL;
+
+    Auto-created suppliers remain in the ``suppliers`` table (they document what
+    was found during the backfill and are flagged for human review).
+    """
+    # Lazy-import to avoid circular dependencies at module level
+    from backend.suppliers import normalize_name, resolve_supplier
+
+    BATCH_SIZE = 200
+    total_processed = 0
+    total_created = 0
+
+    while True:
+        # Read a batch of unprocessed quotations with distinct supplier values
+        rows = db.execute(
+            """SELECT DISTINCT q.id, q.supplier
+               FROM quotations q
+               WHERE q.supplier IS NOT NULL
+                 AND q.supplier != ''
+                 AND q.normalized_supplier_name IS NULL
+               LIMIT ?""",
+            (BATCH_SIZE,),
+        ).fetchall()
+
+        if not rows:
+            break
+
+        # Collect distinct supplier names for this batch to avoid
+        # repeated INSERT OR IGNORE attempts for the same name.
+        seen_suppliers: dict[str, int | None] = {}  # raw -> supplier_id
+
+        for row in rows:
+            raw = row["supplier"]
+            if raw in seen_suppliers:
+                continue
+
+            norm = normalize_name(raw)
+            if not norm:
+                seen_suppliers[raw] = None
+                continue
+
+            sid = resolve_supplier(db, raw)
+
+            if sid is None:
+                # Auto-create supplier flagged for review
+                db.execute(
+                    """INSERT OR IGNORE INTO suppliers
+                       (canonical_name, display_name, status, notes)
+                       VALUES (?, ?, 'review', 'Auto-created during backfill')""",
+                    (norm, norm),
+                )
+                # Re-read the ID — INSERT OR IGNORE may have been a no-op
+                srow = db.execute(
+                    "SELECT id FROM suppliers WHERE canonical_name = ?",
+                    (norm,),
+                ).fetchone()
+                if srow is not None:
+                    sid = srow["id"]
+                    total_created += 1
+                    # Only log on actual creation (INSERT OR IGNORE may skip)
+                    # Use INSERT OR IGNORE on audit log as well (idempotent)
+                    db.execute(
+                        """INSERT OR IGNORE INTO supplier_audit_log
+                           (supplier_id, action, actor, details)
+                           VALUES (?, 'auto_created_backfill', 'system', ?)""",
+                        (sid, json.dumps({"normalized_name": norm, "raw_name": raw}, ensure_ascii=False)),
+                    )
+
+            seen_suppliers[raw] = sid
+
+        # Write back to quotations
+        for row in rows:
+            raw = row["supplier"]
+            norm = normalize_name(raw)
+            if not norm:
+                continue
+            sid = seen_suppliers.get(raw)
+            db.execute(
+                """UPDATE quotations
+                   SET normalized_supplier_name = ?, supplier_id = ?
+                   WHERE id = ?""",
+                (norm, sid, row["id"]),
+            )
+            total_processed += 1
+
+        # Commit this batch independently
+        db.commit()
+
+        logger.info(
+            "Backfill batch: %d processed, %d auto-created (running total)",
+            total_processed, total_created,
+        )
+
+    logger.info(
+        "Migration v3 complete: %d quotations backfilled, %d suppliers auto-created",
+        total_processed, total_created,
+    )
+
+
+MIGRATIONS[3] = _v3_suppliers_backfill
+
+
+# ─── Migration v4: supplier_brands junction table ───────────────────────
+
+def _v4_supplier_brands(db):
+    """Create ``supplier_brands`` junction table for per-supplier brand associations.
+
+    Added after v2 shipped — existing databases need this DDL applied.
+    Idempotent (IF NOT EXISTS).
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS supplier_brands (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+            brand_id    INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(supplier_id, brand_id)
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_brands_supplier"
+        " ON supplier_brands(supplier_id)"
+    )
+    logger.info("Migration v4 complete: supplier_brands table created")
+
+
+MIGRATIONS[4] = _v4_supplier_brands
+
+
+def _v5_supplier_raw_name(db):
+    """Add ``raw_name`` column to ``suppliers`` to store the original user input.
+
+    DDL only — idempotent (IF NOT EXISTS via PRAGMA check).
+    Existing rows get ``raw_name = canonical_name`` as fallback.
+    """
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(suppliers)").fetchall()}
+    if "raw_name" not in cols:
+        db.execute("ALTER TABLE suppliers ADD COLUMN raw_name TEXT")
+        logger.info("  -> Added raw_name to suppliers")
+        # Backfill existing rows: set raw_name = canonical_name
+        db.execute("UPDATE suppliers SET raw_name = canonical_name WHERE raw_name IS NULL")
+        logger.info("  -> Backfilled raw_name for existing suppliers")
+    logger.info("Migration v5 complete: raw_name column added")
+
+
+MIGRATIONS[5] = _v5_supplier_raw_name
+
+
+def _v6_alias_raw_name(db):
+    """Add ``raw_alias`` column to ``supplier_aliases`` to store the original user input.
+
+    DDL only — idempotent. Existing rows get ``raw_alias = alias`` as fallback.
+    """
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(supplier_aliases)").fetchall()}
+    if "raw_alias" not in cols:
+        db.execute("ALTER TABLE supplier_aliases ADD COLUMN raw_alias TEXT")
+        logger.info("  -> Added raw_alias to supplier_aliases")
+        db.execute("UPDATE supplier_aliases SET raw_alias = alias WHERE raw_alias IS NULL")
+        logger.info("  -> Backfilled raw_alias for existing aliases")
+    logger.info("Migration v6 complete: raw_alias column added")
+
+
+MIGRATIONS[6] = _v6_alias_raw_name
 
 
 def _init_schema_version(db):

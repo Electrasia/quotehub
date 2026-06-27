@@ -42,10 +42,12 @@ function goToStep(step) {
 function showProcessView() {
     document.getElementById('processView').classList.remove('hidden');
     document.getElementById('searchView').classList.add('hidden');
+    document.getElementById('suppliersView').classList.add('hidden');
     document.getElementById('settingsView').classList.add('hidden');
     document.getElementById('helpView').classList.add('hidden');
     document.getElementById('navProcess').classList.add('active');
     document.getElementById('navSearch').classList.remove('active');
+    document.getElementById('navSuppliers').classList.remove('active');
     document.getElementById('navSettings').classList.remove('active');
     document.getElementById('navHelp').classList.remove('active');
 }
@@ -104,6 +106,19 @@ function confirmNavStop() {
 }
 
 function showUpload() {
+    if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                showProcessView();
+                goToStep(uploadedFiles.length > 0 ? 2 : 1);
+            },
+        });
+        return;
+    }
     showProcessView();
     goToStep(uploadedFiles.length > 0 ? 2 : 1);
 }
@@ -111,6 +126,23 @@ function showUpload() {
 // Function declarations (not const) so they attach to window and remain
 // callable from inline onclick handlers in index.html.
 function showSearch() {
+    if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                if (isOnProcessView() && hasProcessWorkInProgress()) {
+                    pendingNavAction = _doShowSearch;
+                    showConfirmNavDialog();
+                    return;
+                }
+                _doShowSearch();
+            },
+        });
+        return;
+    }
     if (isOnProcessView() && hasProcessWorkInProgress()) {
         pendingNavAction = _doShowSearch;
         showConfirmNavDialog();
@@ -121,10 +153,12 @@ function showSearch() {
 function _doShowSearch() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.remove('hidden');
+    document.getElementById('suppliersView').classList.add('hidden');
     document.getElementById('settingsView').classList.add('hidden');
     document.getElementById('helpView').classList.add('hidden');
     document.getElementById('navProcess').classList.remove('active');
     document.getElementById('navSearch').classList.add('active');
+    document.getElementById('navSuppliers').classList.remove('active');
     document.getElementById('navSettings').classList.remove('active');
     document.getElementById('navHelp').classList.remove('active');
     // Load all results
@@ -133,6 +167,23 @@ function _doShowSearch() {
 }
 
 function showSettings() {
+    if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                if (isOnProcessView() && hasProcessWorkInProgress()) {
+                    pendingNavAction = _doShowSettings;
+                    showConfirmNavDialog();
+                    return;
+                }
+                _doShowSettings();
+            },
+        });
+        return;
+    }
     if (isOnProcessView() && hasProcessWorkInProgress()) {
         pendingNavAction = _doShowSettings;
         showConfirmNavDialog();
@@ -143,10 +194,12 @@ function showSettings() {
 async function _doShowSettings() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.add('hidden');
+    document.getElementById('suppliersView').classList.add('hidden');
     document.getElementById('settingsView').classList.remove('hidden');
     document.getElementById('helpView').classList.add('hidden');
     document.getElementById('navProcess').classList.remove('active');
     document.getElementById('navSearch').classList.remove('active');
+    document.getElementById('navSuppliers').classList.remove('active');
     document.getElementById('navSettings').classList.add('active');
     document.getElementById('navHelp').classList.remove('active');
     // Load settings data into the page
@@ -178,6 +231,23 @@ async function _doShowSettings() {
 }
 
 function showHelp() {
+    if (isOnSuppliersView() && window.Suppliers && window.Suppliers.dirty) {
+        showConfirmPopup({
+            message: 'You have unsaved changes. Discard them?',
+            confirmText: 'Discard',
+            cancelText: 'Keep editing',
+            danger: true,
+            onConfirm: () => {
+                if (isOnProcessView() && hasProcessWorkInProgress()) {
+                    pendingNavAction = _doShowHelp;
+                    showConfirmNavDialog();
+                    return;
+                }
+                _doShowHelp();
+            },
+        });
+        return;
+    }
     if (isOnProcessView() && hasProcessWorkInProgress()) {
         pendingNavAction = _doShowHelp;
         showConfirmNavDialog();
@@ -188,10 +258,50 @@ function showHelp() {
 function _doShowHelp() {
     document.getElementById('processView').classList.add('hidden');
     document.getElementById('searchView').classList.add('hidden');
+    document.getElementById('suppliersView').classList.add('hidden');
     document.getElementById('settingsView').classList.add('hidden');
     document.getElementById('helpView').classList.remove('hidden');
     document.getElementById('navProcess').classList.remove('active');
     document.getElementById('navSearch').classList.remove('active');
+    document.getElementById('navSuppliers').classList.remove('active');
     document.getElementById('navSettings').classList.remove('active');
     document.getElementById('navHelp').classList.add('active');
+}
+
+// ─── Suppliers Navigation ────────────────────────────────
+
+function isOnSuppliersView() {
+    const suppliersView = document.getElementById('suppliersView');
+    return suppliersView && !suppliersView.classList.contains('hidden');
+}
+
+function showSuppliers() {
+    if (isOnProcessView() && hasProcessWorkInProgress()) {
+        pendingNavAction = _doShowSuppliers;
+        showConfirmNavDialog();
+        return;
+    }
+    _doShowSuppliers();
+}
+function _doShowSuppliers() {
+    document.getElementById('processView').classList.add('hidden');
+    document.getElementById('searchView').classList.add('hidden');
+    document.getElementById('suppliersView').classList.remove('hidden');
+    document.getElementById('settingsView').classList.add('hidden');
+    document.getElementById('helpView').classList.add('hidden');
+    document.getElementById('navProcess').classList.remove('active');
+    document.getElementById('navSearch').classList.remove('active');
+    document.getElementById('navSuppliers').classList.add('active');
+    document.getElementById('navSettings').classList.remove('active');
+    document.getElementById('navHelp').classList.remove('active');
+    // Reset to list panel
+    const detailPanel = document.getElementById('supplierDetailPanel');
+    const listPanel = document.getElementById('suppliersListPanel');
+    if (detailPanel) detailPanel.classList.add('hidden');
+    if (listPanel) listPanel.classList.remove('hidden');
+    // Trigger initial list load
+    if (window.Suppliers && typeof window.Suppliers.loadList === 'function') {
+        window.Suppliers._clearDirty();
+        window.Suppliers.loadList();
+    }
 }

@@ -116,6 +116,9 @@ async function handleFiles(files) {
         console.log(`[upload] Added to queue: ${file.name} (${fileEntry.pages} pages)`);
         renderFileList();
     }
+    if (files.length > 0) {
+        showBriefPopup('Upload complete');
+    }
     updateStepClickability();
 }
 

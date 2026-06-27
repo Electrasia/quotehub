@@ -144,7 +144,7 @@ async function submitAddUser() {
         hideAddUserForm();
         closeModal('usersModal');
         await loadUsersTable();
-        showBriefPopup('Saved');
+        showBriefPopup('User created');
     } catch (e) {
         showUsersError(e.message);
     }
@@ -178,7 +178,7 @@ async function submitEditUser() {
         hideEditUserForm();
         closeModal('usersModal');
         await loadUsersTable();
-        showBriefPopup('Saved');
+        showBriefPopup('User updated');
     } catch (e) {
         showUsersError(e.message);
     }
@@ -256,6 +256,7 @@ async function submitHardDelete() {
         hideHardDeleteForm();
         closeModal('usersModal');
         await loadUsersTable();
+        showBriefPopup('User deleted');
     } catch (e) {
         showUsersError(e.message);
     } finally {

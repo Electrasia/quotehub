@@ -35,6 +35,7 @@ Do not edit files unless user explicitly approves a patch plan.
 ## Code Organization
 
 - **Backend:** `backend/` — Python, FastAPI, SQLite
+  - **FK Enforcement:** `PRAGMA foreign_keys = ON` is set in `get_db()`. Any new `sqlite3.connect()` outside `get_db()` must include this pragma explicitly — enforcement is silent-bypassed without it.
 - **Frontend:** `frontend/` — Vanilla HTML/CSS/JS (no frameworks)
 - **Config:** `config.json` mounted from host, repo copy has placeholders only
 - **No new top-level directories** without discussion

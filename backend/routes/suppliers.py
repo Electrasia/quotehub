@@ -1,0 +1,1609 @@
+"""
+backend/routes/suppliers.py — Supplier management API.
+
+This module provides CRUD endpoints for suppliers, contacts, aliases,
+capabilities, brands, and product types.  All endpoints require
+authentication and enforce role-based access via ``require_role()``.
+
+Roles:
+    - **user+**:     read-only endpoints (list, detail, resolve, autocomplete)
+    - **admin+**:    create, update, delete (with constraints on ``verified`` and ``status``)
+    - **master**:    full access (inactivate, set verified, any status)
+"""
+
+import json
+import logging
+import re
+from datetime import datetime, timezone
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from ..auth import require_role
+from ..db import get_db
+from ..suppliers import normalize_name, resolve_supplier, get_meaningful_tokens
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/suppliers", tags=["suppliers"])
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _now_iso() -> str:
+    """Return current UTC timestamp in ISO 8601 format."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _make_audit_entry(action: str, user: dict, details: dict | None = None) -> dict:
+    """Build a supplier_audit_log row dict."""
+    entry = {
+        "action": action,
+        "actor": user.get("username", "unknown"),
+    }
+    if details:
+        entry["details"] = json.dumps(details, ensure_ascii=False)
+    else:
+        entry["details"] = "{}"
+    return entry
+
+
+def _write_audit_log(db, supplier_id: int, entry: dict):
+    """Insert an audit log row for a supplier."""
+    db.execute(
+        "INSERT INTO supplier_audit_log (supplier_id, action, actor, details) "
+        "VALUES (?, ?, ?, ?)",
+        (supplier_id, entry["action"], entry["actor"], entry["details"]),
+    )
+
+
+def _get_supplier_or_404(db, supplier_id: int) -> dict:
+    """Fetch a supplier by id, raising 404 if not found."""
+    row = db.execute(
+        "SELECT * FROM suppliers WHERE id = ?", (supplier_id,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return dict(row)
+
+
+def _can_set_status(user: dict, desired: str) -> bool:
+    """Check if a user is allowed to set a given supplier status."""
+    role = user.get("role", "")
+    if role == "master":
+        return desired in ("active", "inactive", "review")
+    # admin: only active or inactive
+    if desired == "review":
+        return False
+    return desired in ("active", "inactive")
+
+
+def _diff_dicts(before: dict, after: dict, *keys: str) -> dict:
+    """Return a dict containing only the keys that changed between before and after."""
+    diff = {}
+    for k in keys:
+        vb = before.get(k)
+        va = after.get(k)
+        if vb != va:
+            diff[k] = {"from": vb, "to": va}
+    return diff
+
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+def _get_brand_or_create(db, name: str) -> int:
+    """Resolve a brand name to its ID, creating it if necessary.
+
+    This function is used within supplier capability writes.
+    Brand names are normalised via :func:`~backend.suppliers.normalize_name`.
+    """
+    norm = normalize_name(name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Brand name cannot be empty after normalisation")
+
+    db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (norm,))
+    row = db.execute("SELECT id FROM brands WHERE name = ?", (norm,)).fetchone()
+    if not row:
+        # Race condition guard — retry once
+        db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (norm,))
+        row = db.execute("SELECT id FROM brands WHERE name = ?", (norm,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create brand")
+    return row["id"]
+
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+def _get_product_type_or_create(db, name: str) -> int:
+    """Resolve a product type name to its ID, creating it if necessary.
+
+    Same semantics as :func:`_get_brand_or_create`.
+    """
+    norm = normalize_name(name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Product type name cannot be empty after normalisation")
+
+    db.execute("INSERT OR IGNORE INTO product_types (name) VALUES (?)", (norm,))
+    row = db.execute("SELECT id FROM product_types WHERE name = ?", (norm,)).fetchone()
+    if not row:
+        db.execute("INSERT OR IGNORE INTO product_types (name) VALUES (?)", (norm,))
+        row = db.execute("SELECT id FROM product_types WHERE name = ?", (norm,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create product_type")
+    return row["id"]
+
+
+# ─── Pydantic models ─────────────────────────────────────────────────────────
+
+class SupplierCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    notes: str = ""
+
+
+class SupplierUpdate(BaseModel):
+    display_name: Optional[str] = None
+    status: Optional[str] = Field(default=None, pattern="^(active|inactive|review)$")
+    notes: Optional[str] = None
+
+
+class ContactCreate(BaseModel):
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    role: str = ""
+    position: int = 0
+    is_default_rfq_contact: int = 0
+
+
+class ContactUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    position: Optional[int] = None
+    is_default_rfq_contact: Optional[int] = None
+
+
+class AliasCreate(BaseModel):
+    alias: str
+
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+class CapabilityCreate(BaseModel):
+    brand: str
+    product_type: str
+    verified: bool = False
+
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+class CapabilityUpdate(BaseModel):
+    brand: Optional[str] = None
+    product_type: Optional[str] = None
+    verified: Optional[bool] = None
+
+
+class ResolveRequest(BaseModel):
+    name: str
+
+
+class BrandCreate(BaseModel):
+    name: str
+
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+class ProductTypeCreate(BaseModel):
+    name: str
+
+
+# =============================================================================
+# SUPPLIERS
+# =============================================================================
+
+@router.get("", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_suppliers(
+    q: str = "",
+    status: str = "active",
+    page: int = Query(1, ge=1),
+    per_page: int = Query(25, ge=1, le=100),
+):
+    """List suppliers with optional search, status filter, and pagination."""
+    with get_db(readonly=True) as db:
+        conditions = []
+        params: list = []
+
+        if status and status != "all":
+            conditions.append("s.status = ?")
+            params.append(status)
+
+        if q:
+            conditions.append("s.canonical_name LIKE ?")
+            params.append(f"%{normalize_name(q)}%")
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        # Count
+        count_row = db.execute(
+            f"SELECT COUNT(*) AS total FROM suppliers s {where}", params
+        ).fetchone()
+        total = count_row["total"] if count_row else 0
+
+        # Items
+        offset = (page - 1) * per_page
+        rows = db.execute(
+            f"""SELECT s.*,
+                (SELECT COUNT(*) FROM supplier_aliases a WHERE a.supplier_id = s.id) AS alias_count,
+                (SELECT COUNT(*) FROM contacts c WHERE c.supplier_id = s.id) AS contact_count
+                FROM suppliers s {where} ORDER BY s.canonical_name LIMIT ? OFFSET ?""",
+            params + [per_page, offset],
+        ).fetchall()
+
+        items = [dict(r) for r in rows]
+
+    return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+
+@router.post("", dependencies=[Depends(require_role("admin", "master"))])
+async def create_supplier(body: SupplierCreate, user: dict = Depends(require_role("admin", "master"))):
+    """Create a new supplier.
+
+    ``name`` is the user's raw input.  Three derived fields are computed:
+
+    - ``raw_name``: trimmed only (preserve case/symbols/internal whitespace)
+    - ``display_name``: trimmed + internal whitespace collapsed to single space
+    - ``canonical_name``: ``normalize_name(name)`` for deterministic matching
+
+    Duplicates return 409.  New suppliers always get ``status='active'``.
+    """
+    raw_name = body.name.strip()
+    display_name = re.sub(r'\s+', ' ', raw_name)
+    norm = normalize_name(body.name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="name must not be empty after normalisation")
+
+    notes = body.notes.strip() if body.notes else ""
+
+    with get_db() as db:
+        try:
+            cur = db.execute(
+                "INSERT INTO suppliers (canonical_name, raw_name, display_name, status, notes) "
+                "VALUES (?, ?, ?, 'active', ?)",
+                (norm, raw_name, display_name, notes),
+            )
+            supplier_id = cur.lastrowid
+        except Exception as exc:
+            if "UNIQUE" in str(exc):
+                raise HTTPException(status_code=409, detail="Supplier with this name already exists")
+            raise
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "create_supplier", user,
+            {"name": body.name, "canonical_name": norm, "raw_name": raw_name, "display_name": display_name},
+        ))
+
+        supplier = dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
+
+    return supplier
+
+
+@router.get("/contacts/check-email", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def check_email(
+    email: str = Query(..., min_length=1),
+    exclude_supplier_id: int = Query(None),
+):
+    """Check if an email is already used by another supplier's contact.
+
+    Returns ``{ "used_by": [{ "supplier_id": int, "display_name": str }] }``.
+    """
+    with get_db(readonly=True) as db:
+        rows = db.execute(
+            """SELECT DISTINCT s.id AS supplier_id, s.display_name
+               FROM contacts c
+               JOIN suppliers s ON s.id = c.supplier_id
+               WHERE LOWER(c.email) = LOWER(?)
+               AND s.id != COALESCE(?, -1)
+               AND s.status != 'inactive'""",
+            (email.strip(), exclude_supplier_id),
+        ).fetchall()
+    return {"used_by": [dict(r) for r in rows]}
+
+
+@router.get("/{supplier_id}", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def get_supplier(supplier_id: int):
+    """Get a supplier with nested aliases, contacts, and capabilities."""
+    with get_db(readonly=True) as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        # Fetch aliases
+        aliases = [
+            dict(r) for r in db.execute(
+                "SELECT id, alias, created_at FROM supplier_aliases WHERE supplier_id = ? ORDER BY id",
+                (supplier_id,),
+            ).fetchall()
+        ]
+
+        # Fetch contacts
+        contacts = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM contacts WHERE supplier_id = ? ORDER BY position ASC, id ASC",
+                (supplier_id,),
+            ).fetchall()
+        ]
+
+        # Fetch capabilities (with brand and product_type names)
+        rows = db.execute(
+            """SELECT c.*, b.name AS brand_name, pt.name AS product_type_name
+               FROM supplier_capabilities c
+               JOIN brands b ON b.id = c.brand_id
+               JOIN product_types pt ON pt.id = c.product_type_id
+               WHERE c.supplier_id = ?
+               ORDER BY c.id""",
+            (supplier_id,),
+        ).fetchall()
+        capabilities = [
+            {
+                "id": row["id"],
+                "brand": row["brand_name"],
+                "product_type": row["product_type_name"],
+                "verified": row["verified"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    supplier["aliases"] = aliases
+    supplier["contacts"] = contacts
+    supplier["capabilities"] = capabilities
+    return supplier
+
+
+@router.put("/{supplier_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def update_supplier(
+    supplier_id: int,
+    body: SupplierUpdate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Update a supplier's ``display_name``, ``status``, or ``notes``.
+
+    Admin may only set status to ``active`` or ``inactive``.
+    Admin attempting ``review`` → 403.
+    Master may set any status.
+    """
+    with get_db() as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        # Build update
+        updates = {}
+        if body.display_name is not None:
+            updates["display_name"] = body.display_name.strip()
+        if body.status is not None:
+            if not _can_set_status(user, body.status):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only master can set status to 'review'. Admin may set 'active' or 'inactive'.",
+                )
+            updates["status"] = body.status
+        if body.notes is not None:
+            updates["notes"] = body.notes.strip()
+
+        if not updates:
+            return supplier  # nothing to change
+
+        # Compute diff for audit log (only changed fields)
+        diff = _diff_dicts(supplier, updates, *updates.keys())
+
+        # Apply update
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        db.execute(
+            f"UPDATE suppliers SET {set_clause}, updated_at = ? WHERE id = ?",
+            list(updates.values()) + [_now_iso(), supplier_id],
+        )
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "update_supplier", user, diff if diff else {"no_changes": True},
+        ))
+
+        updated = dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
+
+    return updated
+
+
+@router.post("/{supplier_id}/inactivate", dependencies=[Depends(require_role("master"))])
+async def inactivate_supplier(
+    supplier_id: int,
+    user: dict = Depends(require_role("master")),
+):
+    """Soft-delete a supplier by setting ``status`` to ``inactive``.
+
+    Master-only.  No DELETE endpoint exists on ``/suppliers/{id}``.
+    """
+    with get_db() as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        before = supplier["status"]
+        if before == "inactive":
+            return supplier  # already inactive, no-op
+
+        db.execute(
+            "UPDATE suppliers SET status = 'inactive', updated_at = ? WHERE id = ?",
+            (_now_iso(), supplier_id),
+        )
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "inactivate_supplier", user,
+            {"before_status": before, "after_status": "inactive"},
+        ))
+
+        updated = dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
+
+    return updated
+
+
+@router.delete("/{supplier_id}/purge", dependencies=[Depends(require_role("master"))])
+async def purge_supplier(
+    supplier_id: int,
+    user: dict = Depends(require_role("master")),
+):
+    """Permanently delete a supplier and all its data.
+
+    Master-only.  Stores a complete snapshot in the audit log **before**
+    deletion.  Preconditions:
+      - Supplier must exist.
+      - Status must be ``active`` or ``review`` (not ``inactive``).
+      - Supplier must be **≤ 24 hours old** OR have **zero** quotations,
+        contacts, aliases, and capabilities.
+
+    Returns 409 with a descriptive message when preconditions fail.
+    """
+    with get_db() as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        # ── Precondition 1: status ──────────────────────────────────────
+        status = supplier["status"]
+        if status == "inactive":
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot purge: supplier status is 'inactive'. Already removed from active use.",
+            )
+
+        # ── Precondition 2: age check ───────────────────────────────────
+        created = supplier.get("created_at", "")
+        is_new = False
+        if created:
+            try:
+                created_dt = datetime.strptime(created, "%Y-%m-%d %H:%M:%S")
+                now = datetime.now(timezone.utc)
+                age = now - created_dt.replace(tzinfo=timezone.utc)
+                is_new = age.total_seconds() <= 86400  # 24 hours
+            except ValueError:
+                is_new = False
+
+        # ── Precondition 3: reference counts ────────────────────────────
+        quotation_count = db.execute(
+            "SELECT COUNT(*) AS n FROM quotations WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        contact_count = db.execute(
+            "SELECT COUNT(*) AS n FROM contacts WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        alias_count = db.execute(
+            "SELECT COUNT(*) AS n FROM supplier_aliases WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        capability_count = db.execute(
+            "SELECT COUNT(*) AS n FROM supplier_capabilities WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        brand_count = db.execute(
+            "SELECT COUNT(*) AS n FROM supplier_brands WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchone()["n"]
+
+        has_any_ref = (quotation_count + contact_count + alias_count + brand_count + capability_count) > 0
+
+        # ── Block if not new AND has references ─────────────────────────
+        if not is_new and has_any_ref:
+            if quotation_count > 0:
+                plural = "s" if quotation_count > 1 else ""
+                detail = (
+                    f"Cannot purge: supplier has {quotation_count} linked "
+                    f"quotation{plural}. Inactivate instead."
+                )
+            else:
+                parts = []
+                if contact_count:
+                    parts.append(f"{contact_count} contact{'s' if contact_count > 1 else ''}")
+                if alias_count:
+                    parts.append(f"{alias_count} aliase{'s' if alias_count > 1 else ''}")
+                if brand_count:
+                    parts.append(f"{brand_count} brand{'s' if brand_count > 1 else ''}")
+                if capability_count:
+                    parts.append(f"{capability_count} capabilit{'ies' if capability_count > 1 else 'y'}")
+                detail = (
+                    "Cannot purge: supplier is older than 24 hours and has "
+                    f"{', '.join(parts)}. Inactivate instead."
+                )
+            raise HTTPException(status_code=409, detail=detail)
+
+        # ── Build snapshot BEFORE deletion ──────────────────────────────
+        contacts = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM contacts WHERE supplier_id = ?", (supplier_id,),
+            ).fetchall()
+        ]
+        aliases = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_aliases WHERE supplier_id = ?", (supplier_id,),
+            ).fetchall()
+        ]
+        capabilities = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_capabilities WHERE supplier_id = ?", (supplier_id,),
+            ).fetchall()
+        ]
+        brands = [
+            dict(r) for r in db.execute(
+                """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+                   FROM supplier_brands sb
+                   JOIN brands b ON b.id = sb.brand_id
+                   WHERE sb.supplier_id = ?""",
+                (supplier_id,),
+            ).fetchall()
+        ]
+
+        snapshot = {
+            "supplier": dict(supplier),
+            "contacts": contacts,
+            "aliases": aliases,
+            "brands": brands,
+            "capabilities": capabilities,
+            "purged_at": _now_iso(),
+            "reason": "master_purge",
+        }
+
+        # ── Audit log entry BEFORE row deletion ─────────────────────────
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "purge_supplier", user, snapshot,
+        ))
+
+        # ── Delete children manually (CASCADE is inactive without
+        #    PRAGMA foreign_keys) ────────────────────────────────────────
+        db.execute("DELETE FROM contacts WHERE supplier_id = ?", (supplier_id,))
+        db.execute("DELETE FROM supplier_aliases WHERE supplier_id = ?", (supplier_id,))
+        db.execute("DELETE FROM supplier_brands WHERE supplier_id = ?", (supplier_id,))
+        db.execute("DELETE FROM supplier_capabilities WHERE supplier_id = ?", (supplier_id,))
+
+        # ── Delete the supplier itself ──────────────────────────────────
+        db.execute("DELETE FROM suppliers WHERE id = ?", (supplier_id,))
+
+    return {"detail": "Supplier purged. Snapshot retained in audit log."}
+
+
+@router.post("/{source_id}/merge/{target_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def merge_suppliers(
+    source_id: int,
+    target_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Merge source supplier into target. Moves all data, then deletes source.
+
+    Admin/Master only. Source and target must be different suppliers.
+    """
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a supplier into itself")
+
+    with get_db() as db:
+        source = _get_supplier_or_404(db, source_id)
+        target = _get_supplier_or_404(db, target_id)
+
+        # ── Build snapshot BEFORE any data moves ────────────────────────
+        source_contacts = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM contacts WHERE supplier_id = ?", (source_id,),
+            ).fetchall()
+        ]
+        source_aliases = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_aliases WHERE supplier_id = ?", (source_id,),
+            ).fetchall()
+        ]
+        source_capabilities = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM supplier_capabilities WHERE supplier_id = ?", (source_id,),
+            ).fetchall()
+        ]
+        source_brands = [
+            dict(r) for r in db.execute(
+                """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+                   FROM supplier_brands sb
+                   JOIN brands b ON b.id = sb.brand_id
+                   WHERE sb.supplier_id = ?""",
+                (source_id,),
+            ).fetchall()
+        ]
+
+        # ── Move quotations ────────────────────────────────────────────
+        db.execute(
+            "UPDATE quotations SET supplier_id = ? WHERE supplier_id = ?",
+            (target_id, source_id),
+        )
+
+        # ── Move contacts ──────────────────────────────────────────────
+        db.execute(
+            "UPDATE contacts SET supplier_id = ? WHERE supplier_id = ?",
+            (target_id, source_id),
+        )
+
+        # ── Move aliases: delete from source first (UNIQUE constraint), then insert for target
+        db.execute("DELETE FROM supplier_aliases WHERE supplier_id = ?", (source_id,))
+        for a in source_aliases:
+            exists = db.execute(
+                "SELECT id FROM supplier_aliases WHERE alias = ?",
+                (a["alias"],),
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO supplier_aliases (alias, raw_alias, supplier_id) VALUES (?, ?, ?)",
+                    (a["alias"], a["raw_alias"], target_id),
+                )
+
+        # ── Move brands (skip duplicates) ──────────────────────────────
+        for b in source_brands:
+            exists = db.execute(
+                "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+                (target_id, b["brand_id"]),
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+                    (target_id, b["brand_id"]),
+                )
+
+        # ── Delete source (now empty) ──────────────────────────────────
+        db.execute("DELETE FROM supplier_capabilities WHERE supplier_id = ?", (source_id,))
+        db.execute("DELETE FROM supplier_brands WHERE supplier_id = ?", (source_id,))
+        db.execute("DELETE FROM contacts WHERE supplier_id = ?", (source_id,))
+        db.execute("DELETE FROM suppliers WHERE id = ?", (source_id,))
+
+        # ── Audit log on target with complete snapshot ──────────────────
+        snapshot = {
+            "supplier": dict(source),
+            "contacts": source_contacts,
+            "aliases": source_aliases,
+            "brands": source_brands,
+            "capabilities": source_capabilities,
+            "merged_at": _now_iso(),
+            "reason": "admin_merge",
+        }
+        _write_audit_log(db, target_id, _make_audit_entry(
+            "merge_supplier", user,
+            {"merged_source_id": source_id, "source_name": source["canonical_name"],
+             "snapshot": snapshot},
+        ))
+
+    return {"status": "merged", "target_id": target_id}
+
+
+# =============================================================================
+# CONTACTS
+# =============================================================================
+
+@router.get("/{supplier_id}/contacts", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_contacts(supplier_id: int):
+    """List contacts for a supplier sorted by ``position ASC, id ASC``."""
+    with get_db(readonly=True) as db:
+        _get_supplier_or_404(db, supplier_id)
+        contacts = [
+            dict(r) for r in db.execute(
+                "SELECT * FROM contacts WHERE supplier_id = ? ORDER BY position ASC, id ASC",
+                (supplier_id,),
+            ).fetchall()
+        ]
+    return {"items": contacts}
+
+
+@router.post("/{supplier_id}/contacts", dependencies=[Depends(require_role("admin", "master"))])
+async def create_contact(
+    supplier_id: int,
+    body: ContactCreate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Add a contact to a supplier."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        cur = db.execute(
+            "INSERT INTO contacts (supplier_id, name, email, phone, role, position, is_default_rfq_contact) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (supplier_id, body.name, body.email, body.phone, body.role, body.position, body.is_default_rfq_contact),
+        )
+        contact_id = cur.lastrowid
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "create_contact", user,
+            {"contact_id": contact_id, "name": body.name, "email": body.email},
+        ))
+
+        contact = dict(db.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone())
+
+    return contact
+
+
+@router.put("/{supplier_id}/contacts/{contact_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def update_contact(
+    supplier_id: int,
+    contact_id: int,
+    body: ContactUpdate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Update a contact."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            "SELECT * FROM contacts WHERE id = ? AND supplier_id = ?",
+            (contact_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        contact = dict(row)
+
+        # Build updates
+        updates = {}
+        for field in ("name", "email", "phone", "role", "position", "is_default_rfq_contact"):
+            val = getattr(body, field, None)
+            if val is not None:
+                updates[field] = val
+
+        if not updates:
+            return contact
+
+        diff = _diff_dicts(contact, updates, *updates.keys())
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        db.execute(
+            f"UPDATE contacts SET {set_clause}, updated_at = ? WHERE id = ?",
+            list(updates.values()) + [_now_iso(), contact_id],
+        )
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "update_contact", user, diff if diff else {"no_changes": True},
+        ))
+
+        updated = dict(db.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone())
+
+    return updated
+
+
+@router.delete("/{supplier_id}/contacts/{contact_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def delete_contact(
+    supplier_id: int,
+    contact_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Hard-delete a contact."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            "SELECT id, name FROM contacts WHERE id = ? AND supplier_id = ?",
+            (contact_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Contact not found")
+
+        db.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "delete_contact", user,
+            {"contact_id": contact_id, "name": row["name"]},
+        ))
+
+    return {"status": "deleted"}
+
+
+# =============================================================================
+# ALIASES
+# =============================================================================
+
+@router.get("/{supplier_id}/aliases", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_aliases(supplier_id: int):
+    """List aliases for a supplier."""
+    with get_db(readonly=True) as db:
+        _get_supplier_or_404(db, supplier_id)
+        aliases = [
+            dict(r) for r in db.execute(
+                "SELECT id, alias, created_at FROM supplier_aliases WHERE supplier_id = ? ORDER BY id",
+                (supplier_id,),
+            ).fetchall()
+        ]
+    return {"items": aliases}
+
+
+@router.post("/{supplier_id}/aliases", dependencies=[Depends(require_role("admin", "master"))])
+async def create_alias(
+    supplier_id: int,
+    body: AliasCreate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Add an alias to a supplier.
+
+    The alias is normalised via :func:`~backend.suppliers.normalize_name`.
+    Duplicates return 409.
+    """
+    norm = normalize_name(body.alias)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Alias cannot be empty after normalisation")
+
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        try:
+            cur = db.execute(
+                "INSERT INTO supplier_aliases (alias, raw_alias, supplier_id) VALUES (?, ?, ?)",
+                (norm, body.alias.strip(), supplier_id),
+            )
+            alias_id = cur.lastrowid
+        except Exception as exc:
+            if "UNIQUE" in str(exc):
+                raise HTTPException(status_code=409, detail="Alias already exists")
+            raise
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "add_alias", user,
+            {"alias_id": alias_id, "alias": norm, "raw_alias": body.alias.strip()},
+        ))
+
+        row = dict(db.execute("SELECT id, alias, raw_alias, created_at FROM supplier_aliases WHERE id = ?", (alias_id,)).fetchone())
+
+    return row
+
+
+@router.delete("/{supplier_id}/aliases/{alias_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def delete_alias(
+    supplier_id: int,
+    alias_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Hard-delete an alias."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            "SELECT id, alias FROM supplier_aliases WHERE id = ? AND supplier_id = ?",
+            (alias_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Alias not found")
+
+        db.execute("DELETE FROM supplier_aliases WHERE id = ?", (alias_id,))
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "remove_alias", user,
+            {"alias_id": alias_id, "alias": row["alias"]},
+        ))
+
+    return {"status": "deleted"}
+
+
+@router.get("/{supplier_id}/alias-suggestions", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def alias_suggestions(supplier_id: int):
+    """Suggest alias names from quotations relevant to this supplier.
+
+    Returns up to 20 distinct ``supplier`` values from ``quotations`` that:
+      - Share at least one token with the current supplier's canonical_name.
+      - Are not the canonical name of any supplier (punctuation-safe via normalize_name).
+      - Are not an existing alias of any supplier (punctuation-safe via normalize_name).
+    Results are ordered by frequency (most common first).
+    """
+    with get_db(readonly=True) as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+        canonical = supplier["canonical_name"] or ""
+        tokens = get_meaningful_tokens(canonical)
+        if not tokens:
+            return {"items": []}
+
+        # Build claimed set: all canonical names and aliases, normalized
+        claimed = set()
+        for row in db.execute("SELECT canonical_name FROM suppliers").fetchall():
+            claimed.add(row["canonical_name"])
+        for row in db.execute("SELECT alias FROM supplier_aliases").fetchall():
+            claimed.add(row["alias"])
+
+        # Fetch candidates ordered by frequency
+        rows = db.execute(
+            """SELECT supplier, COUNT(*) AS n
+               FROM quotations
+               WHERE supplier IS NOT NULL AND TRIM(supplier) != ''
+               GROUP BY supplier
+               ORDER BY n DESC, supplier""",
+        ).fetchall()
+
+        results = []
+        for row in rows:
+            candidate = row["supplier"]
+            norm = normalize_name(candidate)
+            if not norm:
+                continue
+            if norm in claimed:
+                continue
+            if not any(t in norm for t in tokens):
+                continue
+            results.append(candidate)
+            if len(results) >= 20:
+                break
+
+    return {"items": results}
+
+
+# =============================================================================
+# SUPPLIER BRANDS
+# =============================================================================
+
+class SupplierBrandCreate(BaseModel):
+    name: str
+
+
+@router.get("/{supplier_id}/brands", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_supplier_brands(supplier_id: int):
+    """List brands associated with a supplier."""
+    with get_db(readonly=True) as db:
+        _get_supplier_or_404(db, supplier_id)
+        brands = [
+            dict(r) for r in db.execute(
+                """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+                   FROM supplier_brands sb
+                   JOIN brands b ON b.id = sb.brand_id
+                   WHERE sb.supplier_id = ?
+                   ORDER BY b.name""",
+                (supplier_id,),
+            ).fetchall()
+        ]
+    return {"items": brands}
+
+
+@router.post("/{supplier_id}/brands", dependencies=[Depends(require_role("admin", "master"))])
+async def add_supplier_brand(
+    supplier_id: int,
+    body: SupplierBrandCreate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Add a brand to a supplier. Creates the brand in the global table if needed."""
+    norm = normalize_name(body.name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Brand name cannot be empty after normalisation")
+
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        # Ensure brand exists in global table
+        db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (norm,))
+        brand_row = db.execute("SELECT id FROM brands WHERE name = ?", (norm,)).fetchone()
+        brand_id = brand_row["id"]
+
+        # Check duplicate
+        existing = db.execute(
+            "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+            (supplier_id, brand_id),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Brand already associated with this supplier")
+
+        cur = db.execute(
+            "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+            (supplier_id, brand_id),
+        )
+        sb_id = cur.lastrowid
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "add_supplier_brand", user,
+            {"supplier_brand_id": sb_id, "brand_id": brand_id, "brand_name": norm},
+        ))
+
+        result = dict(db.execute(
+            """SELECT sb.id, sb.brand_id, b.name, sb.created_at
+               FROM supplier_brands sb
+               JOIN brands b ON b.id = sb.brand_id
+               WHERE sb.id = ?""",
+            (sb_id,),
+        ).fetchone())
+
+    return result
+
+
+@router.delete("/{supplier_id}/brands/{sb_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def remove_supplier_brand(
+    supplier_id: int,
+    sb_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Remove a brand from a supplier."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            """SELECT sb.id, sb.brand_id, b.name
+               FROM supplier_brands sb
+               JOIN brands b ON b.id = sb.brand_id
+               WHERE sb.id = ? AND sb.supplier_id = ?""",
+            (sb_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Supplier brand not found")
+
+        db.execute("DELETE FROM supplier_brands WHERE id = ?", (sb_id,))
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "remove_supplier_brand", user,
+            {"supplier_brand_id": sb_id, "brand_id": row["brand_id"], "brand_name": row["name"]},
+        ))
+
+    return {"status": "deleted"}
+
+
+@router.post("/{supplier_id}/brands/scan", dependencies=[Depends(require_role("admin", "master"))])
+async def scan_supplier_brands(
+    supplier_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Scan all quotations for this supplier and auto-link any brands found in items.
+
+    Returns the count of newly added brands.
+    """
+    with get_db() as db:
+        supplier = _get_supplier_or_404(db, supplier_id)
+
+        # Step 1: Link unlinked quotations that match this supplier's raw name or aliases
+        raw_name = supplier.get("raw_name") or supplier["canonical_name"]
+        names_to_match = [raw_name]
+        alias_rows = db.execute(
+            "SELECT raw_alias FROM supplier_aliases WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchall()
+        for row in alias_rows:
+            if row["raw_alias"]:
+                names_to_match.append(row["raw_alias"])
+
+        # Case-insensitive matching: compare LOWER(supplier) against LOWER(known names)
+        lower_names = [n.lower() for n in names_to_match]
+        placeholders = ",".join("?" * len(lower_names))
+        link_result = db.execute(
+            f"""UPDATE quotations SET supplier_id = ?
+                WHERE supplier_id IS NULL
+                  AND LOWER(supplier) IN ({placeholders})""",
+            [supplier_id] + lower_names,
+        )
+        linked_count = link_result.rowcount
+
+        # Step 2: Fetch all quotations for this supplier (now includes newly linked)
+        quotations = db.execute(
+            "SELECT items FROM quotations WHERE supplier_id = ?",
+            (supplier_id,),
+        ).fetchall()
+
+        if not quotations:
+            return {"added": 0, "total_found": 0, "linked": linked_count,
+                    "message": "No quotations found for this supplier"}
+
+        # Collect unique brand names from all quotation items
+        brands_found = set()
+        for q in quotations:
+            items = json.loads(q["items"]) if q["items"] else []
+            for item in items:
+                brand = (item.get("brand") or "").strip()
+                if brand:
+                    norm = normalize_name(brand)
+                    if norm:
+                        brands_found.add(norm)
+
+        if not brands_found:
+            return {"added": 0, "total_found": 0, "linked": linked_count,
+                    "message": "No brands found in quotation items"}
+
+        # Get existing brands for this supplier
+        existing = db.execute(
+            """SELECT b.name FROM supplier_brands sb
+               JOIN brands b ON b.id = sb.brand_id
+               WHERE sb.supplier_id = ?""",
+            (supplier_id,),
+        ).fetchall()
+        existing_names = {row["name"] for row in existing}
+
+        # Add new brands
+        added = 0
+        for brand_name in brands_found:
+            if brand_name in existing_names:
+                continue
+
+            # Ensure brand exists in global table
+            db.execute("INSERT OR IGNORE INTO brands (name) VALUES (?)", (brand_name,))
+            brand_row = db.execute("SELECT id FROM brands WHERE name = ?", (brand_name,)).fetchone()
+            brand_id = brand_row["id"]
+
+            # Link to supplier (skip if already linked)
+            already_linked = db.execute(
+                "SELECT id FROM supplier_brands WHERE supplier_id = ? AND brand_id = ?",
+                (supplier_id, brand_id),
+            ).fetchone()
+            if not already_linked:
+                db.execute(
+                    "INSERT INTO supplier_brands (supplier_id, brand_id) VALUES (?, ?)",
+                    (supplier_id, brand_id),
+                )
+                added += 1
+
+        if added > 0 or linked_count > 0:
+            _write_audit_log(db, supplier_id, _make_audit_entry(
+                "scan_supplier_brands", user,
+                {"brands_added": added, "total_found": len(brands_found),
+                 "quotations_linked": linked_count},
+            ))
+
+    return {"added": added, "total_found": len(brands_found), "linked": linked_count}
+
+
+# =============================================================================
+# CAPABILITIES
+# =============================================================================
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+@router.get("/{supplier_id}/capabilities", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_capabilities(supplier_id: int):
+    """List capabilities for a supplier, including brand and product_type names."""
+    with get_db(readonly=True) as db:
+        _get_supplier_or_404(db, supplier_id)
+        capabilities = [
+            {
+                "id": r["id"],
+                "brand": r["brand_name"],
+                "product_type": r["product_type_name"],
+                "verified": bool(r["verified"]),
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in db.execute(
+                """SELECT c.id, b.name AS brand_name, pt.name AS product_type_name,
+                          c.verified, c.created_at, c.updated_at
+                   FROM supplier_capabilities c
+                   JOIN brands b ON b.id = c.brand_id
+                   JOIN product_types pt ON pt.id = c.product_type_id
+                   WHERE c.supplier_id = ?
+                   ORDER BY c.id""",
+                (supplier_id,),
+            ).fetchall()
+        ]
+    return {"items": capabilities}
+
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+@router.post("/{supplier_id}/capabilities", dependencies=[Depends(require_role("admin", "master"))])
+async def create_capability(
+    supplier_id: int,
+    body: CapabilityCreate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Add a capability to a supplier.
+
+    Admin may not set ``verified=true`` → 403.
+    Master may set ``verified`` freely.
+    Duplicate ``(supplier_id, brand_id, product_type_id)`` → 409.
+    """
+    role = user.get("role", "")
+    if role != "master" and body.verified:
+        raise HTTPException(
+            status_code=403,
+            detail="Only master can set verified=true on a capability",
+        )
+
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        brand_id = _get_brand_or_create(db, body.brand)
+        product_type_id = _get_product_type_or_create(db, body.product_type)
+
+        try:
+            cur = db.execute(
+                "INSERT INTO supplier_capabilities (supplier_id, brand_id, product_type_id, verified) "
+                "VALUES (?, ?, ?, ?)",
+                (supplier_id, brand_id, product_type_id, 1 if body.verified else 0),
+            )
+            cap_id = cur.lastrowid
+        except Exception as exc:
+            if "UNIQUE" in str(exc):
+                raise HTTPException(
+                    status_code=409,
+                    detail="This supplier already has this brand + product_type combination",
+                )
+            raise
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "create_capability", user,
+            {"capability_id": cap_id, "brand": body.brand, "product_type": body.product_type, "verified": body.verified},
+        ))
+
+        row = db.execute(
+            """SELECT c.id, b.name AS brand_name, pt.name AS product_type_name,
+                      c.verified, c.created_at, c.updated_at
+               FROM supplier_capabilities c
+               JOIN brands b ON b.id = c.brand_id
+               JOIN product_types pt ON pt.id = c.product_type_id
+               WHERE c.id = ?""",
+            (cap_id,),
+        ).fetchone()
+
+    return {
+        "id": row["id"],
+        "brand": row["brand_name"],
+        "product_type": row["product_type_name"],
+        "verified": bool(row["verified"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+@router.put("/{supplier_id}/capabilities/{capability_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def update_capability(
+    supplier_id: int,
+    capability_id: int,
+    body: CapabilityUpdate,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Update a capability.
+
+    Admin may not modify ``verified`` → 403 if attempted.
+    Master may modify ``verified`` freely.
+    """
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            "SELECT * FROM supplier_capabilities WHERE id = ? AND supplier_id = ?",
+            (capability_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Capability not found")
+        cap = dict(row)
+
+        # Resolve current brand/product_type names
+        brand_row = db.execute("SELECT name FROM brands WHERE id = ?", (cap["brand_id"],)).fetchone()
+        pt_row = db.execute("SELECT name FROM product_types WHERE id = ?", (cap["product_type_id"],)).fetchone()
+
+        updates = {}
+        diff_base = {
+            "brand": brand_row["name"] if brand_row else str(cap["brand_id"]),
+            "product_type": pt_row["name"] if pt_row else str(cap["product_type_id"]),
+            "verified": bool(cap["verified"]),
+        }
+
+        if body.brand is not None:
+            brand_id = _get_brand_or_create(db, body.brand)
+            updates["brand_id"] = brand_id
+        if body.product_type is not None:
+            pt_id = _get_product_type_or_create(db, body.product_type)
+            updates["product_type_id"] = pt_id
+        if body.verified is not None:
+            role = user.get("role", "")
+            if role != "master":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only master can change the verified flag on a capability",
+                )
+            updates["verified"] = 1 if body.verified else 0
+
+        if not updates:
+            # Return current state
+            return {
+                "id": cap["id"],
+                "brand": diff_base["brand"],
+                "product_type": diff_base["product_type"],
+                "verified": diff_base["verified"],
+                "created_at": cap["created_at"],
+                "updated_at": cap["updated_at"],
+            }
+
+        # Check unique constraint if brand or product_type changed
+        if "brand_id" in updates or "product_type_id" in updates:
+            new_brand_id = updates.get("brand_id", cap["brand_id"])
+            new_pt_id = updates.get("product_type_id", cap["product_type_id"])
+            existing = db.execute(
+                "SELECT id FROM supplier_capabilities "
+                "WHERE supplier_id = ? AND brand_id = ? AND product_type_id = ? AND id != ?",
+                (supplier_id, new_brand_id, new_pt_id, capability_id),
+            ).fetchone()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This supplier already has this brand + product_type combination",
+                )
+
+        # Build diff (resolve names for changed brand/product_type)
+        new_brand_name = body.brand if body.brand is not None else diff_base["brand"]
+        new_pt_name = body.product_type if body.product_type is not None else diff_base["product_type"]
+        new_verified = body.verified if body.verified is not None else diff_base["verified"]
+
+        diff = _diff_dicts(
+            diff_base,
+            {"brand": new_brand_name, "product_type": new_pt_name, "verified": new_verified},
+            "brand", "product_type", "verified",
+        )
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values())
+        db.execute(
+            f"UPDATE supplier_capabilities SET {set_clause}, updated_at = ? WHERE id = ?",
+            values + [_now_iso(), capability_id],
+        )
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "update_capability", user, diff if diff else {"no_changes": True},
+        ))
+
+        # Read back
+        updated = db.execute(
+            """SELECT c.id, b.name AS brand_name, pt.name AS product_type_name,
+                      c.verified, c.created_at, c.updated_at
+               FROM supplier_capabilities c
+               JOIN brands b ON b.id = c.brand_id
+               JOIN product_types pt ON pt.id = c.product_type_id
+               WHERE c.id = ?""",
+            (capability_id,),
+        ).fetchone()
+
+    return {
+        "id": updated["id"],
+        "brand": updated["brand_name"],
+        "product_type": updated["product_type_name"],
+        "verified": bool(updated["verified"]),
+        "created_at": updated["created_at"],
+        "updated_at": updated["updated_at"],
+    }
+
+
+# ===========================================================================
+# DORMANT — Capabilities feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+@router.delete("/{supplier_id}/capabilities/{capability_id}", dependencies=[Depends(require_role("admin", "master"))])
+async def delete_capability(
+    supplier_id: int,
+    capability_id: int,
+    user: dict = Depends(require_role("admin", "master")),
+):
+    """Hard-delete a capability."""
+    with get_db() as db:
+        _get_supplier_or_404(db, supplier_id)
+
+        row = db.execute(
+            "SELECT id, brand_id, product_type_id FROM supplier_capabilities WHERE id = ? AND supplier_id = ?",
+            (capability_id, supplier_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Capability not found")
+
+        db.execute("DELETE FROM supplier_capabilities WHERE id = ?", (capability_id,))
+
+        _write_audit_log(db, supplier_id, _make_audit_entry(
+            "delete_capability", user,
+            {"capability_id": capability_id},
+        ))
+
+    return {"status": "deleted"}
+
+
+# =============================================================================
+# RESOLVE (strictly read-only)
+# =============================================================================
+
+@router.post("/resolve", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def resolve_supplier_endpoint(body: ResolveRequest):
+    """Resolve a supplier name to a supplier ID.
+
+    **Strictly read-only.**  Never creates or modifies records.
+
+    Returns:
+        - ``id``: matched supplier ID (``null`` if no match)
+        - ``matched``: ``true`` if a match was found
+        - ``canonical_name``: the canonical name of the matched supplier (if matched)
+    """
+    with get_db(readonly=True) as db:
+        sid = resolve_supplier(db, body.name)
+        if sid is not None:
+            row = db.execute(
+                "SELECT canonical_name FROM suppliers WHERE id = ?", (sid,)
+            ).fetchone()
+            return {
+                "id": sid,
+                "matched": True,
+                "canonical_name": row["canonical_name"] if row else None,
+            }
+        return {"id": None, "matched": False, "canonical_name": None}
+
+
+# =============================================================================
+# BRANDS
+# =============================================================================
+
+brands_router = APIRouter(prefix="/brands", tags=["brands"])
+
+
+@brands_router.get("", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_brands(q: str = Query("", min_length=0)):
+    """Autocomplete brands.
+
+    Requires minimum 2 characters.  Returns max 20 results.
+    Indexed prefix match on ``brands.name``.
+    """
+    if len(q) < 2:
+        return {"items": []}
+    norm = normalize_name(q)
+    if not norm:
+        return {"items": []}
+    with get_db(readonly=True) as db:
+        rows = db.execute(
+            "SELECT id, name FROM brands WHERE name LIKE ? ORDER BY name LIMIT 20",
+            (f"{norm}%",),
+        ).fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
+@brands_router.post("", dependencies=[Depends(require_role("admin", "master"))])
+async def create_brand(body: BrandCreate):
+    """Create a new brand.
+
+    Name is normalised.  Duplicates return 409.
+    """
+    norm = normalize_name(body.name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Brand name cannot be empty after normalisation")
+    with get_db() as db:
+        try:
+            cur = db.execute("INSERT INTO brands (name) VALUES (?)", (norm,))
+            brand_id = cur.lastrowid
+        except Exception as exc:
+            if "UNIQUE" in str(exc):
+                raise HTTPException(status_code=409, detail="Brand already exists")
+            raise
+        row = dict(db.execute("SELECT id, name FROM brands WHERE id = ?", (brand_id,)).fetchone())
+    return row
+
+
+# =============================================================================
+# PRODUCT TYPES
+# =============================================================================
+
+product_types_router = APIRouter(prefix="/product-types", tags=["product-types"])
+
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+@product_types_router.get("", dependencies=[Depends(require_role("user", "admin", "master"))])
+async def list_product_types(q: str = Query("", min_length=0)):
+    """Autocomplete product types.
+
+    Requires minimum 2 characters.  Returns max 20 results.
+    Indexed prefix match on ``product_types.name``.
+    """
+    if len(q) < 2:
+        return {"items": []}
+    norm = normalize_name(q)
+    if not norm:
+        return {"items": []}
+    with get_db(readonly=True) as db:
+        rows = db.execute(
+            "SELECT id, name FROM product_types WHERE name LIKE ? ORDER BY name LIMIT 20",
+            (f"{norm}%",),
+        ).fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
+# ===========================================================================
+# DORMANT — Product Types feature (UI removed 2026-06)
+# ===========================================================================
+# Endpoint/model/helper preserved for future RFQ milestone where
+# "supplier covers brand X type Y" matching is reactivated.
+# Routes remain registered. Tests run as regression guards.
+# See HANDOFF.md "Dormant Features" section.
+# ===========================================================================
+
+@product_types_router.post("", dependencies=[Depends(require_role("admin", "master"))])
+async def create_product_type(body: ProductTypeCreate):
+    """Create a new product type.
+
+    Name is normalised.  Duplicates return 409.
+    """
+    norm = normalize_name(body.name)
+    if not norm:
+        raise HTTPException(status_code=422, detail="Product type name cannot be empty after normalisation")
+    with get_db() as db:
+        try:
+            cur = db.execute("INSERT INTO product_types (name) VALUES (?)", (norm,))
+            pt_id = cur.lastrowid
+        except Exception as exc:
+            if "UNIQUE" in str(exc):
+                raise HTTPException(status_code=409, detail="Product type already exists")
+            raise
+        row = dict(db.execute("SELECT id, name FROM product_types WHERE id = ?", (pt_id,)).fetchone())
+    return row

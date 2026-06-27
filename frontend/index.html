@@ -92,6 +92,7 @@
         <div class="nav-left">
             <button class="nav-item nav-process active" id="navProcess" onclick="showUpload()">Process</button>
             <button class="nav-item" id="navSearch" onclick="showSearch()">Search</button>
+            <button class="nav-item" id="navSuppliers" onclick="showSuppliers()">Suppliers <span class="badge hidden" id="suppliersReviewBadge"></span></button>
             <button class="nav-item" id="navSettings" onclick="showSettings()">Settings</button>
             <button class="nav-item" id="navHelp" onclick="showHelp()">Help</button>
         </div>
@@ -156,7 +157,7 @@
                     <div id="fileList"></div>
                     <p id="queueSummary" class="hidden" style="font-size:13px;color:#666;margin-top:10px"></p>
                     <div class="actions" style="margin-top:16px">
-                        <button class="btn btn-success" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
+                        <button class="btn btn-primary" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
                         <button class="btn btn-secondary" onclick="clearFiles()">Clear All</button>
                     </div>
                 </div>
@@ -277,7 +278,7 @@
                             <button class="btn btn-sm btn-secondary" onclick="addRow()" style="margin-bottom:16px">+ Add Row</button>
 
                             <div class="actions">
-                                <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
+                                <button class="btn btn-primary" onclick="confirmSave()">Confirm & Save</button>
                                 <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
                     </div>
                 </div>
@@ -306,6 +307,46 @@
                 <button class="btn btn-sm btn-danger" onclick="deleteSelected()">Delete</button>
             </div>
             <div class="results" id="searchResults"></div>
+        </div>
+
+        <!-- ═══════════════ SUPPLIERS VIEW ═══════════════ -->
+        <div id="suppliersView" class="hidden">
+            <div id="suppliersListPanel">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                    <h2 style="margin:0">Suppliers</h2>
+                    <button class="btn btn-primary" id="suppliersNewBtn" onclick="window.Suppliers.newSupplier()" style="display:none">+ New Supplier</button>
+                </div>
+                <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+                    <input type="text" id="suppliersSearchInput" placeholder="Search suppliers..." style="flex:1;padding:10px 16px;border:1px solid #ddd;border-radius:8px;font-size:14px" onkeyup="window.Suppliers._onSearchInput()">
+                    <select id="suppliersStatusFilter" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px" onchange="window.Suppliers._onSearchInput()">
+                        <option value="all">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="review">Review</option>
+                    </select>
+                </div>
+                <div id="suppliersListError" class="supplier-error hidden" style="margin-bottom:12px"></div>
+                <div style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e0e0e0">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                        <thead>
+                            <tr style="background:#f8f9fa;text-align:left">
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd">Display Name</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd;font-size:12px;color:#888">Matching Key</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd">Status</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd;text-align:center">Aliases</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd;text-align:center">Contacts</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd">Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="suppliersListBody"></tbody>
+                    </table>
+                </div>
+                <div id="suppliersPagination"></div>
+            </div>
+            <div id="supplierDetailPanel" class="hidden">
+                <div id="supplierDetailError" class="supplier-error hidden"></div>
+                <div id="supplierDetailContent"></div>
+            </div>
         </div>
 
         <!-- ═══════════════ SETTINGS VIEW ═══════════════ -->
@@ -748,7 +789,7 @@
                         <option value="admin" selected>admin</option>
                         <option value="master">master</option>
                     </select>
-                    <button class="btn btn-success btn-sm" onclick="submitAddUser()">Create</button>
+                    <button class="btn btn-primary btn-sm" onclick="submitAddUser()">Create</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideAddUserForm()">Cancel</button>
                 </div>
                 <div id="newPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
@@ -781,7 +822,7 @@
                         <input type="password" id="editPassword" placeholder="leave blank to keep" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateEditUserPassword()">
                         <span class="password-toggle" onclick="togglePassword('editPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                     </div>
-                    <button class="btn btn-success btn-sm" onclick="submitEditUser()">Save</button>
+                    <button class="btn btn-primary btn-sm" onclick="submitEditUser()">Save</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideEditUserForm()">Cancel</button>
                 </div>
                 <div id="editPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
@@ -885,7 +926,7 @@
 
             <button class="btn btn-sm btn-secondary" onclick="editAddRow()" style="margin-bottom:12px">+ Add Row</button>
             <div class="actions">
-                <button class="btn btn-success" onclick="saveEdit()">Save Changes</button>
+                <button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>
                 <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancel</button>
             </div>
         </div>
@@ -985,5 +1026,6 @@
     <script src="/static/js/search.js" defer></script>
     <script src="/static/js/settings.js" defer></script>
     <script src="/static/js/users.js" defer></script>
+    <script src="/static/js/suppliers.js" defer></script>
 </body>
 </html>
