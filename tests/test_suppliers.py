@@ -2408,6 +2408,7 @@ class TestMergeSuppliers:
                 ("merge_supplier", target_id),
             ).fetchone()
             assert row is not None
+            assert row["actor"] == "admin"
 
     def test_merge_snapshot_in_audit_log(self, admin_client):
         """Merge stores complete snapshot in audit log (symmetric with purge)."""

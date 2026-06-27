@@ -13,11 +13,11 @@
 |----------------|-------------------------------------------------------|
 | Dev base       | v0.063.2                                              |
 | Active branch  | feature/suppliers-db                                  |
-| Last commit    | f1d6f12 — inline field validation                     |
-| Tree state     | clean                                                 |
+| Last commit    | 432e14b — docs: split HANDOFF.md into session bridge + AUDIT.md archive |
+| Tree state     | dirty (uncommitted CHANGELOG + HANDOFF edits)         |
 | Merged to dev  | NO                                                    |
 | Agent state    | idle                                                  |
-| Next goal      | Close P2 quick-wins (#13, #10, #8), then merge to dev |
+| Next goal      | Merge feature/suppliers-db → dev, tag v0.064.0       |
 
 ---
 
@@ -31,17 +31,17 @@ Suppliers DB module, in flight on feature branch. Highlights:
 - App-wide button color standard rollout
 - Dormant code annotated (capabilities, product-types)
 
-**Pending before merge to dev** (P2 quick-wins agreed):
-- [ ] #13 — Document supplier_aliases global UNIQUE decision
-- [ ] #10 — Migration v5: partial unique index on is_default_rfq_contact
-- [ ] #8  — Merge confirm modal + actor in audit log
-- [ ] Full pytest pass
-- [ ] CHANGELOG v0.064.0 entry
+**Pending before merge to dev:**
+- [x] #13 — Document supplier_aliases global UNIQUE decision *(completed)*
+- [x] #8  — Merge confirm modal + actor in audit log *(completed)*
+- [x] Full pytest pass *(completed — 467/467)*
+- [x] CHANGELOG v0.064.0 entry *(completed)*
 - [ ] Tag + merge
 
 **Deferred with rationale** (do NOT re-raise without new data):
 - #7 Rate limiting on scan/alias — LAN trusted users
 - #9 Scan query profiling — no production data yet
+- #10 Default-RFQ uniqueness — defer to RFQ milestone. Constraint design depends on RFQ scoping. Premature to lock now.
 - #11 status='review' cleanup UI — no backlog observed
 - #12 suppliers.js refactor — module too fresh, regression risk
 - #14 Concurrency stress test — 1 worker + SQLite, low surface
@@ -76,6 +76,10 @@ Suppliers DB module, in flight on feature branch. Highlights:
   - `canonical_name` — normalized via `normalize_name()` (lowercase, punctuation stripped except `-` and `'`)
 - Aliases mirror this: `raw_alias` (original input) + `alias` (normalized).
 - `supplier_aliases.alias` is globally UNIQUE — same alias cannot exist for two suppliers.
+  - **Why global, not per-supplier:** scan resolves a quotation to exactly ONE supplier. If two suppliers shared an alias, scan would silently pick the wrong one. Global UNIQUE forces a single owner.
+  - **Scan collision:** scan matches quotation `supplier` text against `raw_name` + `raw_alias` (case-insensitive exact match). Scan never creates aliases — it only reads existing ones. No alias collision possible.
+  - **Merge collision:** when merging supplier A into B, source aliases are deleted first to free the global UNIQUE constraint, then each is conditionally inserted for B only if not already present. Aliases shared by A and B are dropped (B's row wins). Aliases unique to A move over. No duplicate rows, no constraint error.
+  - **Revisit when:** multi-tenant scoping, alias reassignment UI, or cross-supplier alias sharing is needed.
 - Scan matches quotation `supplier` text against `raw_name` + `raw_alias` (case-insensitive exact match, not fuzzy).
 - Dormant capability/product-type endpoints live in `backend/routes/suppliers.py`, registered but UI-removed; annotated DORMANT. Reactivate at RFQ milestone.
 

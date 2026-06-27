@@ -362,6 +362,13 @@ def _v2_suppliers_ddl(db):
     db.execute("""
         CREATE TABLE IF NOT EXISTS supplier_aliases (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            -- Global UNIQUE on alias (not per-supplier):
+            --   1) Scan matches ONE supplier per alias — ambiguity would silently
+            --      pick the wrong supplier during auto-resolution.
+            --   2) Merge skips duplicate aliases instead of failing — the UNIQUE
+            --      constraint lets INSERT OR IGNORE handle collisions safely.
+            --   3) Same alias for two suppliers means they ARE the same supplier.
+            -- Revisit if: multi-tenant scoping or alias reassignment is needed.
             alias         TEXT NOT NULL UNIQUE,
             raw_alias     TEXT NOT NULL DEFAULT '',
             supplier_id   INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
