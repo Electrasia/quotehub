@@ -11,13 +11,13 @@
 
 | Field          | Value                                                 |
 |----------------|-------------------------------------------------------|
-| Dev base       | v0.064.0                                              |
+| Dev base       | v0.065.0                                              |
 | Active branch  | dev                                                   |
-| Last commit    | a294730 — Merge feature/suppliers-db: v0.064.0 supplier DB milestone |
+| Last commit    | 290b07e — feat(ui): xlsx UX polish + emoji favicon                |
 | Tree state     | clean                                                 |
-| Merged to dev  | YES (v0.064.0 tagged)                                 |
+| Merged to dev  | YES (v0.065.0 pending merge to main)                  |
 | Agent state    | idle                                                  |
-| Next goal      | Bug fixing + audit before merge dev → main            |
+| Next goal      | Merge dev → main (v0.065.0 release)                   |
 
 ---
 
@@ -27,13 +27,13 @@ Suppliers DB milestone shipped (v0.064.0 on dev). Current focus:
 field-test bug fixing + pre-main audit before release to production.
 
 **Session checklist:**
-- [ ] Field-test bug list — triage as found
-- [ ] Auto-backup round-trip with new supplier tables (carried from prior session)
-- [ ] Audit checklist before dev → main merge
-- [ ] CHANGELOG v0.064.1 (if patches needed) or v0.065.0 (if new work)
+- [x] Field-test bug list — 6 bugs found and fixed
+- [x] Auto-backup round-trip — verified, live restore pending
+- [x] Audit checklist — all 5 phases passed (94.2/100 avg)
+- [x] CHANGELOG v0.065.0 written
 
 **Branch status:**
-- dev: 31 commits ahead of main (v0.064.0 included)
+- dev: 34 commits ahead of main (v0.065.0 pending merge)
 - 2 behind main: cosmetic — release-merge commits from v0.063.1/v0.063.2.
   No code drift, no action needed.
 
@@ -90,9 +90,9 @@ field-test bug fixing + pre-main audit before release to production.
 - Field testing in progress. List populated as bugs surface.
 
 **Enhancements**
-- Verify auto-backup round-trip includes new suppliers tables
-  (supplier_brands, supplier_aliases, supplier_audit_log, raw_name/raw_alias columns).
-  Not tested end-to-end since suppliers milestone.
+- Auto-backup mechanism verified: SQLite `backup()` API captures full DB
+  including all v0.064.0 supplier tables automatically (no allowlist needed).
+  Live round-trip restore test (write back to DB) still pending.
 
 **Deferred with rationale** — see §2.
 

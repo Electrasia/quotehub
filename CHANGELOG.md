@@ -1,5 +1,23 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.065.0 (2026-06-28)
+- **Fix**: Search → Edit — `GET /quotations/{id}` endpoint added; `editSelected()` fetches by ID directly instead of relying on current search results
+- **Fix**: Post-login landing page — `initApp()` now navigates to Search instead of Upload
+- **Fix**: Password error display — `extractPasswordError()` helper handles string/array/object shapes; errors render in-modal (not generic alert)
+- **Fix**: Password validation — username-in-password check added; sequential character check (4+ ASCII chars) added; strength meter resets on form open
+- **UX**: Search → Edit XLSX — double-click on XLSX row now downloads directly with toast confirmation instead of opening blank iframe; `viewPdf()` renamed to `viewFile()`
+- **UX**: Search row tooltip — file-type aware: "Double-click to preview" for PDF, "Double-click to download" for XLSX
+- **UX**: XLSX preview label — `updateReviewPdf()` shows "XLSX preview not supported — use the ↗ New Window button" instead of generic fallback
+- **UX**: Emoji favicon — inline SVG `📑` in `<head>`, transparent BG, zero asset files
+- **UX**: Redundant Close button removed from Users Management modal
+- **Chore**: deploy.sh rewrite — auto-detects fresh install vs update via Docker volume; pre-update backup; health verification; `--force` flag
+- **Chore**: Documentation restructure — HANDOFF.md split into session bridge + AUDIT.md archive
+- **Chore**: Tree cleanup — `.opencode/`, `app-cli`, `NPM-DEPLOY.md` removed
+- **Chore**: `console.log` cleanup — 9 dev debug logs removed from `upload.js`
+- **Chore**: LICENSE added (MIT)
+- **Security**: Audit Phase A–E completed — migration safety 94.2%, regression 100%, security 100%, code quality 96.9%, operational readiness 100%
+- **Chore**: 479 tests passing (was 467)
+
 ## v0.064.0 (2026-06-27)
 - **Feature**: Supplier DB module — schema, normalized name model (raw/display/canonical), 18 API endpoints, full frontend UI with list, detail, contacts, aliases, brands, and notes sections
 - **Feature**: Per-supplier brand persistence — `supplier_brands` junction table, `GET/POST/DELETE /suppliers/{id}/brands`, scan brands from quotation items, auto-associate on confirm
