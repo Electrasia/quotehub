@@ -11,12 +11,15 @@ function clearUsersError() {
     document.getElementById('usersError').classList.add('hidden');
 }
 
-async function openUsersModal() {
-    if (!isMaster()) return;
-    clearUsersError();
-    hideAddUserForm();
-    hideEditUserForm();
-    document.getElementById('usersModal').classList.add('active');
+function showFormError(formId, msg) {
+    const el = document.getElementById(formId);
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+}
+function clearFormError(formId) {
+    const el = document.getElementById(formId);
+    if (el) el.classList.add('hidden');
 }
 
 async function loadUsersTable() {
@@ -91,21 +94,28 @@ function renderUsersTable() {
 
 function showAddUserForm() {
     clearUsersError();
+    clearFormError('addUserError');
     hideEditUserForm();
     hideHardDeleteForm();
     document.getElementById('usersModal').classList.add('active');
     document.getElementById('addUserForm').classList.remove('hidden');
     document.getElementById('newUsername').value = '';
     document.getElementById('newPassword').value = '';
+    document.getElementById('newPasswordStrengthBar').classList.add('hidden');
+    document.getElementById('newPasswordStrengthLabel').classList.add('hidden');
     document.getElementById('newRole').value = 'admin';
+    document.getElementById('newPasswordRules').innerHTML = PASSWORD_RULES_HTML;
     document.getElementById('newUsername').focus();
 }
 function hideAddUserForm() {
     document.getElementById('addUserForm').classList.add('hidden');
+    clearFormError('addUserError');
+    closeModal('usersModal');
 }
 
 function showEditUserForm(userId) {
     clearUsersError();
+    clearFormError('editUserError');
     hideAddUserForm();
     hideHardDeleteForm();
     const u = usersCache.find(x => x.id === userId);
@@ -115,11 +125,16 @@ function showEditUserForm(userId) {
     document.getElementById('editUserTitle').textContent = `Edit user: ${u.username}`;
     document.getElementById('editRole').value = u.role;
     document.getElementById('editPassword').value = '';
+    document.getElementById('editPasswordStrengthBar').classList.add('hidden');
+    document.getElementById('editPasswordStrengthLabel').classList.add('hidden');
     document.getElementById('editActive').checked = !!u.active;
+    document.getElementById('editPasswordRules').innerHTML = PASSWORD_RULES_HTML;
     document.getElementById('editUserForm').classList.remove('hidden');
 }
 function hideEditUserForm() {
     document.getElementById('editUserForm').classList.add('hidden');
+    clearFormError('editUserError');
+    closeModal('usersModal');
     editingUserId = null;
 }
 
@@ -127,10 +142,10 @@ async function submitAddUser() {
     const username = document.getElementById('newUsername').value.trim();
     const password = document.getElementById('newPassword').value;
     const role = document.getElementById('newRole').value;
-    if (!username) { showUsersError('Username is required'); return; }
-    if (password.length < 12) { showUsersError('Password must be at least 12 characters'); return; }
+    if (!username) { showFormError('addUserError', 'Username is required'); return; }
+    if (password.length < 12) { showFormError('addUserError', 'Password must be at least 12 characters'); return; }
     const pwErr = validateExportPassword(password);
-    if (pwErr) { showUsersError(pwErr); return; }
+    if (pwErr) { showFormError('addUserError', pwErr); return; }
     try {
         const r = await apiFetch('/users', {
             method: 'POST',
@@ -139,14 +154,14 @@ async function submitAddUser() {
         });
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${r.status}`);
+            throw new Error(extractPasswordError(err.detail) || `HTTP ${r.status}`);
         }
         hideAddUserForm();
         closeModal('usersModal');
         await loadUsersTable();
         showBriefPopup('User created');
     } catch (e) {
-        showUsersError(e.message);
+        showFormError('addUserError', e.message);
     }
 }
 
@@ -157,11 +172,11 @@ async function submitEditUser() {
     const active = document.getElementById('editActive').checked;
     if (newPassword) {
         if (newPassword.length < 12) {
-            showUsersError('New password must be at least 12 characters');
+            showFormError('editUserError', 'New password must be at least 12 characters');
             return;
         }
         const pwErr = validateExportPassword(newPassword);
-        if (pwErr) { showUsersError(pwErr); return; }
+        if (pwErr) { showFormError('editUserError', pwErr); return; }
     }
     try {
         const body = { role, active };
@@ -173,14 +188,14 @@ async function submitEditUser() {
         });
         if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${r.status}`);
+            throw new Error(extractPasswordError(err.detail) || `HTTP ${r.status}`);
         }
         hideEditUserForm();
         closeModal('usersModal');
         await loadUsersTable();
         showBriefPopup('User updated');
     } catch (e) {
-        showUsersError(e.message);
+        showFormError('editUserError', e.message);
     }
 }
 

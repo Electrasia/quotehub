@@ -13,6 +13,20 @@
  *   closeModal: Close a modal by ID
  */
 
+// ─── Password Helpers ────────────────────────────────────────
+
+const PASSWORD_RULES_HTML = '<div class="pw-rules">Password must be: at least 12 characters, one uppercase, one lowercase, one digit, one special character. Cannot contain the username, common patterns (e.g. \'password\', \'qwerty\'), or sequential characters (e.g. \'1234\' or \'abcd\').</div>';
+
+/**
+ * Extract readable error message from API response detail.
+ * Handles: string, {errors: [...]}, or fallback.
+ */
+function extractPasswordError(detail) {
+    if (typeof detail === 'string') return detail;
+    if (detail && Array.isArray(detail.errors)) return detail.errors.join('. ');
+    return 'Validation failed';
+}
+
 // ─── HTML Escaping ──────────────────────────────────────────
 
 /**

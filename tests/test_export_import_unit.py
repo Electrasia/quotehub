@@ -79,6 +79,18 @@ class TestValidateExportPassword:
         errors = validate_export_password("")
         assert len(errors) >= 1
 
+    def test_export_password_sequential_chars_rejected(self):
+        """Export password with 4+ sequential characters is rejected."""
+        errors = validate_export_password("Abcdefg1!2345")
+        assert any("sequential" in e.lower() for e in errors)
+
+    def test_export_password_username_check_skipped(self):
+        """Export password validator has no username rule (no param)."""
+        # 'admin' appears in password but export validator has no username check
+        errors = validate_export_password("Admin1234!@Xx")
+        # Should only get common pattern error, NOT username error
+        assert not any("username" in e.lower() for e in errors)
+
 
 # ═══════════════════════════════════════════════════════════════
 # ─── record_hash ──────────────────────────────────────────────

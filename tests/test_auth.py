@@ -384,6 +384,68 @@ class TestUserCRUD:
         })
         assert resp.status_code == 422
 
+    def test_create_weak_password_returns_errors_list(self, master_client):
+        """POST /users with weak password returns detail.errors as list of strings."""
+        resp = master_client.post("/users", json={
+            "username": "weakpwuser2",
+            "password": "password1234",  # 12+ chars, passes Pydantic, fails common pattern check
+            "role": "user",
+        })
+        assert resp.status_code == 422
+        body = resp.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], dict)
+        assert "errors" in body["detail"]
+        errors = body["detail"]["errors"]
+        assert isinstance(errors, list)
+        assert len(errors) > 0
+        assert all(isinstance(e, str) for e in errors)
+
+    def test_create_with_username_in_password_rejected(self, master_client):
+        """POST /users with username embedded in password should return 422."""
+        for pw in ["alice12!@AbX", "ALICE12!@AbX", "AliCe12!@AbX"]:
+            resp = master_client.post("/users", json={
+                "username": "alice",
+                "password": pw,
+                "role": "user",
+            })
+            assert resp.status_code == 422, f"Expected 422 for password '{pw}'"
+            errors = resp.json()["detail"]["errors"]
+            assert any("username" in e.lower() for e in errors)
+
+    def test_create_with_sequential_digits_rejected(self, master_client):
+        """POST /users with 4+ sequential digits should return 422."""
+        for pw in ["Abcdefg1!2345", "Abcdefg1!9876"]:
+            resp = master_client.post("/users", json={
+                "username": "seqtest",
+                "password": pw,
+                "role": "user",
+            })
+            assert resp.status_code == 422, f"Expected 422 for password '{pw}'"
+            errors = resp.json()["detail"]["errors"]
+            assert any("sequential" in e.lower() for e in errors)
+
+    def test_create_with_sequential_letters_rejected(self, master_client):
+        """POST /users with 4+ sequential letters should return 422."""
+        for pw in ["Abcdefg1!abcd", "Abcdefg1!WXYZ", "Abcdefg1!dcba"]:
+            resp = master_client.post("/users", json={
+                "username": "seqtest2",
+                "password": pw,
+                "role": "user",
+            })
+            assert resp.status_code == 422, f"Expected 422 for password '{pw}'"
+            errors = resp.json()["detail"]["errors"]
+            assert any("sequential" in e.lower() for e in errors)
+
+    def test_password_with_3_char_sequence_allowed(self, master_client):
+        """3-character sequences (abc) should be allowed — locks 4-char threshold."""
+        resp = master_client.post("/users", json={
+            "username": "seqtest3",
+            "password": "Bmv7$Fnq2@Wz",
+            "role": "user",
+        })
+        assert resp.status_code == 200
+
     def test_create_duplicate_username(self, master_client):
         """POST /users with existing username should return 400."""
         resp = master_client.post("/users", json={

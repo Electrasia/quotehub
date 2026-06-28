@@ -126,6 +126,7 @@ function showExportModal() {
     document.getElementById('exportSubmitBtn').disabled = true;
     document.getElementById('exportModalBody').classList.remove('hidden');
     document.getElementById('exportProgressBody').classList.add('hidden');
+    document.getElementById('exportPasswordRules').innerHTML = PASSWORD_RULES_HTML;
     document.getElementById('exportModal').classList.add('active');
 }
 
@@ -229,7 +230,7 @@ async function submitExport() {
         });
         if (!resp.ok) {
             const data = await resp.json().catch(() => ({}));
-            throw new Error(data.detail || 'Export failed');
+            throw new Error(extractPasswordError(data.detail) || 'Export failed');
         }
         progressFill.style.width = '60%';
         progressText.textContent = 'Downloading...';
@@ -277,6 +278,7 @@ async function importDatabase(input) {
     document.getElementById('quodbImportPassword').value = '';
     document.getElementById('quodbImportDryRun').checked = false;
     document.getElementById('quodbImportForm').classList.remove('hidden');
+    document.getElementById('quodbImportRules').innerHTML = PASSWORD_RULES_HTML;
     document.getElementById('importResult').classList.add('hidden');
     document.getElementById('importProgress').classList.add('hidden');
     document.getElementById('quodbImportBtn').disabled = false;
