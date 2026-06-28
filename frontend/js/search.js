@@ -108,7 +108,9 @@ function renderSearchResults() {
             { text: item._date || item.date, className: 'text-right nowrap-cell' },
             { html: escapeHtml(item.supplier || item._supplier || ''), style: 'word-wrap:break-word;max-width:150px' },
         ];
-        return `<tr data-filename="${fn}" style="cursor:pointer" title="Double-click to view PDF">` +
+        const ext = (item._filename || '').split('.').pop().toLowerCase();
+        const tip = ext === 'xlsx' ? 'Double-click to download' : 'Double-click to preview';
+        return `<tr data-filename="${fn}" style="cursor:pointer" title="${tip}">` +
             cells.map(c => `<td${c.className ? ` class="${c.className}"` : ''}${c.style ? ` style="${c.style}"` : ''}>${c.html !== undefined ? c.html : escapeHtml(c.text || '')}</td>`).join('') +
             `<td style="text-align:center">${escapeHtml(item._document_type || '-')}</td>` +
             `</tr>`;
@@ -164,8 +166,19 @@ async function searchQuotations() {
     }
 }
 
-// ─── PDF Viewer ──────────────────────────────────────────────
-function viewPdf(filename) {
+// ─── File Viewer ─────────────────────────────────────────────
+function viewFile(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    if (ext === 'xlsx') {
+        const a = document.createElement('a');
+        a.href = `/archive/${encodeURIComponent(filename)}`;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showBriefPopup('XLSX downloaded — open in Excel');
+        return;
+    }
     document.getElementById('pdfViewerFrame').src = `/archive/${encodeURIComponent(filename)}`;
     document.getElementById('pdfViewerModal').classList.add('active');
 }
@@ -330,5 +343,5 @@ document.addEventListener('keydown', (e) => {
 // Open PDF on double-click via event delegation (survives innerHTML changes)
 document.getElementById('searchResults').addEventListener('dblclick', (e) => {
     const row = e.target.closest('tr[data-filename]');
-    if (row) viewPdf(row.dataset.filename);
+    if (row) viewFile(row.dataset.filename);
 });

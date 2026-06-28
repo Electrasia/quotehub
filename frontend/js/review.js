@@ -95,6 +95,10 @@ function updateReviewPdf() {
         pageInfo.classList.remove('hidden');
     } else {
         img.classList.add('hidden');
+        const ext = (reviewOriginalFilename || '').split('.').pop().toLowerCase();
+        fallback.textContent = (ext === 'xlsx')
+            ? 'XLSX preview not supported — use the ↗ New Window button to open in Excel.'
+            : 'Page preview unavailable. Use ↗ New Window above to view the original file.';
         fallback.classList.remove('hidden');
         pageInfo.classList.add('hidden');
     }
