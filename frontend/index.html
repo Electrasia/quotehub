@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QuoteHub - AI Quotation Database</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📑</text></svg>">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -51,6 +52,7 @@
                         <input type="password" id="cpNew" autocomplete="new-password" minlength="12" required style="width:100%;padding-right:36px" oninput="updateChangePassword()">
                         <span class="password-toggle" onclick="togglePassword('cpNew', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                     </div>
+                    <div id="cpNewRules"></div>
                     <div id="cpStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
                         <div id="cpStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
                     </div>
@@ -92,6 +94,7 @@
         <div class="nav-left">
             <button class="nav-item nav-process active" id="navProcess" onclick="showUpload()">Process</button>
             <button class="nav-item" id="navSearch" onclick="showSearch()">Search</button>
+            <button class="nav-item" id="navSuppliers" onclick="showSuppliers()">Suppliers <span class="badge hidden" id="suppliersReviewBadge"></span></button>
             <button class="nav-item" id="navSettings" onclick="showSettings()">Settings</button>
             <button class="nav-item" id="navHelp" onclick="showHelp()">Help</button>
         </div>
@@ -156,7 +159,7 @@
                     <div id="fileList"></div>
                     <p id="queueSummary" class="hidden" style="font-size:13px;color:#666;margin-top:10px"></p>
                     <div class="actions" style="margin-top:16px">
-                        <button class="btn btn-success" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
+                        <button class="btn btn-primary" id="processAllBtn" onclick="processAll()" disabled>Process All</button>
                         <button class="btn btn-secondary" onclick="clearFiles()">Clear All</button>
                     </div>
                 </div>
@@ -277,7 +280,7 @@
                             <button class="btn btn-sm btn-secondary" onclick="addRow()" style="margin-bottom:16px">+ Add Row</button>
 
                             <div class="actions">
-                                <button class="btn btn-success" onclick="confirmSave()">Confirm & Save</button>
+                                <button class="btn btn-primary" onclick="confirmSave()">Confirm & Save</button>
                                 <button class="btn btn-secondary" onclick="backToUpload()">Cancel</button>
                     </div>
                 </div>
@@ -306,6 +309,46 @@
                 <button class="btn btn-sm btn-danger" onclick="deleteSelected()">Delete</button>
             </div>
             <div class="results" id="searchResults"></div>
+        </div>
+
+        <!-- ═══════════════ SUPPLIERS VIEW ═══════════════ -->
+        <div id="suppliersView" class="hidden">
+            <div id="suppliersListPanel">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                    <h2 style="margin:0">Suppliers</h2>
+                    <button class="btn btn-primary" id="suppliersNewBtn" onclick="window.Suppliers.newSupplier()" style="display:none">+ New Supplier</button>
+                </div>
+                <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+                    <input type="text" id="suppliersSearchInput" placeholder="Search suppliers..." style="flex:1;padding:10px 16px;border:1px solid #ddd;border-radius:8px;font-size:14px" onkeyup="window.Suppliers._onSearchInput()">
+                    <select id="suppliersStatusFilter" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px" onchange="window.Suppliers._onSearchInput()">
+                        <option value="all">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="review">Review</option>
+                    </select>
+                </div>
+                <div id="suppliersListError" class="supplier-error hidden" style="margin-bottom:12px"></div>
+                <div style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e0e0e0">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                        <thead>
+                            <tr style="background:#f8f9fa;text-align:left">
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd">Display Name</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd;font-size:12px;color:#888">Matching Key</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd">Status</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd;text-align:center">Aliases</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd;text-align:center">Contacts</th>
+                                <th style="padding:10px 12px;border-bottom:2px solid #ddd">Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="suppliersListBody"></tbody>
+                    </table>
+                </div>
+                <div id="suppliersPagination"></div>
+            </div>
+            <div id="supplierDetailPanel" class="hidden">
+                <div id="supplierDetailError" class="supplier-error hidden"></div>
+                <div id="supplierDetailContent"></div>
+            </div>
         </div>
 
         <!-- ═══════════════ SETTINGS VIEW ═══════════════ -->
@@ -429,6 +472,7 @@
                                 <input type="password" id="quodbImportPassword" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="off">
                                 <span class="password-toggle" onclick="togglePassword('quodbImportPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                             </div>
+                            <div id="quodbImportRules"></div>
                         </div>
                         <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px">
                             <input type="checkbox" id="quodbImportDryRun">
@@ -438,7 +482,7 @@
                             <button class="btn btn-primary btn-sm" id="quodbImportBtn" onclick="runQuodbImport()">Restore</button>
                             <button class="btn btn-secondary btn-sm" onclick="resetQuodbImport()">Cancel</button>
                         </div>
-                        <div id="quodbImportError" class="hidden" style="margin-top:8px;font-size:13px;color:#e74c3c"></div>
+                        <div id="quodbImportError" class="modal-error hidden"></div>
                         <div id="quodbImportReport" class="hidden" style="margin-top:8px;font-size:12px;color:#333;background:#f8f9fa;padding:8px;border-radius:4px;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:monospace"></div>
                     </div>
                 </div>
@@ -740,21 +784,23 @@
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                     <input type="text" id="newUsername" placeholder="Username" style="flex:1;min-width:140px;padding:8px;border:1px solid #ddd;border-radius:6px">
                     <div style="position:relative;flex:1;min-width:160px">
-                        <input type="password" id="newPassword" placeholder="Password (min 12 chars)" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateNewUserPassword()">
+                        <input type="password" id="newPassword" placeholder="Password (min 12 chars)" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateNewUserPassword();clearFormError('addUserError')">
                         <span class="password-toggle" onclick="togglePassword('newPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                     </div>
+                    <div id="newPasswordRules"></div>
                     <select id="newRole" style="padding:8px;border:1px solid #ddd;border-radius:6px">
                         <option value="user">user</option>
                         <option value="admin" selected>admin</option>
                         <option value="master">master</option>
                     </select>
-                    <button class="btn btn-success btn-sm" onclick="submitAddUser()">Create</button>
+                    <button class="btn btn-primary btn-sm" onclick="submitAddUser()">Create</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideAddUserForm()">Cancel</button>
                 </div>
                 <div id="newPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
                     <div id="newPasswordStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
                 </div>
                 <div id="newPasswordStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
+                <div id="addUserError" class="modal-error hidden"></div>
             </div>
 
             <!-- Edit User sub-form (hidden by default) -->
@@ -778,16 +824,18 @@
                     </select>
                     <label style="font-size:13px;margin-left:8px">New Password (optional):</label>
                     <div style="position:relative;flex:1;min-width:160px">
-                        <input type="password" id="editPassword" placeholder="leave blank to keep" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateEditUserPassword()">
+                        <input type="password" id="editPassword" placeholder="leave blank to keep" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px" oninput="updateEditUserPassword();clearFormError('editUserError')">
                         <span class="password-toggle" onclick="togglePassword('editPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                     </div>
-                    <button class="btn btn-success btn-sm" onclick="submitEditUser()">Save</button>
+                    <div id="editPasswordRules"></div>
+                    <button class="btn btn-primary btn-sm" onclick="submitEditUser()">Save</button>
                     <button class="btn btn-secondary btn-sm" onclick="hideEditUserForm()">Cancel</button>
                 </div>
                 <div id="editPasswordStrengthBar" class="hidden" style="margin-top:6px;height:4px;background:#eee;border-radius:2px;overflow:hidden">
                     <div id="editPasswordStrengthFill" style="height:100%;width:0%;border-radius:2px;transition:width 0.2s,background 0.2s"></div>
                 </div>
                 <div id="editPasswordStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-top:4px"></div>
+                <div id="editUserError" class="modal-error hidden"></div>
             </div>
 
             <!-- Hard Delete confirmation sub-form (hidden by default) -->
@@ -808,9 +856,6 @@
                 </div>
             </div>
 
-            <div class="actions" style="justify-content:center;margin-top:16px">
-                <button class="btn btn-secondary" onclick="closeModal('usersModal')">Close</button>
-            </div>
         </div>
     </div>
 
@@ -885,7 +930,7 @@
 
             <button class="btn btn-sm btn-secondary" onclick="editAddRow()" style="margin-bottom:12px">+ Add Row</button>
             <div class="actions">
-                <button class="btn btn-success" onclick="saveEdit()">Save Changes</button>
+                <button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>
                 <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancel</button>
             </div>
         </div>
@@ -916,6 +961,7 @@
                         <input type="password" id="exportPassword" style="width:100%;padding:8px 36px 8px 8px;border:1px solid #ddd;border-radius:6px;font-size:14px" autocomplete="new-password" oninput="updateExportButton()">
                         <span class="password-toggle" onclick="togglePassword('exportPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;user-select:none;color:#999">👁</span>
                     </div>
+                    <div id="exportPasswordRules"></div>
                 </div>
                 <div style="margin-bottom:12px">
                     <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Confirm Password</label>
@@ -929,7 +975,7 @@
                 </div>
                 <div id="exportStrengthLabel" class="hidden" style="font-size:11px;color:#999;margin-bottom:8px"></div>
                 <div style="font-size:12px;color:#999;margin-bottom:12px">Minimum 12 characters with uppercase, lowercase, digit, and a symbol.</div>
-                <div id="exportError" class="hidden" style="font-size:13px;color:#e74c3c;margin-bottom:8px"></div>
+                <div id="exportError" class="modal-error hidden"></div>
                 <div class="actions" style="justify-content:flex-end;gap:8px">
                     <button class="btn btn-secondary" onclick="closeModal('exportModal')">Cancel</button>
                     <button class="btn btn-primary" id="exportSubmitBtn" onclick="submitExport()" disabled>Export</button>
@@ -985,5 +1031,6 @@
     <script src="/static/js/search.js" defer></script>
     <script src="/static/js/settings.js" defer></script>
     <script src="/static/js/users.js" defer></script>
+    <script src="/static/js/suppliers.js" defer></script>
 </body>
 </html>

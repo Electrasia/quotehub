@@ -66,8 +66,9 @@ async function initApp() {
     try { await loadPopupDuration(); } catch (e) { /* offline / not auth */ }
     try { await loadVersion();       } catch (e) { /* offline / not auth */ }
     try { await loadExtractionModeBadge(); } catch (e) { /* ignore */ }
+    try { if (window.Suppliers) window.Suppliers.updateReviewBadge(); } catch (e) { /* ignore */ }
     await loadQueueState();
-    showUpload();
+    showSearch();
     appInitialized = true;
 }
 

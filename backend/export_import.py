@@ -55,6 +55,18 @@ HEADER_SIZE = HEADER_FORMAT.size       # 41 bytes
 _COMMON_PATTERNS = ['password', '1234', 'admin', 'export', 'quodb', 'quote', 'abc123', 'qwerty', 'letmein']
 
 
+def _has_sequential_chars(password: str) -> bool:
+    """Check for 4+ sequential ASCII characters (ascending or descending)."""
+    lower = password.lower()
+    for i in range(len(lower) - 3):
+        chunk = lower[i:i+4]
+        if all(ord(chunk[j+1]) - ord(chunk[j]) == 1 for j in range(3)):
+            return True
+        if all(ord(chunk[j]) - ord(chunk[j+1]) == 1 for j in range(3)):
+            return True
+    return False
+
+
 def validate_export_password(password: str) -> list[str]:
     """Validate export password strength. Returns list of error messages (empty = valid)."""
     errors = []
@@ -73,6 +85,8 @@ def validate_export_password(password: str) -> list[str]:
         if pattern in lower:
             errors.append("Password contains a common pattern and is too guessable")
             break
+    if _has_sequential_chars(password):
+        errors.append("Password must not contain sequential characters (e.g. '1234' or 'abcd')")
     return errors
 
 # ─── Password management ─────────────────────────────────────────────────────

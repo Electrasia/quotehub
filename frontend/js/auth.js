@@ -56,6 +56,7 @@ function showChangePassword(subtitle) {
     document.getElementById('cpStrengthBar').classList.add('hidden');
     document.getElementById('cpStrengthLabel').classList.add('hidden');
     document.getElementById('changePasswordError').classList.add('hidden');
+    document.getElementById('cpNewRules').innerHTML = PASSWORD_RULES_HTML;
     setTimeout(() => document.getElementById('cpOld').focus(), 50);
 }
 
@@ -226,7 +227,7 @@ async function doChangePassword() {
             }
         } else {
             const err = await r.json().catch(() => ({}));
-            showChangePasswordError(err.detail || 'Password change failed');
+            showChangePasswordError(extractPasswordError(err.detail) || 'Password change failed');
         }
     } catch (e) {
         showChangePasswordError('Change failed: ' + e.message);

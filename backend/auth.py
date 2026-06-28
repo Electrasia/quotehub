@@ -239,16 +239,30 @@ def require_role(*allowed_roles: str):
 _COMMON_PATTERNS = ['password', '1234', 'admin', 'export', 'quodb', 'quote', 'abc123', 'qwerty', 'letmein']
 
 
-def validate_user_password(password: str) -> list[str]:
+def _has_sequential_chars(password: str) -> bool:
+    """Check for 4+ sequential ASCII characters (ascending or descending)."""
+    lower = password.lower()
+    for i in range(len(lower) - 3):
+        chunk = lower[i:i+4]
+        if all(ord(chunk[j+1]) - ord(chunk[j]) == 1 for j in range(3)):
+            return True
+        if all(ord(chunk[j]) - ord(chunk[j+1]) == 1 for j in range(3)):
+            return True
+    return False
+
+
+def validate_user_password(password: str, username: str = None) -> list[str]:
     """Validate user password strength. Returns list of error messages (empty = valid).
 
-    Rules (same as export passwords):
+    Rules:
         - At least 12 characters
         - At least one uppercase letter
         - At least one lowercase letter
         - At least one digit
         - At least one special character (non-alphanumeric)
         - No common/guessable patterns
+        - Must not contain the username (when provided)
+        - No 4+ sequential characters
     """
     errors = []
     if len(password) < 12:
@@ -266,6 +280,10 @@ def validate_user_password(password: str) -> list[str]:
         if pattern in lower:
             errors.append("Password contains a common pattern and is too guessable")
             break
+    if username and username.lower() in lower:
+        errors.append("Password must not contain the username")
+    if _has_sequential_chars(password):
+        errors.append("Password must not contain sequential characters (e.g. '1234' or 'abcd')")
     return errors
 
 

@@ -57,43 +57,35 @@ async function handleFiles(files) {
     if (errorBanner) errorBanner.innerHTML = '';
 
     for (const file of files) {
-        console.log(`[upload] Processing: ${file.name}, size: ${file.size} bytes`);
         // v0.038.0: check by extension, not MIME type. .xlsx files have
         // MIME type 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         // (or 'application/octet-stream' on some systems), so the old
         // `file.type === 'application/pdf'` check silently dropped them.
         const name = (file.name || '').toLowerCase();
         if (!name.endsWith('.pdf') && !name.endsWith('.xlsx')) {
-            console.log(`[upload] SKIPPED (wrong extension): ${file.name}`);
             addUploadError(`${file.name} — Unsupported file type`);
             continue;
         }
         // Reject empty files client-side
         if (file.size === 0) {
-            console.log(`[upload] SKIPPED (empty): ${file.name}`);
             addUploadError(`${file.name} — Empty file`);
             continue;
         }
         const formData = new FormData();
         formData.append('files', file);
-        console.log(`[upload] Uploading: ${file.name}`);
         const resp = await fetch('/upload', { method: 'POST', body: formData });
         const data = await resp.json();
-        console.log(`[upload] Response:`, JSON.stringify({ uploaded: data.uploaded, errors: data.errors, filesCount: data.files?.length }));
         if (!resp.ok) {
-            console.log(`[upload] FAILED (HTTP ${resp.status}): ${file.name}`);
             addUploadError(`${file.name} — Upload failed: ${data.error || resp.statusText}`);
             continue;
         }
         // Show backend validation errors (empty files, wrong type)
         if (data.errors && data.errors.length > 0) {
             for (const err of data.errors) {
-                console.log(`[upload] REJECTED by backend: ${err.filename} — ${err.error}`);
                 addUploadError(`${err.filename} — ${err.error}`);
             }
         }
         if (!data.files || data.files.length === 0) {
-            console.log(`[upload] No valid files in response, skipping.`);
             continue;
         }
         // Extract the actual file entry from the backend response envelope
@@ -113,8 +105,10 @@ async function handleFiles(files) {
             }
         } catch (e) { /* ignore check errors */ }
         uploadedFiles.push(fileEntry);
-        console.log(`[upload] Added to queue: ${file.name} (${fileEntry.pages} pages)`);
         renderFileList();
+    }
+    if (files.length > 0) {
+        showBriefPopup('Upload complete');
     }
     updateStepClickability();
 }

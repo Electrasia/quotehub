@@ -108,7 +108,9 @@ function renderSearchResults() {
             { text: item._date || item.date, className: 'text-right nowrap-cell' },
             { html: escapeHtml(item.supplier || item._supplier || ''), style: 'word-wrap:break-word;max-width:150px' },
         ];
-        return `<tr data-filename="${fn}" style="cursor:pointer" title="Double-click to view PDF">` +
+        const ext = (item._filename || '').split('.').pop().toLowerCase();
+        const tip = ext === 'xlsx' ? 'Double-click to download' : 'Double-click to preview';
+        return `<tr data-filename="${fn}" style="cursor:pointer" title="${tip}">` +
             cells.map(c => `<td${c.className ? ` class="${c.className}"` : ''}${c.style ? ` style="${c.style}"` : ''}>${c.html !== undefined ? c.html : escapeHtml(c.text || '')}</td>`).join('') +
             `<td style="text-align:center">${escapeHtml(item._document_type || '-')}</td>` +
             `</tr>`;
@@ -164,8 +166,19 @@ async function searchQuotations() {
     }
 }
 
-// ─── PDF Viewer ──────────────────────────────────────────────
-function viewPdf(filename) {
+// ─── File Viewer ─────────────────────────────────────────────
+function viewFile(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    if (ext === 'xlsx') {
+        const a = document.createElement('a');
+        a.href = `/archive/${encodeURIComponent(filename)}`;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showBriefPopup('XLSX downloaded — open in Excel');
+        return;
+    }
     document.getElementById('pdfViewerFrame').src = `/archive/${encodeURIComponent(filename)}`;
     document.getElementById('pdfViewerModal').classList.add('active');
 }
@@ -184,11 +197,9 @@ async function editSelected() {
     // For now, edit the first selected quotation
     editQuotationId = ids[0];
     // Fetch the quotation data
-    const resp = await fetch(`/search?q=`);
-    const data = await resp.json();
-    const results = data.results || [];
-    const quotation = results.find(r => r.id === editQuotationId);
-    if (!quotation) { showBriefPopup('Quotation not found.'); return; }
+    const resp = await fetch(`/quotations/${editQuotationId}`);
+    if (!resp.ok) { showBriefPopup('Quotation not found.'); return; }
+    const quotation = await resp.json();
 
     document.getElementById('editSupplier').value = quotation.supplier || '';
     document.getElementById('editDocumentType').value = quotation.document_type || 'unknown';
@@ -294,6 +305,7 @@ async function saveEdit() {
         const result = await resp.json();
         if (result.status === 'updated') {
             closeModal('editModal');
+            showBriefPopup('Quotation updated');
             searchQuotations();
         }
     } catch (e) {
@@ -314,6 +326,7 @@ async function deleteSelected() {
             });
             const result = await resp.json();
             if (result.status === 'deleted') {
+                showBriefPopup('Quotation deleted');
                 searchQuotations();
             }
         } catch (e) {
@@ -330,5 +343,5 @@ document.addEventListener('keydown', (e) => {
 // Open PDF on double-click via event delegation (survives innerHTML changes)
 document.getElementById('searchResults').addEventListener('dblclick', (e) => {
     const row = e.target.closest('tr[data-filename]');
-    if (row) viewPdf(row.dataset.filename);
+    if (row) viewFile(row.dataset.filename);
 });

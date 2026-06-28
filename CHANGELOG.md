@@ -1,5 +1,43 @@
 # CHANGELOG.md — QuoteHub Release Notes
 
+## v0.065.0 (2026-06-28)
+- **Fix**: Search → Edit — `GET /quotations/{id}` endpoint added; `editSelected()` fetches by ID directly instead of relying on current search results
+- **Fix**: Post-login landing page — `initApp()` now navigates to Search instead of Upload
+- **Fix**: Password error display — `extractPasswordError()` helper handles string/array/object shapes; errors render in-modal (not generic alert)
+- **Fix**: Password validation — username-in-password check added; sequential character check (4+ ASCII chars) added; strength meter resets on form open
+- **UX**: Search → Edit XLSX — double-click on XLSX row now downloads directly with toast confirmation instead of opening blank iframe; `viewPdf()` renamed to `viewFile()`
+- **UX**: Search row tooltip — file-type aware: "Double-click to preview" for PDF, "Double-click to download" for XLSX
+- **UX**: XLSX preview label — `updateReviewPdf()` shows "XLSX preview not supported — use the ↗ New Window button" instead of generic fallback
+- **UX**: Emoji favicon — inline SVG `📑` in `<head>`, transparent BG, zero asset files
+- **UX**: Redundant Close button removed from Users Management modal
+- **Chore**: deploy.sh rewrite — auto-detects fresh install vs update via Docker volume; pre-update backup; health verification; `--force` flag
+- **Chore**: Documentation restructure — HANDOFF.md split into session bridge + AUDIT.md archive
+- **Chore**: Tree cleanup — `.opencode/`, `app-cli`, `NPM-DEPLOY.md` removed
+- **Chore**: `console.log` cleanup — 9 dev debug logs removed from `upload.js`
+- **Chore**: LICENSE added (MIT)
+- **Security**: Audit Phase A–E completed — migration safety 94.2%, regression 100%, security 100%, code quality 96.9%, operational readiness 100%
+- **Chore**: 479 tests passing (was 467)
+
+## v0.064.0 (2026-06-27)
+- **Feature**: Supplier DB module — schema, normalized name model (raw/display/canonical), 18 API endpoints, full frontend UI with list, detail, contacts, aliases, brands, and notes sections
+- **Feature**: Per-supplier brand persistence — `supplier_brands` junction table, `GET/POST/DELETE /suppliers/{id}/brands`, scan brands from quotation items, auto-associate on confirm
+- **Feature**: Scan brands endpoint — `POST /suppliers/{id}/brands/scan` scans quotation items, creates global brands, links to supplier, updates unlinked quotations
+- **Feature**: Merge supplier — `POST /suppliers/{source_id}/merge/{target_id}` transfers quotations, contacts, aliases (skip duplicates), brands (skip duplicates); deletes source; audit logged with full snapshot
+- **Feature**: Purge supplier — `DELETE /suppliers/{id}/purge` hard-deletes with audit snapshot (Master-only)
+- **Feature**: Alias suggestions from quotation DB — `GET /suppliers/{id}/alias-suggestions` with token overlap relevance, `normalize_name()` filtering, frequency ranking, stopword exclusion
+- **Feature**: Email duplicate check — `GET /suppliers/contacts/check-email` with non-blocking frontend warning
+- **Feature**: Alias count and contact count on `GET /suppliers` list endpoint via correlated subqueries
+- **Feature**: Migrations v4–v6 — `supplier_brands` table, `raw_name` column on suppliers, `raw_alias` column on supplier_aliases
+- **Security**: `PRAGMA foreign_keys = ON` enabled in `get_db()` for write connections; orphan-blocking enforcement verified by 3 FK tests
+- **Security**: Merge stores full source supplier snapshot in audit log before data transfer (symmetric with purge)
+- **UX**: App-wide 4-color button standard (primary/secondary/warning/danger); `.btn-success` retired
+- **UX**: Native `confirm()`/`alert()`/`prompt()` calls replaced with app-consistent modals (`showConfirmPopup`, `showAlertPopup`, `showPromptPopup`)
+- **UX**: Inline field validation — email format + phone format checked on blur/input; errors persist across reorder/re-render; save button disabled when invalid
+- **UX**: Section descriptions, smart empty states, review badge on Suppliers nav, visible brand Add button with semicolon separator
+- **Chore**: Dormant code annotated (capabilities, product-types) — backend preserved for RFQ milestone
+- **Chore**: HANDOFF.md restructured into session bridge; AUDIT.md created for closed v0.063.x audit record
+- **Chore**: 467 tests passing (193 supplier tests)
+
 ## v0.063.2 (2026-06-22)
 - **Fix**: Search page edit button — `editSelected()` now correctly unwraps the API response (`data.results` instead of treating the whole response object as an array). Selecting one item and pressing Edit now opens the modal.
 - **Chore**: VERSION → 0.063.2

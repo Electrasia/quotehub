@@ -13,6 +13,20 @@
  *   closeModal: Close a modal by ID
  */
 
+// ─── Password Helpers ────────────────────────────────────────
+
+const PASSWORD_RULES_HTML = '<div class="pw-rules">Password must be: at least 12 characters, one uppercase, one lowercase, one digit, one special character. Cannot contain the username, common patterns (e.g. \'password\', \'qwerty\'), or sequential characters (e.g. \'1234\' or \'abcd\').</div>';
+
+/**
+ * Extract readable error message from API response detail.
+ * Handles: string, {errors: [...]}, or fallback.
+ */
+function extractPasswordError(detail) {
+    if (typeof detail === 'string') return detail;
+    if (detail && Array.isArray(detail.errors)) return detail.errors.join('. ');
+    return 'Validation failed';
+}
+
 // ─── HTML Escaping ──────────────────────────────────────────
 
 /**
@@ -66,48 +80,228 @@ function showBriefPopup(message) {
     console.log(`[popup] ${message}`);
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active';
-    overlay.innerHTML = `
-        <div class="modal" style="max-width:350px">
-            <p style="font-size:15px;margin:0"></p>
-        </div>
-    `;
-    // Use textContent to prevent XSS — message is never rendered as HTML
-    overlay.querySelector('p').textContent = message;
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.maxWidth = '350px';
+    const p = document.createElement('p');
+    p.style.fontSize = '15px';
+    p.style.margin = '0';
+    p.textContent = message;
+    modal.appendChild(p);
+    overlay.appendChild(modal);
     document.body.appendChild(overlay);
     setTimeout(() => {
         overlay.classList.remove('active');
         setTimeout(() => overlay.remove(), 300);
-    }, popupDurationSec * 1000);
+    }, (popupDurationSec || 3) * 1000);
 }
 
 /**
  * Show a confirmation dialog with a callback.
  *
- * @param {string} message - The confirmation message
- * @param {Function} onConfirm - Callback when user confirms
+ * @param {string|object} messageOrOptions - Message string (legacy) or options object
+ * @param {Function} [onConfirm] - Callback when user confirms (legacy form)
+ * @returns {Promise<boolean>} Resolves true on confirm, false on cancel
  */
-function showConfirmPopup(message, onConfirm) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay active';
-    overlay.innerHTML = `
-        <div class="modal" style="max-width:400px">
-            <p style="font-size:15px;margin:0 0 16px 0"></p>
-            <div class="actions" style="justify-content:center">
-                <button class="btn btn-danger btn-sm" id="confirmYes">Yes, Delete</button>
-                <button class="btn btn-secondary btn-sm" id="confirmNo">Cancel</button>
-            </div>
-        </div>
-    `;
-    // Use textContent to prevent XSS — message is never rendered as HTML
-    overlay.querySelector('p').textContent = message;
-    document.body.appendChild(overlay);
-    overlay.querySelector('#confirmYes').onclick = () => {
-        overlay.remove();
-        onConfirm();
-    };
-    overlay.querySelector('#confirmNo').onclick = () => {
-        overlay.remove();
-    };
+function showConfirmPopup(messageOrOptions, onConfirm) {
+    let opts;
+    if (typeof messageOrOptions === 'string') {
+        opts = {
+            message: messageOrOptions,
+            confirmText: 'Yes, Delete',
+            cancelText: 'Cancel',
+            danger: true,
+            onConfirm: onConfirm || null,
+            onCancel: null,
+        };
+    } else {
+        opts = Object.assign({
+            confirmText: 'Confirm',
+            cancelText: 'Cancel',
+            danger: false,
+            onConfirm: null,
+            onCancel: null,
+        }, messageOrOptions);
+    }
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+
+        const modal = document.createElement('div');
+        modal.className = 'modal' + (opts.danger ? ' modal-content--danger' : '');
+        modal.style.maxWidth = '400px';
+
+        const p = document.createElement('p');
+        p.style.fontSize = '15px';
+        p.style.margin = '0 0 16px 0';
+        p.textContent = opts.message;
+        modal.appendChild(p);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        actions.style.justifyContent = 'center';
+
+        const btnYes = document.createElement('button');
+        btnYes.className = 'btn btn-sm ' + (opts.danger ? 'btn-danger' : 'btn-primary');
+        btnYes.textContent = opts.confirmText;
+
+        const btnNo = document.createElement('button');
+        btnNo.className = 'btn btn-secondary btn-sm';
+        btnNo.textContent = opts.cancelText;
+
+        actions.appendChild(btnYes);
+        actions.appendChild(btnNo);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        btnYes.onclick = () => {
+            overlay.remove();
+            if (opts.onConfirm) opts.onConfirm();
+            resolve(true);
+        };
+        btnNo.onclick = () => {
+            overlay.remove();
+            if (opts.onCancel) opts.onCancel();
+            resolve(false);
+        };
+    });
+}
+
+// ─── Prompt & Alert Popups ────────────────────────────────
+
+/**
+ * Show a prompt dialog with an input field.
+ *
+ * @param {object} options - { message, defaultValue?, placeholder?, confirmText?, cancelText? }
+ * @returns {Promise<string|null>} Resolves to entered string or null on cancel
+ */
+function showPromptPopup(options) {
+    const opts = Object.assign({
+        defaultValue: '',
+        placeholder: '',
+        confirmText: 'OK',
+        cancelText: 'Cancel',
+    }, options);
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.maxWidth = '400px';
+
+        const p = document.createElement('p');
+        p.style.fontSize = '15px';
+        p.style.margin = '0 0 12px 0';
+        p.textContent = opts.message;
+        modal.appendChild(p);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'modal-prompt-input';
+        input.value = opts.defaultValue;
+        input.placeholder = opts.placeholder;
+        input.style.width = '100%';
+        input.style.padding = '8px 12px';
+        input.style.border = '1px solid #ddd';
+        input.style.borderRadius = '6px';
+        input.style.fontSize = '14px';
+        input.style.marginBottom = '16px';
+        input.style.boxSizing = 'border-box';
+        modal.appendChild(input);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        actions.style.justifyContent = 'center';
+
+        const btnOk = document.createElement('button');
+        btnOk.className = 'btn btn-primary btn-sm';
+        btnOk.textContent = opts.confirmText;
+
+        const btnCancel = document.createElement('button');
+        btnCancel.className = 'btn btn-secondary btn-sm';
+        btnCancel.textContent = opts.cancelText;
+
+        actions.appendChild(btnOk);
+        actions.appendChild(btnCancel);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        input.focus();
+
+        const submit = () => {
+            overlay.remove();
+            resolve(input.value || '');
+        };
+        const cancel = () => {
+            overlay.remove();
+            resolve(null);
+        };
+
+        btnOk.onclick = submit;
+        btnCancel.onclick = cancel;
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') submit();
+            if (e.key === 'Escape') cancel();
+        };
+    });
+}
+
+/**
+ * Show an alert dialog that must be acknowledged.
+ *
+ * @param {object} options - { message, title?, confirmText? }
+ * @returns {Promise<void>} Resolves when user clicks Confirm
+ */
+function showAlertPopup(options) {
+    const opts = Object.assign({
+        title: '',
+        confirmText: 'OK',
+    }, options);
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.maxWidth = '400px';
+
+        if (opts.title) {
+            const h = document.createElement('h4');
+            h.style.margin = '0 0 8px 0';
+            h.textContent = opts.title;
+            modal.appendChild(h);
+        }
+
+        const p = document.createElement('p');
+        p.style.fontSize = '15px';
+        p.style.margin = '0 0 16px 0';
+        p.textContent = opts.message;
+        modal.appendChild(p);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        actions.style.justifyContent = 'center';
+
+        const btnOk = document.createElement('button');
+        btnOk.className = 'btn btn-primary btn-sm';
+        btnOk.textContent = opts.confirmText;
+
+        actions.appendChild(btnOk);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        btnOk.onclick = () => {
+            overlay.remove();
+            resolve();
+        };
+    });
 }
 
 // ─── Modal Management ───────────────────────────────────────

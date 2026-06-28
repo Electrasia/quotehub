@@ -165,3 +165,49 @@ class TestFtsRebuild:
         resp = seed_quotations.get("/search", params={"q": "ZZTopNonexistent"})
         assert resp.status_code == 200
         assert resp.json()["results"] == []
+
+
+class TestGetQuotation:
+    """Tests for GET /quotations/{id} — single quotation lookup."""
+
+    def test_get_quotation_as_admin(self, admin_client, seed_quotations):
+        """Admin can fetch a quotation by ID."""
+        # Get an ID from search first
+        resp = seed_quotations.get("/search", params={"q": "Acme"})
+        q_id = resp.json()["results"][0]["id"]
+
+        resp = admin_client.get(f"/quotations/{q_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == q_id
+        assert body["supplier"] == "Acme Corp"
+        assert isinstance(body["items"], list)
+        assert len(body["items"]) == 2
+
+    def test_get_quotation_as_master(self, master_client, seed_quotations):
+        """Master can fetch a quotation by ID."""
+        resp = seed_quotations.get("/search", params={"q": "Beta"})
+        q_id = resp.json()["results"][0]["id"]
+
+        resp = master_client.get(f"/quotations/{q_id}")
+        assert resp.status_code == 200
+        assert resp.json()["id"] == q_id
+
+    def test_get_quotation_as_user_403(self, user_client, seed_quotations):
+        """User role is rejected (403)."""
+        resp = seed_quotations.get("/search", params={"q": "Acme"})
+        q_id = resp.json()["results"][0]["id"]
+
+        resp = user_client.get(f"/quotations/{q_id}")
+        assert resp.status_code == 403
+
+    def test_get_quotation_not_found_404(self, admin_client):
+        """Non-existent ID returns 404."""
+        resp = admin_client.get("/quotations/99999")
+        assert resp.status_code == 404
+        assert "Quotation not found" in resp.json()["detail"]
+
+    def test_get_quotation_unauthenticated_401(self, app_client):
+        """Unauthenticated request returns 401."""
+        resp = app_client.get("/quotations/1")
+        assert resp.status_code == 401

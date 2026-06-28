@@ -184,7 +184,7 @@ async def change_password(req: ChangePasswordRequest, request: Request):
     if not verify_password(req.old_password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
     # Validate new password strength
-    pw_errors = validate_user_password(req.new_password)
+    pw_errors = validate_user_password(req.new_password, user["username"])
     if pw_errors:
         raise HTTPException(status_code=422, detail={"errors": pw_errors})
     update_user_password(user["id"], req.new_password)
@@ -210,7 +210,7 @@ async def add_user(req: UserCreate):
     existing = get_user_by_username(req.username)
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
-    pw_errors = validate_user_password(req.password)
+    pw_errors = validate_user_password(req.password, req.username)
     if pw_errors:
         raise HTTPException(status_code=422, detail={"errors": pw_errors})
     user_id = create_user(req.username, req.password, req.role)
@@ -230,7 +230,7 @@ async def update_user(user_id: int, req: UserUpdate):
         raise HTTPException(status_code=404, detail="User not found")
     # Validate new password if provided
     if req.new_password:
-        pw_errors = validate_user_password(req.new_password)
+        pw_errors = validate_user_password(req.new_password, user["username"])
         if pw_errors:
             raise HTTPException(status_code=422, detail={"errors": pw_errors})
         update_user_password(user_id, req.new_password)
