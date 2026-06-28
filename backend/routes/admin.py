@@ -537,6 +537,22 @@ async def search(q: str = "", document_type: str = ""):
     return {"results": results, "limited": limited}
 
 
+@router.get("/quotations/{quotation_id:int}", dependencies=[Depends(require_role("admin", "master"))])
+async def get_quotation(quotation_id: int):
+    """Fetch a single quotation by ID. Used by Search → Edit."""
+    with get_db(readonly=True) as db:
+        row = db.execute("SELECT * FROM quotations WHERE id = ?", (quotation_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    d = dict(row)
+    if isinstance(d.get("items"), str):
+        try:
+            d["items"] = json.loads(d["items"])
+        except (json.JSONDecodeError, TypeError):
+            d["items"] = []
+    return d
+
+
 # ─── Brand Suggestion ─────────────────────────────────────
 
 @router.get("/items/by-model", dependencies=[Depends(require_role("user", "admin", "master"))])

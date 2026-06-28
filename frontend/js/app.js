@@ -68,7 +68,7 @@ async function initApp() {
     try { await loadExtractionModeBadge(); } catch (e) { /* ignore */ }
     try { if (window.Suppliers) window.Suppliers.updateReviewBadge(); } catch (e) { /* ignore */ }
     await loadQueueState();
-    showUpload();
+    showSearch();
     appInitialized = true;
 }
 

@@ -184,11 +184,9 @@ async function editSelected() {
     // For now, edit the first selected quotation
     editQuotationId = ids[0];
     // Fetch the quotation data
-    const resp = await fetch(`/search?q=`);
-    const data = await resp.json();
-    const results = data.results || [];
-    const quotation = results.find(r => r.id === editQuotationId);
-    if (!quotation) { showBriefPopup('Quotation not found.'); return; }
+    const resp = await fetch(`/quotations/${editQuotationId}`);
+    if (!resp.ok) { showBriefPopup('Quotation not found.'); return; }
+    const quotation = await resp.json();
 
     document.getElementById('editSupplier').value = quotation.supplier || '';
     document.getElementById('editDocumentType').value = quotation.document_type || 'unknown';

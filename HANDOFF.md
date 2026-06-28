@@ -11,37 +11,36 @@
 
 | Field          | Value                                                 |
 |----------------|-------------------------------------------------------|
-| Dev base       | v0.063.2                                              |
-| Active branch  | feature/suppliers-db                                  |
-| Last commit    | 432e14b — docs: split HANDOFF.md into session bridge + AUDIT.md archive |
-| Tree state     | dirty (uncommitted CHANGELOG + HANDOFF edits)         |
-| Merged to dev  | NO                                                    |
+| Dev base       | v0.064.0                                              |
+| Active branch  | dev                                                   |
+| Last commit    | a294730 — Merge feature/suppliers-db: v0.064.0 supplier DB milestone |
+| Tree state     | clean                                                 |
+| Merged to dev  | YES (v0.064.0 tagged)                                 |
 | Agent state    | idle                                                  |
-| Next goal      | Merge feature/suppliers-db → dev, tag v0.064.0       |
+| Next goal      | Bug fixing + audit before merge dev → main            |
 
 ---
 
-## 2. Active Work — feature/suppliers-db (pending merge)
+## 2. Active Work — Pre-Main Audit
 
-Suppliers DB module, in flight on feature branch. Highlights:
-- Raw / display / canonical name model
-- Stopword filtering on alias suggestions
-- Phone + email render-time validation, persistent field errors
-- Custom modal for dirty-guard nav (replaces native confirm)
-- App-wide button color standard rollout
-- Dormant code annotated (capabilities, product-types)
+Suppliers DB milestone shipped (v0.064.0 on dev). Current focus:
+field-test bug fixing + pre-main audit before release to production.
 
-**Pending before merge to dev:**
-- [x] #13 — Document supplier_aliases global UNIQUE decision *(completed)*
-- [x] #8  — Merge confirm modal + actor in audit log *(completed)*
-- [x] Full pytest pass *(completed — 467/467)*
-- [x] CHANGELOG v0.064.0 entry *(completed)*
-- [ ] Tag + merge
+**Session checklist:**
+- [ ] Field-test bug list — triage as found
+- [ ] Auto-backup round-trip with new supplier tables (carried from prior session)
+- [ ] Audit checklist before dev → main merge
+- [ ] CHANGELOG v0.064.1 (if patches needed) or v0.065.0 (if new work)
+
+**Branch status:**
+- dev: 31 commits ahead of main (v0.064.0 included)
+- 2 behind main: cosmetic — release-merge commits from v0.063.1/v0.063.2.
+  No code drift, no action needed.
 
 **Deferred with rationale** (do NOT re-raise without new data):
 - #7 Rate limiting on scan/alias — LAN trusted users
 - #9 Scan query profiling — no production data yet
-- #10 Default-RFQ uniqueness — defer to RFQ milestone. Constraint design depends on RFQ scoping. Premature to lock now.
+- #10 Default-RFQ uniqueness — defer to RFQ milestone
 - #11 status='review' cleanup UI — no backlog observed
 - #12 suppliers.js refactor — module too fresh, regression risk
 - #14 Concurrency stress test — 1 worker + SQLite, low surface
@@ -88,10 +87,12 @@ Suppliers DB module, in flight on feature branch. Highlights:
 ## 4. Open Bugs & Enhancements
 
 **Bugs**
-- Immediate bugs addressed. Field testing pending — re-audit after real use.
+- Field testing in progress. List populated as bugs surface.
 
 **Enhancements**
-- Verify auto-backup round-trip includes new suppliers tables (supplier_brands, supplier_aliases, supplier_audit_log, etc.) and survives restore. Not tested end-to-end since suppliers milestone.
+- Verify auto-backup round-trip includes new suppliers tables
+  (supplier_brands, supplier_aliases, supplier_audit_log, raw_name/raw_alias columns).
+  Not tested end-to-end since suppliers milestone.
 
 **Deferred with rationale** — see §2.
 
